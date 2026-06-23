@@ -36,7 +36,8 @@ __pycache__/
 .venv/
 venv/
 target/
-vendor/
+vendor/*
+!vendor/nmp
 *.log
 coverage/
 .cache/
