@@ -49,12 +49,55 @@ struct App29er: App {
     }
 }
 
-/// Placeholder root view for T05. T06 replaces this with the real
-/// `ShakeoutView` that calls `openGroupDiscovery("wss://nip29.f7z.io")` and
-/// renders the observed `discoveredGroups`.
+/// S01/T06 shakeout proof: opens group discovery on `wss://nip29.f7z.io` and
+/// renders the live `DiscoveredGroupsProjection` count + first few rows.
+/// Proves SwiftUI observes the same typed sidecar the Rust CLI proved
+/// against the live relay (S01 gate criterion 3).
 struct ShakeoutView: View {
+    @EnvironmentObject private var model: KernelModel
+
     var body: some View {
-        Text("29er")
-            .font(.largeTitle)
+        NavigationStack {
+            Group {
+                let groups = model.discoveredGroups.groups
+                if model.discoveredGroups.isSearching && groups.isEmpty {
+                    ProgressView("Discovering groups on nip29.f7z.io…")
+                } else if groups.isEmpty {
+                    ContentUnavailableView(
+                        "No Groups",
+                        systemImage: "rectangle.stack",
+                        description: Text("Discovery has not returned any groups yet.")
+                    )
+                } else {
+                    List(groups.prefix(50)) { group in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(group.displayName)
+                                .font(.headline)
+                            Text(group.groupId)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 12) {
+                                Label("\(group.memberCount)", systemImage: "person.2")
+                                Label("\(group.adminCount)", systemImage: "shield")
+                                if group.public {
+                                    Label("public", systemImage: "globe")
+                                }
+                                if !group.open {
+                                    Label("closed", systemImage: "lock")
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                }
+            }
+            .navigationTitle("29er · \(model.discoveredGroups.groups.count) groups")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+        .task {
+            model.openGroupDiscovery(hostRelayUrl: "wss://nip29.f7z.io")
+        }
     }
 }
