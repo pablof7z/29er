@@ -8,7 +8,7 @@ struct App29er: App {
 
     var body: some Scene {
         WindowGroup {
-            ShakeoutView()
+            RootView()
                 .environmentObject(model)
                 .task {
                     // Skip kernel boot when the app is launched as an XCTest
@@ -49,11 +49,42 @@ struct App29er: App {
     }
 }
 
-/// S01/T06 shakeout proof: opens group discovery on `wss://nip29.f7z.io` and
-/// renders the live `DiscoveredGroupsProjection` count + first few rows.
-/// Proves SwiftUI observes the same typed sidecar the Rust CLI proved
-/// against the live relay (S01 gate criterion 3).
-struct ShakeoutView: View {
+/// S02 root router. Switches on `model.identityState`:
+///   • `.signedIn`  → `MainScaffold` (authenticated app shell)
+///   • `.signedOut` / `.invalidKey` / `.storageError` → `OnboardingView`
+///   • `.unknown`   → loading screen with a 3s fallback to `.signedOut`
+struct RootView: View {
+    @EnvironmentObject private var model: KernelModel
+
+    var body: some View {
+        switch model.identityState {
+        case .signedIn:
+            MainScaffold()
+        case .signedOut, .invalidKey, .storageError:
+            OnboardingView()
+        case .unknown:
+            ProgressView("Starting…")
+                .onAppear {
+                    // Boot timeout — if the kernel has not produced a snapshot
+                    // with an `active_account` verdict within ~3s, collapse to
+                    // `.signedOut` so the user is never stuck on a spinner.
+                    // A slow first tick (cold relay connect, Keychain read)
+                    // can hold `unknown` past user patience.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                        if model.identityState == .unknown {
+                            model.identityState = .signedOut
+                        }
+                    }
+                }
+        }
+    }
+}
+
+/// S02 authenticated app shell — the scaffold S03/S04 will fill with the
+/// real expandable NavigationStack group tree. For now it renders the live
+/// discovered-groups list (the S01 `ShakeoutView` data) so the post-onboarding
+/// screen is not empty.
+struct MainScaffold: View {
     @EnvironmentObject private var model: KernelModel
 
     var body: some View {

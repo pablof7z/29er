@@ -52,6 +52,7 @@ targets:
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: NO
         SWIFT_OBJC_BRIDGING_HEADER: 29er/Bridge/NmpCore.h
+        CODE_SIGN_ENTITLEMENTS: 29er/29er.entitlements
         # 29er links one aggregate Rust archive (`-lnmp_app_29er`) that
         # contains nmp-core, the NIP-46 signer broker, and the 29er per-app
         # projection. The xcframework wraps the staticlib; the link happens

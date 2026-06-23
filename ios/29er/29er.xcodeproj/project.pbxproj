@@ -13,6 +13,7 @@
 		1B936EDC3EB01641F7D22735 /* KernelUpdateFrameDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6042A9266ACB4F8A1BAC1E3 /* KernelUpdateFrameDecoder.swift */; };
 		299322783E4F97821BCDEA75 /* TypedProjectionGlue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57C6389FB46990ABFC8B387E /* TypedProjectionGlue.swift */; };
 		2AC60DBC2F60DE169BDAE1AC /* KernelModel+Apply.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF03993A560914185BA3E8A /* KernelModel+Apply.swift */; };
+		42698E6B26592C89A9A89CDA /* KeychainCapability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91C35535B6E84575DDC847F5 /* KeychainCapability.swift */; };
 		502091213898ECEAF798A254 /* DiscoveredGroups.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F0838D20014D25E25BFE6D7 /* DiscoveredGroups.generated.swift */; };
 		78A47E212755CAECACF88B67 /* KernelUpdateTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398E1727FD663BB294EBBFC8 /* KernelUpdateTypes.swift */; };
 		86BF88172B8EBF6FEE37D0BB /* KernelModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44EFA1C646FBE80DAC3D74A /* KernelModel.swift */; };
@@ -20,6 +21,8 @@
 		98E1E66EA87E5D5B6533C34B /* ActiveAccount.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E4D7ADA8368CFA74D520CB /* ActiveAccount.generated.swift */; };
 		CB6817C74046035284BDFB8C /* TypedProjectionDecoders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40EB7A574E4557A226148EE7 /* TypedProjectionDecoders.swift */; };
 		CEECD7F72DD05BE9847DF3AA /* KernelSnapshotTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E3A95744A539A755CCD359 /* KernelSnapshotTypes.swift */; };
+		E9A83B8AD108D592CB4581D8 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC0F99E54E0D07D0CD105A5E /* OnboardingView.swift */; };
+		ED2181C6AE7C7BD804C1294B /* TwentyNinerCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = B145FF42AA446276AEFA3B3D /* TwentyNinerCapabilities.swift */; };
 		F022F5F5AD1D3FEB8A3C95F1 /* GroupDiscoveryBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A9DE15067F695623D8E628E /* GroupDiscoveryBridge.swift */; };
 		F34F6188F65585822D6F52D3 /* KernelBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0A8194E83F64EFB225496D9 /* KernelBridge.swift */; };
 /* End PBXBuildFile section */
@@ -34,7 +37,10 @@
 		57C6389FB46990ABFC8B387E /* TypedProjectionGlue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypedProjectionGlue.swift; sourceTree = "<group>"; };
 		59213A5D5C56D037A2DE4178 /* 29er.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = 29er.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5A9DE15067F695623D8E628E /* GroupDiscoveryBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupDiscoveryBridge.swift; sourceTree = "<group>"; };
+		7092CE6CC5D073A49E895172 /* 29er.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = 29er.entitlements; sourceTree = "<group>"; };
+		91C35535B6E84575DDC847F5 /* KeychainCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCapability.swift; sourceTree = "<group>"; };
 		A44EFA1C646FBE80DAC3D74A /* KernelModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KernelModel.swift; sourceTree = "<group>"; };
+		B145FF42AA446276AEFA3B3D /* TwentyNinerCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwentyNinerCapabilities.swift; sourceTree = "<group>"; };
 		BAE20A89BDA40FFA8C355E18 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		D0A8194E83F64EFB225496D9 /* KernelBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KernelBridge.swift; sourceTree = "<group>"; };
 		E517E4888FC04BDFBA36B1C3 /* NmpUpdate.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NmpUpdate.generated.swift; sourceTree = "<group>"; };
@@ -42,6 +48,7 @@
 		E9E3A95744A539A755CCD359 /* KernelSnapshotTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KernelSnapshotTypes.swift; sourceTree = "<group>"; };
 		EBF03993A560914185BA3E8A /* KernelModel+Apply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KernelModel+Apply.swift"; sourceTree = "<group>"; };
 		F6042A9266ACB4F8A1BAC1E3 /* KernelUpdateFrameDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KernelUpdateFrameDecoder.swift; sourceTree = "<group>"; };
+		FC0F99E54E0D07D0CD105A5E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -83,6 +90,23 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		5CE47AC93F41DF0AA3BCDFA7 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				FC0F99E54E0D07D0CD105A5E /* OnboardingView.swift */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		E785513BA1B7EA42D3730DAF /* Capabilities */ = {
+			isa = PBXGroup;
+			children = (
+				91C35535B6E84575DDC847F5 /* KeychainCapability.swift */,
+				B145FF42AA446276AEFA3B3D /* TwentyNinerCapabilities.swift */,
+			);
+			path = Capabilities;
+			sourceTree = "<group>";
+		};
 		EF7BC437577A917533A45BD8 = {
 			isa = PBXGroup;
 			children = (
@@ -94,9 +118,12 @@
 		F43BB2E5A671B8868C76E1F2 /* 29er */ = {
 			isa = PBXGroup;
 			children = (
+				7092CE6CC5D073A49E895172 /* 29er.entitlements */,
 				549834D395C23FDB99E7FA40 /* App.swift */,
 				BAE20A89BDA40FFA8C355E18 /* Info.plist */,
 				41C2E984B1BBA22F80C8524B /* Bridge */,
+				E785513BA1B7EA42D3730DAF /* Capabilities */,
+				5CE47AC93F41DF0AA3BCDFA7 /* Features */,
 			);
 			path = 29er;
 			sourceTree = "<group>";
@@ -185,7 +212,10 @@
 				CEECD7F72DD05BE9847DF3AA /* KernelSnapshotTypes.swift in Sources */,
 				1B936EDC3EB01641F7D22735 /* KernelUpdateFrameDecoder.swift in Sources */,
 				78A47E212755CAECACF88B67 /* KernelUpdateTypes.swift in Sources */,
+				42698E6B26592C89A9A89CDA /* KeychainCapability.swift in Sources */,
 				11750078DA48DA4AB41A259E /* NmpUpdate.generated.swift in Sources */,
+				E9A83B8AD108D592CB4581D8 /* OnboardingView.swift in Sources */,
+				ED2181C6AE7C7BD804C1294B /* TwentyNinerCapabilities.swift in Sources */,
 				CB6817C74046035284BDFB8C /* TypedProjectionDecoders.swift in Sources */,
 				299322783E4F97821BCDEA75 /* TypedProjectionGlue.swift in Sources */,
 			);
@@ -200,6 +230,7 @@
 				"ARCHS[sdk=iphonesimulator*]" = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = 29er/29er.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
@@ -294,6 +325,7 @@
 				"ARCHS[sdk=iphonesimulator*]" = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = 29er/29er.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;

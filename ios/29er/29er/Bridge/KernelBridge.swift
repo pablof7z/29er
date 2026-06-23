@@ -24,6 +24,10 @@ final class KernelHandle {
     /// retain can be released *exactly once* — on re-`listen()` (replace) or
     /// in `deinit` (clear).
     private var retainedUpdateSink: Unmanaged<KernelUpdateSink>?
+    /// Strong reference to the registered capabilities object. Held so the
+    /// context pointer passed to `nmpCapabilityCallback` stays valid until
+    /// `deinit` unregisters the callback.
+    private var retainedCapabilities: TwentyNinerCapabilities?
     /// Opaque handle returned by `nmp_app_29er_register`. The
     /// group-discovery bridge extension manages its lifetime; see
     /// `GroupDiscoveryBridge.swift`.
@@ -65,6 +69,15 @@ final class KernelHandle {
         // `nmp_app_start`; the kernel narrows its built-in output to this
         // declaration (the one non-footgun way to receive the full set).
         nmp_app_29er_declare_consumed_projections(raw)
+        // S02 — register the native keyring capability handler before any
+        // `nmp_app_start` so the kernel can route capability requests from
+        // the first tick (the identity restore hook reads from Keychain
+        // during `register_defaults` → `nmp_app_start`). The handler is
+        // started immediately and held by `retainedCapabilities` for the
+        // kernel lifetime.
+        let capabilities = TwentyNinerCapabilities()
+        capabilities.start()
+        registerCapabilityHandler(capabilities)
     }
 
     private static func configureStoragePath(for raw: UnsafeMutableRawPointer) {
@@ -94,7 +107,24 @@ final class KernelHandle {
         // Unregister the update callback and release the retained sink in
         // lock-step (balances the `passRetained` in `listen`).
         clearUpdateCallback()
+        // Unregister the capability callback before releasing
+        // `retainedCapabilities` so no callback fires with a dangling
+        // context pointer.
+        nmp_app_set_capability_callback(raw, nil, nil)
+        retainedCapabilities = nil
         nmp_app_free(raw)
+    }
+
+    /// Register the native keyring capability handler. The Rust kernel routes
+    /// every keyring `CapabilityRequest` through this seam. Must be called
+    /// before `start()` so the handler is in place for any capability requests
+    /// the actor issues during startup (identity restore reads from Keychain).
+    func registerCapabilityHandler(_ capabilities: TwentyNinerCapabilities) {
+        retainedCapabilities = capabilities
+        nmp_app_set_capability_callback(
+            raw,
+            Unmanaged.passUnretained(capabilities).toOpaque(),
+            nmpCapabilityCallback)
     }
 
     /// Wire the Rust update callback. `handler` runs on every snapshot frame.
@@ -185,6 +215,19 @@ final class KernelHandle {
             }
         }
     }
+
+    /// Sign in with a local nsec and activate it as the active account.
+    /// Fire-and-forget (D6): the nsec is validated by `nostr::Keys::parse`
+    /// in Rust. On success the `active_account` slot is populated and the
+    /// `KACT` typed projection carries the pubkey on the next tick. On
+    /// failure (malformed/invalid nsec) the slot stays nil — the shell
+    /// observes the absence via `typedActiveAccount` and surfaces an error.
+    ///
+    /// D004: Swift hands the nsec to NMP once, never re-reads it. The caller
+    /// must clear its own copy immediately after dispatch.
+    func signInNsec(_ nsec: String) {
+        nsec.withCString { nmp_app_signin_nsec(raw, $0, 1) }
+    }
 }
 
 final class KernelUpdateSink {
@@ -217,6 +260,24 @@ let nmpUpdateCallback: NmpUpdateCallback = { context, bytes, count in
     case .panic:
         sink.onPanic()
     }
+}
+
+/// C capability callback — receives `CapabilityRequest` JSON from Rust and
+/// returns a malloc-allocated `CapabilityEnvelope` JSON string that Rust frees
+/// via `nmp_free_string` / `CString::from_raw`. Uses `strdup` so the
+/// allocation is compatible with Rust's `CString::from_raw` on Apple platforms
+/// (both use the system malloc allocator).
+///
+/// There is one C callback for every capability; `TwentyNinerCapabilities.handleJSON`
+/// routes the request to the capability owning its `namespace` (keyring). Rust
+/// invokes this from the actor thread (never the main thread), so a synchronous
+/// capability may block here safely.
+let nmpCapabilityCallback: NmpCapabilityCallback = { context, requestJSON in
+    guard let context, let requestJSON else { return nil }
+    let capabilities = Unmanaged<TwentyNinerCapabilities>.fromOpaque(context).takeUnretainedValue()
+    let requestStr = String(cString: requestJSON)
+    let resultStr = capabilities.handleJSON(requestStr)
+    return resultStr.withCString { strdup($0) }
 }
 
 extension KernelHandle {

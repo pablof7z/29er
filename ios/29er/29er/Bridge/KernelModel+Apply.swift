@@ -25,6 +25,22 @@ extension KernelModel {
         typedDiscoveredGroups = result.typedDiscoveredGroups
         typedActiveAccount = result.typedActiveAccount
 
+        // S02 — derive `identityState` from the `active_account` typed
+        // projection. The first tick with `rev > 0` collapses `unknown` to
+        // either `signedIn(pubkey)` or `signedOut`; a subsequent sign-in
+        // flips `unknown` (set by `submitNsec`) to `signedIn` once the
+        // `KACT` sidecar carries the pubkey. `invalidKey` is a client-side
+        // state set by `submitNsec`'s format check and is only collapsed
+        // here once a real tick arrives (so a rejected nsec does not get
+        // silently cleared by a stale snapshot).
+        if result.rev > 0 {
+            if let pubkey = result.typedActiveAccount, !pubkey.isEmpty {
+                identityState = .signedIn(pubkey: pubkey)
+            } else if identityState != .invalidKey {
+                identityState = .signedOut
+            }
+        }
+
         // Snapshot-driven error toast (tap-to-dismiss has nowhere else to
         // land, so it stays a distinct slot from any user-clearable toast).
         lastErrorToast = result.lastErrorToast

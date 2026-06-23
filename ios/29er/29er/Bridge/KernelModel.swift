@@ -5,6 +5,24 @@ import os.log
 
 private let kmLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "KernelModel")
 
+/// S02 root-routing state. Derived from the `active_account` typed projection
+/// (`KACT`) on every snapshot tick, plus the local submit/load transitions
+/// driven by `submitNsec` and the boot timeout.
+///
+/// `unknown` is the pre-first-snapshot state (and the loading state set by
+/// `submitNsec` while waiting for the nsec to be validated and the
+/// `active_account` slot to flip). It is also the state the `RootView`
+/// falls back to during kernel boot; a 3-second timeout in `RootView`
+/// collapses a stuck `unknown` to `signedOut` so the user is never stuck on
+/// a spinner.
+enum IdentityState: Equatable {
+    case unknown       // before first snapshot or loading
+    case signedOut     // no active account
+    case signedIn(pubkey: String)
+    case invalidKey    // nsec was rejected
+    case storageError  // keychain/auth error
+}
+
 /// `ObservableObject` mirror of the kernel snapshot. The Rust actor pushes
 /// binary FlatBuffers updates via the callback; the bridge decodes them and
 /// this class republishes the resulting model for SwiftUI consumption.
@@ -27,6 +45,13 @@ final class KernelModel: ObservableObject {
     /// the last tick (startup before sign-in). Read through the
     /// `activeAccountPubkey` accessor.
     @Published var typedActiveAccount: String?
+
+    // ── Identity routing (S02) ─────────────────────────────────────────────
+
+    /// Root-routing state derived from `typedActiveAccount` on every tick,
+    /// plus the local submit/load transitions driven by `submitNsec`. See
+    /// `IdentityState` for the state machine.
+    @Published var identityState: IdentityState = .unknown
 
     // ── Local mutable state ──────────────────────────────────────────────
 

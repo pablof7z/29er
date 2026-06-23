@@ -75,4 +75,35 @@ extension KernelModel {
     func closeGroupDiscovery() {
         discoveredGroups.closeSession()
     }
+
+    // ── S02 identity ─────────────────────────────────────────────────────
+
+    /// Submit an nsec for sign-in. Performs a quick client-side format check
+    /// (starts with `nsec1`, length >= 40) before dispatching to Rust; a
+    /// malformed nsec flips `identityState` to `.invalidKey` and returns
+    /// without dispatching (D004 — the nsec never reaches NMP). A valid-looking
+    /// nsec flips `identityState` to `.unknown` (loading) and dispatches
+    /// `nmp_app_signin_nsec` to the actor; the next `KACT` tick flips the
+    /// state to `.signedIn(pubkey)` on success or `.signedOut` on rejection
+    /// (the `active_account` slot stays nil).
+    ///
+    /// The nsec string is cleared from this stack frame immediately after
+    /// dispatch — Swift never holds the nsec beyond the dispatch moment (D004).
+    func submitNsec(_ nsec: String) {
+        let trimmed = nsec.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Quick client-side format check. The authoritative validation is
+        // `nostr::Keys::parse` in Rust; this is a fast-fail so a typo does
+        // not round-trip through the actor.
+        guard trimmed.hasPrefix("nsec1"), trimmed.count >= 40 else {
+            identityState = .invalidKey
+            return
+        }
+        // Loading state — the next `KACT` tick resolves this to `.signedIn`
+        // or `.signedOut` (see `apply`).
+        identityState = .unknown
+        // D004 — hand the nsec to NMP once. The nsec is never stored on the
+        // model; `trimmed` is a local that is released when this frame
+        // returns, so Swift does not hold the nsec beyond the dispatch.
+        kernel.signInNsec(trimmed)
+    }
 }

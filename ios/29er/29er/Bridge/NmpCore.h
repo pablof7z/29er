@@ -16,6 +16,7 @@
 //   * nmp_app_is_alive                                         (liveness probe)
 //   * nmp_app_declare_incremental_apply                        (R3 cache-merge)
 //   * nmp_app_signin_nsec                                      (identity)
+//   * nmp_app_set_capability_callback                          (keyring socket)
 //   * nmp_app_add_relay                                        (bootstrap)
 //   * nmp_app_dispatch_action_bytes                            (action doorway)
 //   * nmp_app_29er_register / nmp_app_29er_unregister          (composition)
@@ -77,6 +78,27 @@ uint32_t nmp_signer_broker_init(void *app);
 // make_active=1 signs in and activates; make_active=0 registers a visible
 // secondary signer without activating it.
 void nmp_app_signin_nsec(void *app, const char *secret, uint8_t make_active);
+
+// ── T151 — capability socket ──────────────────────────────────────────────
+//
+// `nmp_app_set_capability_callback` registers the native handler that the
+// kernel calls (synchronously) whenever it needs a platform capability (e.g.
+// iOS Keychain via PD-019/T96). The callback receives the
+// `CapabilityRequest` JSON and MUST return a freshly heap-allocated
+// `CapabilityEnvelope` JSON string; that string MUST then be released by the
+// caller via `nmp_free_string`. Passing NULL for `callback` unregisters the
+// handler; a request received while unregistered yields an error envelope
+// (D6), never a crash.
+//
+// There is one C callback for every capability; the Swift-side
+// `TwentyNinerCapabilities.handleJSON` routes the request to the capability
+// owning its `namespace` (keyring). Rust invokes this from the actor thread
+// (never the main thread), so a synchronous capability may block here safely.
+// The returned C string is heap-allocated via `strdup` so it is compatible
+// with Rust's `CString::from_raw` on Apple platforms (both use the system
+// malloc allocator).
+typedef char *(*NmpCapabilityCallback)(void *context, const char *request_json);
+void nmp_app_set_capability_callback(void *app, void *context, NmpCapabilityCallback callback);
 
 // Relay bootstrap. `role` is a NMP relay role token (e.g. "outbox", "inbox").
 void nmp_app_add_relay(void *app, const char *url, const char *role);
