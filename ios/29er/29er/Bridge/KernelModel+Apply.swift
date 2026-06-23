@@ -1,0 +1,74 @@
+import Foundation
+import os.log
+
+private let kmApplyLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "KernelModel")
+
+// ── Snapshot apply ────────────────────────────────────────────────────────────
+
+@MainActor
+extension KernelModel {
+
+    func apply(result: KernelUpdateResult) {
+        // Staleness guard on the bare envelope `rev`. Production always emits
+        // `rev` on every frame, so a zero rev is not a valid production frame
+        // and is dropped.
+        guard result.rev > kernel.lastAppliedRev else { return }
+
+        // 29er S01 consumes only the discovered-groups + active-account
+        // sidecars. The Chirp pattern assigns ONLY the @Published slots whose
+        // projection key advanced in this frame (`result.changedKeys`); 29er
+        // does not yet wire the ProjectionMergeCache (single snapshot key, no
+        // rev-aware cache needs in S01), so we assign unconditionally — the
+        // kernel emits a full frame on every tick. When 29er grows to consume
+        // more projections, wire the cache-merge layer + the `changedKeys` gate
+        // (mirroring Chirp's `KernelModel+Apply.swift`).
+        typedDiscoveredGroups = result.typedDiscoveredGroups
+        typedActiveAccount = result.typedActiveAccount
+
+        // Snapshot-driven error toast (tap-to-dismiss has nowhere else to
+        // land, so it stays a distinct slot from any user-clearable toast).
+        lastErrorToast = result.lastErrorToast
+        lastErrorCategory = result.lastErrorCategory
+
+        // NIP-29 group-discovery projection mirror. Push every tick so the
+        // store tracks `projections["nmp.nip29.discovered_groups"]`. The store
+        // is unwired until the user enters a relay and taps Search
+        // (`searchGroups`); the snapshot key is `nil` until then, and the
+        // store ignores stale snapshots from a previously-registered relay
+        // during a switch.
+        discoveredGroups.apply(snapshot: result.typedDiscoveredGroups)
+
+        kmApplyLog.debug(
+            "NMP_PERF swift_apply rev=\(result.rev, privacy: .public) payload_bytes=\(result.payloadBytes, privacy: .public) decode_us=\(result.decodeMicros, privacy: .public)")
+
+        kernel.lastAppliedRev = result.rev
+        snapshotCount &+= 1
+        lastSnapshotAt = Date()
+    }
+
+    /// The authoritative snapshot revision. Reads the last-applied `rev`
+    /// (mirrors Chirp's `rev` accessor reading the typed envelope). `0` before
+    /// the first tick lands.
+    var rev: UInt64 { kernel.lastAppliedRev }
+
+    /// Null every typed projection slot so the computed accessors collapse to
+    /// their empty defaults. Used by `resetAndRestart()`: the next tick
+    /// reassigns each slot, so this is a transient blank, not a steady state.
+    func clearTypedProjections() {
+        typedDiscoveredGroups = nil
+        typedActiveAccount = nil
+    }
+
+    /// Active account pubkey (`nil` ⇒ no active account). Read through the
+    /// `typedActiveAccount` slot.
+    var activeAccountPubkey: String? {
+        typedActiveAccount
+    }
+
+    /// Discovered groups snapshot (`nil` ⇒ discovery not registered or last
+    /// tick's sidecar was malformed). Read through the
+    /// `typedDiscoveredGroups` slot.
+    var discoveredGroupsSnapshot: DiscoveredGroupsSnapshot? {
+        typedDiscoveredGroups
+    }
+}

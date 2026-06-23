@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/shakeout"]
+members = ["crates/shakeout", "crates/nmp-app-29er"]
 exclude = ["vendor/nmp"]
 
 [workspace.package]

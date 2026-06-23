@@ -243,6 +243,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-queue"
 version = "0.3.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -757,6 +766,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0efe882e02d206d8d279c20eb40e03baf7cb5136a1476dc084a324fbc3ec42d"
 
 [[package]]
+name = "nmp-app-29er"
+version = "0.1.0"
+dependencies = [
+ "nmp-core",
+ "nmp-defaults",
+ "nmp-ffi",
+ "nmp-nip29",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nmp-content"
 version = "0.8.0"
 dependencies = [
@@ -858,6 +879,9 @@ dependencies = [
  "nmp-nip50",
  "nmp-nip51",
  "nmp-planner",
+ "nmp-signer-broker",
+ "nmp-signer-iface",
+ "nmp-signers",
  "nmp-store",
  "nostr",
  "serde",
@@ -1150,11 +1174,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "nmp-signer-broker"
+version = "0.8.0"
+dependencies = [
+ "crossbeam-channel",
+ "nmp-network",
+ "nmp-signer-iface",
+ "nmp-signers",
+ "nostr",
+ "rand",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nmp-signer-iface"
 version = "0.8.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "nmp-signers"
+version = "0.8.0"
+dependencies = [
+ "js-sys",
+ "nmp-signer-iface",
+ "nostr",
+ "serde",
+ "serde_json",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "zeroize",
 ]
 
 [[package]]
@@ -2283,6 +2337,7 @@ version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 dependencies = [
+ "serde",
  "zeroize_derive",
 ]
 

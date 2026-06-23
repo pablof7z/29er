@@ -1,0 +1,92 @@
+name: 29er
+options:
+  bundleIdPrefix: io.f7z
+  deploymentTarget:
+    iOS: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    GENERATE_INFOPLIST_FILE: NO
+    CODE_SIGN_STYLE: Automatic
+packages:
+  FlatBuffers:
+    url: https://github.com/google/flatbuffers.git
+    from: 25.12.19
+targets:
+  29er:
+    type: application
+    platform: iOS
+    sources:
+      - path: 29er
+    dependencies:
+      - package: FlatBuffers
+    info:
+      path: 29er/Info.plist
+      properties:
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        CFBundleDisplayName: 29er
+        UIApplicationSupportsIndirectInputEvents: true
+        CFBundleIconName: AppIcon
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        LSApplicationQueriesSchemes:
+          - nostrsigner
+          - primal
+          - nostrconnect
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.f7z.app29er
+        PRODUCT_MODULE_NAME: App29er
+        PRODUCT_NAME: 29er
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_OBJC_BRIDGING_HEADER: 29er/Bridge/NmpCore.h
+        # 29er links one aggregate Rust archive (`-lnmp_app_29er`) that
+        # contains nmp-core, the NIP-46 signer broker, and the 29er per-app
+        # projection. The xcframework wraps the staticlib; the link happens
+        # via LIBRARY_SEARCH_PATHS pointing at the xcframework slice (mirrors
+        # Chirp's `LIBRARY_SEARCH_PATHS` pointing at `target/.../debug`).
+        "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]":
+          - $(SRCROOT)/Vendor/NmpCore.xcframework/ios-arm64
+          - $(SRCROOT)/../../target/aarch64-apple-ios/debug
+          - $(SRCROOT)/../../target/aarch64-apple-ios/release
+        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]":
+          - $(SRCROOT)/Vendor/NmpCore.xcframework/ios-arm64-simulator
+          - $(SRCROOT)/../../target/aarch64-apple-ios-sim/debug
+          - $(SRCROOT)/../../target/aarch64-apple-ios-sim/release
+        OTHER_LDFLAGS: "$(inherited) -lnmp_app_29er"
+        # The NmpCore.xcframework ships arm64 simulator + arm64 device slices
+        # only (matches the Rust iOS build targets). Restrict the simulator
+        # build to arm64 so the linker does not look for an x86_64 slice that
+        # was never built. CI / local simulators on Apple Silicon cover this;
+        # Intel Macs would need an x86_64 sim slice added to the xcframework.
+        ARCHS[sdk=iphonesimulator*]: arm64
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        # Xcode 26 beta workarounds (mirrors Chirp's project.yml):
+        # 1. SwiftUICore restricts allowable-clients in its SDK TBD; the debug
+        #    dylib mode hits the same restriction. Disable the debug dylib so
+        #    the linker targets the real executable, and point FRAMEWORK_SEARCH_PATHS
+        #    at /tmp/LocalFrameworks first — that directory holds a copy of
+        #    the SwiftUICore.tbd with the allowable-clients block removed.
+        # 2. UIUtilities is a new private framework auto-linked in Xcode 26; a
+        #    stub TBD lives in the same /tmp/LocalFrameworks directory.
+        # Both stubs must exist before building; see
+        # vendor/nmp/ios/Chirp/project.yml for the upstream reference.
+        ENABLE_DEBUG_DYLIB: NO
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]": "/tmp/LocalFrameworks $(inherited)"
+schemes:
+  29er:
+    build:
+      targets:
+        29er: all
