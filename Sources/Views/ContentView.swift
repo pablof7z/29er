@@ -61,23 +61,14 @@ struct SidebarView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(model.groupTree, id: \.id) { group in
                             GroupRowView(
                                 group: group,
-                                isExpanded: expandedGroups.contains(group.id),
-                                onToggle: {
-                                    if expandedGroups.contains(group.id) {
-                                        expandedGroups.remove(group.id)
-                                    } else {
-                                        expandedGroups.insert(group.id)
-                                    }
-                                },
-                                onSelect: {
-                                    model.selectGroup(group)
-                                }
+                                depth: 0,
+                                expandedGroups: $expandedGroups,
+                                onSelect: { model.selectGroup(group) }
                             )
-                            .environmentObject(model)
                         }
                     }
                     .padding(.vertical, 8)
@@ -95,7 +86,6 @@ struct SidebarView: View {
         .background(Color(.systemBackground))
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .task {
-            model.isLoadingGroups = true
             await model.fetchGroupTree()
         }
     }
@@ -103,23 +93,25 @@ struct SidebarView: View {
 
 struct GroupRowView: View {
     let group: GroupNode
-    let isExpanded: Bool
-    let onToggle: () -> Void
+    let depth: Int
+    @Binding var expandedGroups: Set<String>
     let onSelect: () -> Void
     @EnvironmentObject var model: KernelModel
+
+    private var isExpanded: Bool { expandedGroups.contains(group.id) }
+    private var hasChildren: Bool { !group.children.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                if !group.children.isEmpty {
-                    Button(action: onToggle) {
+                if hasChildren {
+                    Button(action: toggle) {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .frame(width: 16)
                     }
                     .buttonStyle(.plain)
                 } else {
-                    Spacer()
-                        .frame(width: 16)
+                    Spacer().frame(width: 16)
                 }
 
                 Button(action: onSelect) {
@@ -136,6 +128,11 @@ struct GroupRowView: View {
                             Text(group.name)
                                 .font(.callout)
                                 .lineLimit(1)
+                            if group.lastActivityAt > .distantPast {
+                                Text(group.lastActivityAt.formatted(.relative(presentation: .named)))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
                         }
 
                         Spacer()
@@ -153,20 +150,27 @@ struct GroupRowView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 8)
 
-            if isExpanded {
+            if isExpanded && hasChildren {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(group.children, id: \.id) { child in
                         GroupRowView(
                             group: child,
-                            isExpanded: false,
-                            onToggle: { },
-                            onSelect: onSelect
+                            depth: depth + 1,
+                            expandedGroups: $expandedGroups,
+                            onSelect: { model.selectGroup(child) }
                         )
-                        .environmentObject(model)
                     }
                 }
                 .padding(.leading, 12)
             }
+        }
+    }
+
+    private func toggle() {
+        if isExpanded {
+            expandedGroups.remove(group.id)
+        } else {
+            expandedGroups.insert(group.id)
         }
     }
 }
@@ -325,8 +329,7 @@ struct SignInView: View {
 
                 Button(action: {
                     Task {
-                        model.nsec = nsecInput
-                        await model.fetchGroupTree()
+                        await model.signIn(with: nsecInput)
                     }
                 }) {
                     Text("Sign In")
