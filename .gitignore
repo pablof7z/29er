@@ -41,3 +41,8 @@ vendor/
 coverage/
 .cache/
 tmp/
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
