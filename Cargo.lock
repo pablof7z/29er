@@ -774,6 +774,7 @@ dependencies = [
  "nmp-defaults",
  "nmp-ffi",
  "nmp-nip29",
+ "nmp-planner",
  "serde",
  "serde_json",
 ]

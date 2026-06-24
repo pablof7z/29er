@@ -24,5 +24,6 @@ nmp-core = { workspace = true }
 nmp-ffi = { workspace = true, features = ["signer-broker"] }
 nmp-defaults = { workspace = true }
 nmp-nip29 = { workspace = true }
+nmp-planner = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

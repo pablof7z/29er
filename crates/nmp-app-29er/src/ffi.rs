@@ -3,17 +3,22 @@
 //! to the S01 surface: register, open/close group discovery, register group
 //! chat, dispatch action bytes, declare consumed projections, unregister.
 
+use std::collections::BTreeMap;
 use std::ffi::c_char;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use nmp_core::dispatch_envelope::{encode_dispatch_envelope, DISPATCH_ENVELOPE_SCHEMA_VERSION};
 use nmp_core::substrate::{ActionPayload, EventObserverRegistrar, SnapshotProjectionRegistrar};
 use nmp_core::{KernelEventObserver, KernelEventObserverId, TypedProjectionData};
 use nmp_ffi::{nmp_app_dispatch_action_bytes, NmpApp};
 use nmp_nip29::group_id::GroupId;
+use nmp_nip29::interest::host_pinned_interest;
+use nmp_nip29::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use nmp_nip29::projection::DiscoveredGroupsProjection;
 use nmp_nip29::register::wire_group_chat;
+use nmp_planner::stable_hash::stable_hash64;
+use nmp_planner::InterestLifecycle;
 
 use crate::group_tree::{
     encode_group_tree_snapshot, GROUP_TREE_FILE_IDENTIFIER, GROUP_TREE_SCHEMA_ID,
@@ -191,10 +196,7 @@ pub extern "C" fn nmp_app_29er_declare_consumed_projections(app: *mut NmpApp) {
 /// borrowed only for the duration of this call.
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub extern "C" fn nmp_app_29er_register_group_chat(
-    app: *mut NmpApp,
-    group_id_json: *const c_char,
-) {
+pub extern "C" fn nmp_app_29er_register_group_chat(app: *mut NmpApp, group_id_json: *const c_char) {
     if app.is_null() {
         return;
     }
@@ -209,7 +211,53 @@ pub extern "C" fn nmp_app_29er_register_group_chat(
         return;
     };
 
-    wire_group_chat(app_ref, group_id);
+    wire_group_chat(app_ref, group_id.clone());
+    app_ref.push_interest(group_chat_interest(&group_id));
+}
+
+fn group_chat_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
+    let id = stable_hash64((
+        "29er.nip29.group_chat",
+        group_id.host_relay_url.as_str(),
+        group_id.local_id.as_str(),
+    ));
+    host_pinned_interest(
+        id,
+        group_id,
+        [KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
+        BTreeMap::new(),
+        InterestLifecycle::Tailing,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn group_chat_interest_is_host_pinned_and_tailing() {
+        let group = GroupId::new("wss://groups.example.com", "rust-nostr");
+        let interest = group_chat_interest(&group);
+
+        assert_eq!(
+            interest.shape.relay_pin.as_deref(),
+            Some("wss://groups.example.com")
+        );
+        assert!(interest.shape.kinds.contains(&KIND_CHAT_MESSAGE));
+        assert!(interest.shape.kinds.contains(&KIND_DISCUSSION_OR_ARTIFACT));
+        assert!(interest.shape.tags.get("h").unwrap().contains("rust-nostr"));
+        assert_eq!(interest.lifecycle, InterestLifecycle::Tailing);
+    }
+
+    #[test]
+    fn group_chat_interest_id_is_deterministic_per_group() {
+        let a1 = group_chat_interest(&GroupId::new("wss://groups.example.com", "room-a"));
+        let a2 = group_chat_interest(&GroupId::new("wss://groups.example.com", "room-a"));
+        let b = group_chat_interest(&GroupId::new("wss://groups.example.com", "room-b"));
+
+        assert_eq!(a1.id, a2.id);
+        assert_ne!(a1.id, b.id);
+    }
 }
 
 /// Open a NIP-29 group-discovery session for one host relay.
@@ -327,9 +375,7 @@ where
 /// `nmp_app_29er_open_group_discovery` or null.
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub extern "C" fn nmp_app_29er_close_group_discovery(
-    handle: *mut TwentyNinerGroupDiscoveryHandle,
-) {
+pub extern "C" fn nmp_app_29er_close_group_discovery(handle: *mut TwentyNinerGroupDiscoveryHandle) {
     if handle.is_null() {
         return;
     }
@@ -400,9 +446,11 @@ pub extern "C" fn nmp_app_29er_dispatch_action_bytes(
     };
 
     let Some(payload) = encode_payload_for_namespace(&ns, &body) else {
-        return CString::new(format!(r#"{{"error":"no typed payload encoder for action namespace '{ns}'"}}"#))
-            .unwrap_or_else(|_| c"{}".to_owned())
-            .into_raw();
+        return CString::new(format!(
+            r#"{{"error":"no typed payload encoder for action namespace '{ns}'"}}"#
+        ))
+        .unwrap_or_else(|_| c"{}".to_owned())
+        .into_raw();
     };
 
     let correlation_id = mint_correlation_id();
@@ -448,9 +496,7 @@ fn encode_payload_for_namespace(namespace: &str, json: &str) -> Option<Vec<u8>> 
     }
     match namespace {
         "nmp.publish" => encode::<nmp_core::publish::PublishAction>(namespace, json),
-        "nmp.nip29.discover" => {
-            encode::<nmp_nip29::action::DiscoverGroupsInput>(namespace, json)
-        }
+        "nmp.nip29.discover" => encode::<nmp_nip29::action::DiscoverGroupsInput>(namespace, json),
         "nmp.nip29.join" => encode::<nmp_nip29::action::JoinGroupInput>(namespace, json),
         _ => None,
     }
@@ -464,5 +510,9 @@ fn c_string_opt(ptr: *const c_char) -> Option<String> {
     }
     // SAFETY: caller guarantees `ptr` is a valid NUL-terminated C string for
     // the duration of this call (the FFI contract).
-    Some(unsafe { std::ffi::CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+    Some(
+        unsafe { std::ffi::CStr::from_ptr(ptr) }
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
