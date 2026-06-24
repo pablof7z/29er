@@ -36,6 +36,7 @@ __pycache__/
 .venv/
 venv/
 target/
+.build/
 vendor/*
 !vendor/nmp
 *.log

@@ -8,11 +8,10 @@ private let gtLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupT
 ///
 ///   - `NavigationStack` + push navigation (no `.sidebar` split column —
 ///     iPhone-only).
-///   - Branch rows are `DisclosureGroup`s whose label is a `NavigationLink`
-///     (D003 — branch nodes are real groups; tapping the label navigates to
-///     the group's timeline, tapping the chevron expands/collapses
-///     children).
-///   - Leaf rows are plain `NavigationLink`s.
+///   - Branch rows keep the branch's own `NavigationLink` (D003 — branch nodes
+///     are real groups; tapping the label navigates to the group's timeline,
+///     tapping the chevron expands/collapses children).
+///   - Leaf rows are plain chat-list rows.
 ///   - Pushed destination is a placeholder timeline view (`TimelinePlaceholder`)
 ///     — S04 replaces it with the real kind:9 timeline.
 ///
@@ -20,9 +19,10 @@ private let gtLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupT
 ///   - `isSearching && tree.roots.isEmpty` → `LoadingView`
 ///   - `kernelIsDead` → `ErrorStateView`
 ///   - otherwise empty → `EmptyStateView`
-///   - otherwise → the `List` forest.
+///   - otherwise → the chat-style forest.
 struct GroupTreeView: View {
     @EnvironmentObject private var model: KernelModel
+    @State private var expandedGroups = Set<String>()
 
     var body: some View {
         let tree = model.groupTree
@@ -40,16 +40,24 @@ struct GroupTreeView: View {
                     message: "Discovery has not returned any groups yet."
                 )
             } else {
-                List {
-                    ForEach(tree.roots) { node in
-                        GroupTreeRow(node: node, tree: tree)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(tree.roots) { node in
+                            GroupTreeRow(
+                                node: node,
+                                tree: tree,
+                                depth: 0,
+                                expandedGroups: $expandedGroups
+                            )
+                        }
                     }
+                    .padding(.top, 8)
                 }
-                .listStyle(.insetGrouped)
+                .background(Color(.systemBackground))
             }
         }
         .navigationTitle(navigationTitle(tree: tree))
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarTitleDisplayMode(.large)
         .navigationDestination(for: String.self) { groupId in
             GroupTimelineView(groupId: groupId)
         }
@@ -72,36 +80,69 @@ struct GroupTreeView: View {
     }
 }
 
-/// Recursive row view. Branches render a `DisclosureGroup` with the branch's
-/// own `NavigationLink` as the label (D003 — branch nodes are real groups
-/// with their own timeline, not just expand/collapse folders). Leaves render
-/// a plain `NavigationLink`.
+/// Recursive row view. Branches render an explicit expand control next to the
+/// branch's own `NavigationLink` (D003 — branch nodes are real groups with
+/// their own timeline, not just expand/collapse folders). Leaves render a
+/// plain `NavigationLink`.
 struct GroupTreeRow: View {
     let node: GroupTreeNode
     let tree: GroupTreeSnapshot
+    let depth: Int
+    @Binding var expandedGroups: Set<String>
+
+    private var isExpanded: Bool { expandedGroups.contains(node.groupId) }
 
     var body: some View {
-        if node.isBranch {
-            DisclosureGroup {
-                ForEach(children) { child in
-                    GroupTreeRow(node: child, tree: tree)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                if node.isBranch {
+                    Button(action: toggle) {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Color.clear.frame(width: 24, height: 44)
                 }
-            } label: {
+
                 NavigationLink(value: node.groupId) {
                     GroupRowLabel(node: node)
                 }
                 .buttonStyle(.plain)
             }
-        } else {
-            NavigationLink(value: node.groupId) {
-                GroupRowLabel(node: node)
+            .padding(.leading, CGFloat(12 + depth * 18))
+            .padding(.trailing, 12)
+            .padding(.vertical, 8)
+
+            Divider()
+                .padding(.leading, CGFloat(82 + depth * 18))
+
+            if node.isBranch && isExpanded {
+                ForEach(children) { child in
+                    GroupTreeRow(
+                        node: child,
+                        tree: tree,
+                        depth: depth + 1,
+                        expandedGroups: $expandedGroups
+                    )
+                }
             }
-            .buttonStyle(.plain)
         }
     }
 
     private var children: [GroupTreeNode] {
         node.childIds.compactMap { tree.allNodes[$0] }
+    }
+
+    private func toggle() {
+        if isExpanded {
+            expandedGroups.remove(node.groupId)
+        } else {
+            expandedGroups.insert(node.groupId)
+        }
     }
 }
 
@@ -113,31 +154,76 @@ struct GroupRowLabel: View {
     let node: GroupTreeNode
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(node.displayName)
-                .font(.headline)
-                .lineLimit(1)
-            Text(node.groupId)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            HStack(spacing: 12) {
-                Label("\(node.memberCount)", systemImage: "person.2")
-                Label("\(node.adminCount)", systemImage: "shield")
-                if node.isPublic {
-                    Label("public", systemImage: "globe")
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.blue)
+                Text(initials)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .frame(width: 52, height: 52)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(node.displayName)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    if node.isBranch {
+                        Text("\(node.childIds.count)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.blue))
+                    }
                 }
-                if !node.isOpen {
-                    Label("closed", systemImage: "lock")
-                }
-                if node.isBranch {
-                    Label("\(node.childIds.count)", systemImage: "folder")
+
+                HStack(spacing: 6) {
+                    Text(subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    if !node.isOpen {
+                        Image(systemName: "lock.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 2)
+        .contentShape(Rectangle())
+    }
+
+    private var initials: String {
+        let pieces = node.displayName
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first }
+        let value = String(pieces).uppercased()
+        return value.isEmpty ? "#" : value
+    }
+
+    private var subtitle: String {
+        var pieces: [String] = []
+        if node.memberCount > 0 {
+            pieces.append("\(node.memberCount) members")
+        }
+        if node.adminCount > 0 {
+            pieces.append("\(node.adminCount) admins")
+        }
+        pieces.append(node.isPublic ? "public" : "private")
+        if node.isBranch {
+            pieces.append(node.childIds.count == 1 ? "1 room" : "\(node.childIds.count) rooms")
+        }
+        return pieces.joined(separator: " • ")
     }
 }
 
