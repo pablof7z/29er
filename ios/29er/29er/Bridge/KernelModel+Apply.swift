@@ -36,10 +36,23 @@ extension KernelModel {
         // here once a real tick arrives (so a rejected nsec does not get
         // silently cleared by a stale snapshot).
         if result.rev > 0 {
+            // Capture pre-apply state so we can detect the signedIn transition.
+            let wasSignedIn: Bool
+            if case .signedIn = identityState { wasSignedIn = true } else { wasSignedIn = false }
+
             if let pubkey = result.typedActiveAccount, !pubkey.isEmpty {
                 identityState = .signedIn(pubkey: pubkey)
             } else if identityState != .invalidKey {
                 identityState = .signedOut
+            }
+
+            // Auto-open group discovery on the first signedIn tick — covers
+            // both fresh sign-in AND session restore via keychain. Fires once:
+            // `wasSignedIn` gates the transition tick, and `hostRelayUrl` being
+            // non-empty after the first call prevents re-entry. GroupTreeView's
+            // .task guard also deduplicates when the view appears later.
+            if !wasSignedIn, case .signedIn = identityState, discoveredGroups.hostRelayUrl.isEmpty {
+                openGroupDiscovery(hostRelayUrl: "wss://nip29.f7z.io")
             }
         }
 
