@@ -63,9 +63,9 @@ targets:
           - $(SRCROOT)/../../target/aarch64-apple-ios/debug
           - $(SRCROOT)/../../target/aarch64-apple-ios/release
         "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]":
-          - $(SRCROOT)/Vendor/NmpCore.xcframework/ios-arm64-simulator
           - $(SRCROOT)/../../target/aarch64-apple-ios-sim/debug
           - $(SRCROOT)/../../target/aarch64-apple-ios-sim/release
+          - $(SRCROOT)/Vendor/NmpCore.xcframework/ios-arm64-simulator
         OTHER_LDFLAGS: "$(inherited) -lnmp_app_29er"
         # The NmpCore.xcframework ships arm64 simulator + arm64 device slices
         # only (matches the Rust iOS build targets). Restrict the simulator

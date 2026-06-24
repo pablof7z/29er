@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use nmp_core::dispatch_envelope::{encode_dispatch_envelope, DISPATCH_ENVELOPE_SCHEMA_VERSION};
-use nmp_core::substrate::{ActionPayload, EventObserverRegistrar, SnapshotProjectionRegistrar};
+use nmp_core::substrate::{ActionPayload, ViewDependencies};
 use nmp_core::{KernelEventObserver, KernelEventObserverId, TypedProjectionData};
 use nmp_ffi::{nmp_app_dispatch_action_bytes, NmpApp};
 use nmp_nip29::group_id::GroupId;
@@ -18,11 +18,11 @@ use nmp_nip29::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use nmp_nip29::projection::DiscoveredGroupsProjection;
 use nmp_nip29::register::wire_group_chat;
 use nmp_planner::stable_hash::stable_hash64;
-use nmp_planner::InterestLifecycle;
+use nmp_planner::{InterestId, InterestLifecycle, InterestScope};
 
 use crate::group_tree::{
-    encode_group_tree_snapshot, GROUP_TREE_FILE_IDENTIFIER, GROUP_TREE_SCHEMA_ID,
-    GROUP_TREE_SCHEMA_VERSION,
+    encode_group_tree_snapshot, GroupTreeProjection, GROUP_TREE_FILE_IDENTIFIER,
+    GROUP_TREE_SCHEMA_ID, GROUP_TREE_SCHEMA_VERSION,
 };
 
 /// Opaque handle returned by [`nmp_app_29er_register`] and consumed by
@@ -32,8 +32,9 @@ pub struct TwentyNinerHandle {
 }
 
 pub struct TwentyNinerGroupDiscoveryHandle {
-    observer_id: KernelEventObserverId,
-    teardown_fn: Box<dyn FnOnce(KernelEventObserverId) + Send>,
+    observer_ids: Vec<KernelEventObserverId>,
+    tree_projection: Arc<GroupTreeProjection>,
+    teardown_fn: Box<dyn FnOnce(Vec<KernelEventObserverId>) + Send>,
 }
 
 unsafe impl Send for TwentyNinerGroupDiscoveryHandle {}
@@ -230,6 +231,20 @@ fn group_chat_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
     )
 }
 
+fn group_tree_chat_summary_interest(host_relay_url: &str) -> nmp_planner::LogicalInterest {
+    let id = stable_hash64(("29er.nip29.group_tree.chat_summary", host_relay_url));
+    ViewDependencies {
+        kinds: vec![KIND_CHAT_MESSAGE],
+        relay_pin: Some(host_relay_url.to_string()),
+        ..Default::default()
+    }
+    .into_logical_interest(
+        InterestId(id),
+        InterestScope::Global,
+        InterestLifecycle::Tailing,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,17 +316,21 @@ pub extern "C" fn nmp_app_29er_open_group_discovery(
     }
 }
 
-fn open_group_discovery_with_tree<A>(
-    app: &A,
+fn open_group_discovery_with_tree(
+    app: &NmpApp,
     relay_url: String,
-) -> Option<TwentyNinerGroupDiscoveryHandle>
-where
-    A: EventObserverRegistrar + SnapshotProjectionRegistrar + Send + Sync,
-{
-    let projection = Arc::new(DiscoveredGroupsProjection::new(relay_url));
+) -> Option<TwentyNinerGroupDiscoveryHandle> {
+    let projection = Arc::new(DiscoveredGroupsProjection::new(relay_url.clone()));
     let observer_id =
         app.register_event_observer(Arc::clone(&projection) as Arc<dyn KernelEventObserver>);
     if observer_id.0 == 0 {
+        return None;
+    }
+    let tree_messages = Arc::new(GroupTreeProjection::new());
+    let tree_observer_id =
+        app.register_event_observer(Arc::clone(&tree_messages) as Arc<dyn KernelEventObserver>);
+    if tree_observer_id.0 == 0 {
+        app.unregister_event_observer(observer_id);
         return None;
     }
 
@@ -335,24 +354,31 @@ where
     });
 
     let tree_projection = Arc::clone(&projection);
+    let tree_messages_projection = Arc::clone(&tree_messages);
     app.register_typed_snapshot_projection("nmp.29er.group_tree", move || {
         let snapshot = tree_projection.snapshot();
+        let messages = tree_messages_projection.snapshot();
         Some(TypedProjectionData {
             key: "nmp.29er.group_tree".to_string(),
             schema_id: GROUP_TREE_SCHEMA_ID.to_string(),
             schema_version: GROUP_TREE_SCHEMA_VERSION,
             file_identifier: String::from_utf8_lossy(GROUP_TREE_FILE_IDENTIFIER).into_owned(),
-            payload: encode_group_tree_snapshot(&snapshot),
+            payload: encode_group_tree_snapshot(&snapshot, &messages),
             ..Default::default()
         })
     });
 
-    let app_addr = (app as *const A) as usize;
+    app.push_interest(group_tree_chat_summary_interest(&relay_url));
+
+    let app_addr = (app as *const NmpApp) as usize;
     Some(TwentyNinerGroupDiscoveryHandle {
-        observer_id,
-        teardown_fn: Box::new(move |id| {
-            let app = unsafe { &*(app_addr as *const A) };
-            app.unregister_event_observer(id);
+        observer_ids: vec![observer_id, tree_observer_id],
+        tree_projection: tree_messages,
+        teardown_fn: Box::new(move |ids| {
+            let app = unsafe { &*(app_addr as *const NmpApp) };
+            for id in ids {
+                app.unregister_event_observer(id);
+            }
             app.remove_snapshot_projection("nmp.nip29.discovered_groups");
             app.remove_snapshot_projection("nmp.29er.group_tree");
         }),
@@ -384,7 +410,26 @@ pub extern "C" fn nmp_app_29er_close_group_discovery(handle: *mut TwentyNinerGro
     // call. `Box::from_raw` takes ownership; `close_group_discovery` tears
     // down the observer + projection before the box is dropped.
     let handle = unsafe { *Box::from_raw(handle) };
-    (handle.teardown_fn)(handle.observer_id);
+    (handle.teardown_fn)(handle.observer_ids);
+}
+
+/// Mark a group's direct kind:9 messages read inside the open group-tree
+/// discovery projection. The next tree snapshot will fold that read state into
+/// the group's aggregate unread count.
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn nmp_app_29er_mark_group_read(
+    handle: *mut TwentyNinerGroupDiscoveryHandle,
+    group_id: *const c_char,
+) {
+    if handle.is_null() {
+        return;
+    }
+    let Some(group_id) = c_string_opt(group_id).filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let handle = unsafe { &*handle };
+    handle.tree_projection.mark_read(&group_id);
 }
 
 /// Process-local correlation-id source for 29er's byte-doorway dispatches.
@@ -483,8 +528,9 @@ pub extern "C" fn nmp_app_29er_dispatch_action_bytes(
 /// canonical serde shape; this only re-encodes to typed bytes.
 ///
 /// The set mirrors Chirp's `encode_payload_for_namespace` but strips to the
-/// NIP-29 namespaces 29er dispatches in S01. New namespaces are added as
-/// 29er grows.
+/// NIP-29 namespaces 29er dispatches. Read/write group chat is first-class:
+/// Swift only hands typed JSON bodies across this doorway; Rust/NMP owns
+/// event kind, tags, signing, and relay pinning.
 fn encode_payload_for_namespace(namespace: &str, json: &str) -> Option<Vec<u8>> {
     use serde::de::DeserializeOwned;
     fn encode<P>(_namespace: &str, json: &str) -> Option<Vec<u8>>
@@ -498,6 +544,12 @@ fn encode_payload_for_namespace(namespace: &str, json: &str) -> Option<Vec<u8>> 
         "nmp.publish" => encode::<nmp_core::publish::PublishAction>(namespace, json),
         "nmp.nip29.discover" => encode::<nmp_nip29::action::DiscoverGroupsInput>(namespace, json),
         "nmp.nip29.join" => encode::<nmp_nip29::action::JoinGroupInput>(namespace, json),
+        "nmp.nip29.post_chat_message" => {
+            encode::<nmp_nip29::action::PostChatMessageInput>(namespace, json)
+        }
+        "nmp.nip29.react_in_group" => {
+            encode::<nmp_nip29::action::ReactInGroupInput>(namespace, json)
+        }
         _ => None,
     }
 }

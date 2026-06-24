@@ -29,6 +29,7 @@ struct GroupChatMessage: Decodable, Identifiable, Equatable {
     let content: String
     let createdAt: UInt64
     let kind: UInt32
+    let rawJson: String
 }
 
 /// The serialised read model a group timeline consumes. `messages` is ordered

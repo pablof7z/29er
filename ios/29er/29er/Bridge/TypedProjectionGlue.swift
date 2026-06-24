@@ -32,7 +32,8 @@ enum TypedProjectionGlue {
                     pubkey: row.pubkey ?? "",
                     content: row.content ?? "",
                     createdAt: row.createdAt,
-                    kind: row.kind
+                    kind: row.kind,
+                    rawJson: row.rawJson ?? ""
                 )
             }
         )
@@ -97,7 +98,12 @@ enum TypedProjectionGlue {
             adminCount: row.adminCount,
             isPublic: row.public_,
             isOpen: row.open_,
-            isBranch: row.branch
+            isBranch: row.branch,
+            lastMessageId: row.lastMessageId,
+            lastMessagePubkey: row.lastMessagePubkey,
+            lastMessagePreview: row.lastMessagePreview,
+            lastMessageCreatedAt: row.lastMessageCreatedAt,
+            unreadCount: row.unreadCount
         )
     }
 }

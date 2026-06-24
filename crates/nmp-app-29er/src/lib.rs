@@ -35,9 +35,9 @@ mod group_tree;
 
 pub use ffi::{
     nmp_app_29er_close_group_discovery, nmp_app_29er_declare_consumed_projections,
-    nmp_app_29er_dispatch_action_bytes, nmp_app_29er_open_group_discovery,
-    nmp_app_29er_register, nmp_app_29er_register_group_chat, nmp_app_29er_unregister,
-    NmpRegisterStatus, TwentyNinerHandle,
+    nmp_app_29er_dispatch_action_bytes, nmp_app_29er_mark_group_read,
+    nmp_app_29er_open_group_discovery, nmp_app_29er_register, nmp_app_29er_register_group_chat,
+    nmp_app_29er_unregister, NmpRegisterStatus, TwentyNinerHandle,
 };
 // Re-export `nmp_free_string` so the 29er shell links it through this archive
 // the same way Chirp links it through `libnmp_app_chirp.a`.

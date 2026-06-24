@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import os.log
 
 private let gtLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupTreeView")
@@ -146,10 +147,9 @@ struct GroupTreeRow: View {
     }
 }
 
-/// Label content shared by branch and leaf rows. Shows the group's display
-/// name, a member-count badge, an admin-count badge, and public/closed
-/// indicators. Mirrors the S02 `MainScaffold` row presentation so the
-/// post-onboarding screen is visually continuous.
+/// Label content shared by branch and leaf rows. Swift renders the
+/// Rust-owned list read model: group name, latest direct kind:9 preview, and
+/// aggregate unread count for the group plus descendants.
 struct GroupRowLabel: View {
     let node: GroupTreeNode
 
@@ -173,29 +173,24 @@ struct GroupRowLabel: View {
 
                     Spacer(minLength: 8)
 
-                    if node.isBranch {
-                        Text("\(node.childIds.count)")
+                    if node.unreadCount > 0 {
+                        Text(unreadText)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.white)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(Color.blue))
+                            .monospacedDigit()
+                            .padding(.horizontal, node.unreadCount > 9 ? 7 : 6)
+                            .frame(minWidth: 22, minHeight: 22)
+                            .background(Capsule().fill(Color.accentColor))
                     }
                 }
 
                 HStack(spacing: 6) {
-                    Text(subtitle)
+                    Text(previewText)
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(node.hasLastMessage ? .secondary : .tertiary)
                         .lineLimit(1)
 
                     Spacer(minLength: 8)
-
-                    if !node.isOpen {
-                        Image(systemName: "lock.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
         }
@@ -211,19 +206,17 @@ struct GroupRowLabel: View {
         return value.isEmpty ? "#" : value
     }
 
-    private var subtitle: String {
-        var pieces: [String] = []
-        if node.memberCount > 0 {
-            pieces.append("\(node.memberCount) members")
+    private var previewText: String {
+        guard let preview = node.lastMessagePreview?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !preview.isEmpty
+        else {
+            return "No messages yet"
         }
-        if node.adminCount > 0 {
-            pieces.append("\(node.adminCount) admins")
-        }
-        pieces.append(node.isPublic ? "public" : "private")
-        if node.isBranch {
-            pieces.append(node.childIds.count == 1 ? "1 room" : "\(node.childIds.count) rooms")
-        }
-        return pieces.joined(separator: " • ")
+        return preview
+    }
+
+    private var unreadText: String {
+        node.unreadCount > 99 ? "99+" : "\(node.unreadCount)"
     }
 }
 
@@ -232,53 +225,488 @@ struct GroupTimelineView: View {
     @EnvironmentObject private var model: KernelModel
     let groupId: String
 
-    var body: some View {
-        Group {
-            if model.groupChat.messages.isEmpty {
-                EmptyStateView(
-                    title: "No Messages",
-                    message: "No live kind:9 messages have arrived for this group yet."
-                )
-            } else {
-                List(model.groupChat.messages) { message in
-                    GroupMessageRow(message: message)
+    @State private var draft = ""
+    @State private var pendingMessages: [PendingGroupMessage] = []
+    @FocusState private var composerFocused: Bool
+
+    private var node: GroupTreeNode? {
+        model.groupTree.allNodes[groupId]
+    }
+
+    private var title: String {
+        node?.displayName ?? groupId
+    }
+
+    private var visibleMessages: [GroupChatMessage] {
+        // Projection owns the newest-first data contract. Chat presentation
+        // reads chronologically so the newest item anchors above the composer.
+        Array(model.groupChat.messages.reversed())
+    }
+
+    private var trimmedDraft: String {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSend: Bool {
+        !trimmedDraft.isEmpty && node != nil && !model.kernelIsDead
+    }
+
+    private var mentionSuggestions: [String] {
+        let token = currentMentionToken(in: draft)
+        let authors = model.groupChat.messages
+            .map(\.pubkey)
+            .reduce(into: [String]()) { result, pubkey in
+                if !result.contains(pubkey) {
+                    result.append(pubkey)
                 }
-                .listStyle(.plain)
+            }
+        guard let token else { return [] }
+        let needle = token.lowercased()
+        return authors
+            .filter { needle.isEmpty || $0.shortHex.lowercased().contains(needle) || $0.lowercased().contains(needle) }
+            .prefix(4)
+            .map { $0 }
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            VStack(spacing: 0) {
+                if model.kernelIsDead {
+                    ErrorStateView(
+                        message: "The background service stopped. Relaunch the app to recover."
+                    )
+                } else if visibleMessages.isEmpty && pendingMessages.isEmpty {
+                    emptyChat
+                } else {
+                    messageStream(proxy: proxy)
+                }
+
+                composer
+            }
+            .background(Color(.systemBackground))
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    VStack(spacing: 1) {
+                        HStack(spacing: 5) {
+                            Text(title)
+                                .font(.headline)
+                                .lineLimit(1)
+
+                            if let node, !node.isOpen {
+                                Image(systemName: "lock.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if let node {
+                            Text(roomChromeSubtitle(node))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if let node {
+                        Label(
+                            node.memberCount == 1 ? "1 member" : "\(node.memberCount) members",
+                            systemImage: "person.2"
+                        )
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(node.memberCount == 1 ? "1 member" : "\(node.memberCount) members")
+                    }
+                }
+            }
+            .task(id: groupId) {
+                model.openGroupTimeline(groupId)
+            }
+            .onChange(of: model.groupChat.messages) { _, _ in
+                reconcilePending()
+                scrollToBottom(proxy)
+            }
+            .onChange(of: pendingMessages.count) { _, _ in
+                scrollToBottom(proxy)
             }
         }
-        .navigationTitle(groupId)
-        .navigationBarTitleDisplayMode(.inline)
-        .task(id: groupId) {
-            model.openGroupTimeline(groupId)
+    }
+
+    private var emptyChat: some View {
+        ContentUnavailableView(
+            "No messages yet",
+            systemImage: "bubble.left.and.bubble.right",
+            description: Text("Start the conversation in this NIP-29 group.")
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func messageStream(proxy: ScrollViewProxy) -> some View {
+        ScrollView {
+            LazyVStack(spacing: 10) {
+                ForEach(visibleMessages) { message in
+                    GroupMessageRow(
+                        message: message,
+                        isOwnMessage: message.pubkey == model.activeAccountPubkey,
+                        onReact: {
+                            model.reactToGroupMessage(
+                                groupId: groupId,
+                                eventId: message.id,
+                                eventAuthorPubkey: message.pubkey
+                            )
+                        }
+                    )
+                    .id(message.id)
+                }
+
+                ForEach(pendingMessages) { message in
+                    PendingMessageRow(message: message)
+                        .id(message.id)
+                }
+
+                Color.clear
+                    .frame(height: 1)
+                    .id("chat-bottom")
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
         }
+        .onAppear { scrollToBottom(proxy, animated: false) }
+    }
+
+    private var composer: some View {
+        VStack(spacing: 0) {
+            if !mentionSuggestions.isEmpty {
+                mentionSuggestionBar
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Message \(title)", text: $draft, axis: .vertical)
+                    .focused($composerFocused)
+                    .font(.body)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(Color(.separator), lineWidth: 0.5)
+                    )
+                    .accessibilityIdentifier("group-chat-message-editor")
+
+                Button(action: sendDraft) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 29, weight: .semibold))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
+                .accessibilityLabel("Send message")
+                .accessibilityIdentifier("group-chat-send-button")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+        }
+        .background(.regularMaterial)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private var mentionSuggestionBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(mentionSuggestions, id: \.self) { pubkey in
+                    Button {
+                        acceptMention(pubkey)
+                    } label: {
+                        Label(pubkey.shortHex, systemImage: "at")
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule().fill(Color(.tertiarySystemBackground))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Mention \(pubkey.shortHex)")
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .background(Color(.secondarySystemBackground))
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private func sendDraft() {
+        let text = trimmedDraft
+        guard canSend else { return }
+
+        let pending = PendingGroupMessage(content: text)
+        pendingMessages.append(pending)
+        let accepted = model.sendGroupMessage(groupId: groupId, content: text)
+        if !accepted, let index = pendingMessages.firstIndex(where: { $0.id == pending.id }) {
+            pendingMessages[index].state = .failed
+        }
+
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        draft = ""
+        composerFocused = true
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(12))
+            if let index = pendingMessages.firstIndex(where: { $0.id == pending.id }),
+               pendingMessages[index].state == .sending
+            {
+                pendingMessages[index].state = .queued
+            }
+        }
+    }
+
+    private func roomChromeSubtitle(_ node: GroupTreeNode) -> String {
+        var pieces: [String] = []
+        if node.memberCount > 0 {
+            pieces.append(node.memberCount == 1 ? "1 member" : "\(node.memberCount) members")
+        }
+        pieces.append(node.isOpen ? "open" : "closed")
+        return pieces.joined(separator: " • ")
+    }
+
+    private func reconcilePending() {
+        guard let activePubkey = model.activeAccountPubkey else { return }
+        let delivered = model.groupChat.messages.filter { $0.pubkey == activePubkey }
+        pendingMessages.removeAll { pending in
+            delivered.contains { delivered in
+                delivered.content == pending.content && delivered.createdAt >= pending.createdAtSeconds - 10
+            }
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        let action = {
+            proxy.scrollTo("chat-bottom", anchor: .bottom)
+        }
+        if animated {
+            withAnimation(.easeOut(duration: 0.22), action)
+        } else {
+            action()
+        }
+    }
+
+    private func currentMentionToken(in text: String) -> String? {
+        guard let last = text.split(separator: " ", omittingEmptySubsequences: false).last,
+              last.hasPrefix("@")
+        else { return nil }
+        return String(last.dropFirst())
+    }
+
+    private func acceptMention(_ pubkey: String) {
+        let mention = "@\(pubkey.shortHex)"
+        var parts = draft.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
+        if parts.isEmpty {
+            draft = mention + " "
+        } else {
+            parts[parts.count - 1] = mention
+            draft = parts.joined(separator: " ") + " "
+        }
+        composerFocused = true
     }
 }
 
 private struct GroupMessageRow: View {
     let message: GroupChatMessage
+    let isOwnMessage: Bool
+    let onReact: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Text(shortPubkey(message.pubkey))
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("kind \(message.kind)")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
+        HStack(alignment: .bottom, spacing: 8) {
+            if isOwnMessage {
+                Spacer(minLength: 42)
+            } else {
+                ChatAvatar(seed: message.pubkey)
             }
-            Text(message.content)
-                .font(.body)
-            Text("created_at \(message.createdAt)")
-                .font(.caption2.monospaced())
-                .foregroundStyle(.tertiary)
+
+            VStack(alignment: isOwnMessage ? .trailing : .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    if !isOwnMessage {
+                        Text(message.pubkey.shortHex)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Text(message.createdAt.relativeTimeFromUnixSeconds)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                Text(message.content)
+                    .font(.body)
+                    .foregroundStyle(isOwnMessage ? .white : .primary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(isOwnMessage ? Color.accentColor : Color(.secondarySystemBackground))
+                    )
+            }
+
+            if !isOwnMessage {
+                Spacer(minLength: 42)
+            }
         }
-        .padding(.vertical, 6)
+        .contextMenu {
+            Button(action: onReact) {
+                Label("React", systemImage: "heart")
+            }
+            Button {
+                UIPasteboard.general.string = message.content
+            } label: {
+                Label("Copy Text", systemImage: "doc.on.doc")
+            }
+            Button {
+                UIPasteboard.general.string = message.rawJson
+            } label: {
+                Label("Copy Raw JSON", systemImage: "curlybraces")
+            }
+            Button {
+                UIPasteboard.general.string = message.id
+            } label: {
+                Label("Copy Event ID", systemImage: "number")
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("group-chat-message-\(message.id)")
+    }
+}
+
+private struct PendingMessageRow: View {
+    let message: PendingGroupMessage
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Spacer(minLength: 42)
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(message.state.label)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+
+                Text(message.content)
+                    .font(.body)
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.accentColor.opacity(0.72))
+                    )
+            }
+        }
+        .accessibilityIdentifier("group-chat-pending-message-\(message.id.uuidString)")
+    }
+}
+
+private struct ChatAvatar: View {
+    let seed: String
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(seed.pubkeyColor)
+            Text(seed.displayInitials)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 32, height: 32)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct PendingGroupMessage: Identifiable, Equatable {
+    let id = UUID()
+    let content: String
+    let createdAt = Date()
+    var state: PendingState = .sending
+
+    var createdAtSeconds: UInt64 {
+        UInt64(createdAt.timeIntervalSince1970)
+    }
+}
+
+private enum PendingState: Equatable {
+    case sending
+    case queued
+    case failed
+
+    var label: String {
+        switch self {
+        case .sending:
+            return "Sending"
+        case .queued:
+            return "Queued"
+        case .failed:
+            return "Not sent"
+        }
+    }
+}
+
+private extension String {
+    var shortHex: String {
+        guard count > 16 else { return self }
+        return "\(prefix(8))…\(suffix(8))"
     }
 
-    private func shortPubkey(_ pubkey: String) -> String {
-        guard pubkey.count > 12 else { return pubkey }
-        return "\(pubkey.prefix(8))…\(pubkey.suffix(4))"
+    var displayInitials: String {
+        let words = split(separator: " ").prefix(2)
+        if words.count >= 2 {
+            return words.compactMap(\.first).map { String($0).uppercased() }.joined()
+        }
+        return count >= 2 ? String(prefix(2)).uppercased() : ".."
+    }
+
+    var pubkeyColor: Color {
+        var hash: UInt32 = 5381
+        for byte in utf8 {
+            hash = hash &* 33 &+ UInt32(byte)
+        }
+        return Color(
+            hue: Double(hash % 360) / 360.0,
+            saturation: 0.58,
+            brightness: 0.72
+        )
+    }
+}
+
+private func relativeFormatter() -> RelativeDateTimeFormatter {
+    let key = "TwentyNinerRelativeDateTimeFormatter"
+    if let existing = Thread.current.threadDictionary[key] as? RelativeDateTimeFormatter {
+        return existing
+    }
+    let formatter = RelativeDateTimeFormatter()
+    formatter.unitsStyle = .abbreviated
+    Thread.current.threadDictionary[key] = formatter
+    return formatter
+}
+
+private extension UInt64 {
+    var relativeTimeFromUnixSeconds: String {
+        let date = Date(timeIntervalSince1970: TimeInterval(self))
+        let now = Date()
+        if date >= now.addingTimeInterval(-5) {
+            return "now"
+        }
+        return relativeFormatter().localizedString(for: date, relativeTo: now)
     }
 }

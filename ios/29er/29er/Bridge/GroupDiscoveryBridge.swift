@@ -65,13 +65,23 @@ extension KernelHandle {
         gdLog.info("closed NIP-29 discovery session")
     }
 
+    /// Mark one group's direct messages read inside the Rust group-tree
+    /// projection. The tree projection owns unread aggregation; Swift only
+    /// reports the user's current read position.
+    func markGroupRead(_ handle: OpaquePointer?, groupId: String) {
+        guard let handle, !groupId.isEmpty else { return }
+        groupId.withCString {
+            nmp_app_29er_mark_group_read(UnsafeMutableRawPointer(handle), $0)
+        }
+    }
+
     /// Dispatch a `nmp.nip29.discover` action — push the relay-pinned
     /// `LogicalInterest` for kinds 39000/39001/39002 so the kernel opens a
     /// REQ for that relay's group catalog. Fire-and-forget; the catalog
     /// surfaces through the next `nmp.nip29.discovered_groups` snapshot tick.
     func discoverGroups(relayUrl: String) {
         let payload: [String: Any] = ["relay_url": relayUrl]
-        dispatchNip29("nmp.nip29.discover", payload: payload, label: "discoverGroups")
+        _ = dispatchNip29("nmp.nip29.discover", payload: payload, label: "discoverGroups")
     }
 
     /// Dispatch a `nmp.nip29.join` action — publish a kind:9021 join request
@@ -86,32 +96,118 @@ extension KernelHandle {
         if let reason, !reason.isEmpty {
             payload["reason"] = reason
         }
-        dispatchNip29("nmp.nip29.join", payload: payload, label: "joinGroup")
+        _ = dispatchNip29("nmp.nip29.join", payload: payload, label: "joinGroup")
     }
 
-    /// Shared fire-and-forget marshal for the discover / join action
-    /// dispatches. Encodes `payload` to JSON and routes it through the 29er
-    /// byte doorway `nmp_app_29er_dispatch_action_bytes`; the returned
-    /// correlation JSON is freed and ignored (outcomes surface through the
-    /// next snapshot tick). D6: a JSON-encode failure degrades to a logged
-    /// no-op.
+    /// Dispatch a `nmp.nip29.post_chat_message` action — publish a kind:9
+    /// message to `group`. Rust owns the event shape, tags, signing, and
+    /// relay pinning; Swift only marshals the draft text.
+    func postChatMessage(group: GroupId, content: String) -> Bool {
+        let payload: [String: Any] = [
+            "group": group.jsonObject,
+            "content": content,
+        ]
+        return dispatchNip29(
+            "nmp.nip29.post_chat_message",
+            payload: payload,
+            label: "postChatMessage"
+        )
+    }
+
+    /// Dispatch a `nmp.nip29.react_in_group` action — publish a host-pinned
+    /// kind:7 reaction to a message in `group`.
+    func reactToMessage(
+        group: GroupId,
+        eventId: String,
+        eventAuthorPubkey: String? = nil,
+        reaction: String = "+"
+    ) -> Bool {
+        var payload: [String: Any] = [
+            "group": group.jsonObject,
+            "target_event_id": eventId,
+            "content": reaction,
+        ]
+        if let eventAuthorPubkey, !eventAuthorPubkey.isEmpty {
+            payload["target_author_pubkey"] = eventAuthorPubkey
+        }
+        return dispatchNip29("nmp.nip29.react_in_group", payload: payload, label: "reactToMessage")
+    }
+
+    /// Shared marshal for NIP-29 action dispatches. Encodes `payload` to JSON
+    /// and routes it through the 29er byte doorway
+    /// `nmp_app_29er_dispatch_action_bytes`; returns true only when Rust
+    /// accepts the typed action envelope and returns a correlation id.
+    /// Snapshot/outbox state still owns eventual delivery.
     private func dispatchNip29(
         _ namespace: String, payload: [String: Any], label: String
-    ) {
+    ) -> Bool {
         guard
             let data = try? JSONSerialization.data(withJSONObject: payload),
             let json = String(data: data, encoding: .utf8)
         else {
             gdLog.error("\(label, privacy: .public): failed to encode action payload")
-            return
+            return false
         }
-        json.withCString { jsonPtr in
+        return json.withCString { jsonPtr in
             namespace.withCString { nsPtr in
-                if let ptr = nmp_app_29er_dispatch_action_bytes(raw, nsPtr, jsonPtr) {
-                    nmp_free_string(ptr)
+                guard let ptr = nmp_app_29er_dispatch_action_bytes(raw, nsPtr, jsonPtr) else {
+                    gdLog.error("\(label, privacy: .public): action dispatch returned null")
+                    return false
                 }
+                defer { nmp_free_string(ptr) }
+
+                let rawResult = String(cString: ptr)
+                guard let resultData = rawResult.data(using: .utf8),
+                      let result = try? JSONDecoder().decode(Nip29DispatchResult.self, from: resultData)
+                else {
+                    gdLog.error("\(label, privacy: .public): malformed dispatch result \(rawResult, privacy: .public)")
+                    return false
+                }
+
+                if let error = result.error, !error.isEmpty {
+                    gdLog.error("\(label, privacy: .public): dispatch rejected: \(error, privacy: .public)")
+                    return false
+                }
+                guard let correlationId = result.correlationId, !correlationId.isEmpty else {
+                    gdLog.error("\(label, privacy: .public): dispatch result had no correlation id")
+                    return false
+                }
+                return true
             }
         }
+    }
+}
+
+private struct Nip29DispatchResult: Decodable {
+    let correlationId: String?
+    let error: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case correlationId = "correlation_id"
+        case error
+    }
+}
+
+@MainActor
+extension KernelModel {
+    func sendGroupMessage(groupId: String, content: String) -> Bool {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let group = nip29GroupId(for: groupId) else { return false }
+        return kernel.postChatMessage(group: group, content: trimmed)
+    }
+
+    func reactToGroupMessage(groupId: String, eventId: String, eventAuthorPubkey: String) {
+        guard let group = nip29GroupId(for: groupId) else { return }
+        _ = kernel.reactToMessage(
+            group: group,
+            eventId: eventId,
+            eventAuthorPubkey: eventAuthorPubkey
+        )
+    }
+
+    func nip29GroupId(for groupId: String) -> GroupId? {
+        guard let node = groupTree.allNodes[groupId] else { return nil }
+        return GroupId(hostRelayUrl: node.hostRelayUrl, localId: node.groupId)
     }
 }
 
@@ -210,6 +306,10 @@ final class DiscoveredGroupsStore: ObservableObject {
         groups = []
         hostRelayUrl = ""
         isSearching = false
+    }
+
+    func markGroupRead(groupId: String) {
+        kernel.markGroupRead(discoveryHandle, groupId: groupId)
     }
 
     /// Mirror the latest kernel snapshot. Called from `KernelModel.apply`

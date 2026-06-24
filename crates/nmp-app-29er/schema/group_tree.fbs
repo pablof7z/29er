@@ -11,6 +11,11 @@ table GroupTreeNode {
   public:bool = true;
   open:bool = true;
   branch:bool = false;
+  last_message_id:string;
+  last_message_pubkey:string;
+  last_message_preview:string;
+  last_message_created_at:uint64;
+  unread_count:uint32;
 }
 
 table GroupTreeSnapshot {

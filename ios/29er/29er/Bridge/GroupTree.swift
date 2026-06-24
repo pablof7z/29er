@@ -11,9 +11,15 @@ struct GroupTreeNode: Identifiable, Equatable {
     let isPublic: Bool
     let isOpen: Bool
     let isBranch: Bool
+    let lastMessageId: String?
+    let lastMessagePubkey: String?
+    let lastMessagePreview: String?
+    let lastMessageCreatedAt: UInt64
+    let unreadCount: UInt32
 
     var id: String { groupId }
     var displayName: String { name?.isEmpty == false ? name! : groupId }
+    var hasLastMessage: Bool { lastMessageId?.isEmpty == false }
 }
 
 struct GroupTreeSnapshot: Equatable {

@@ -68,6 +68,9 @@ extension KernelModel {
         // store ignores stale snapshots from a previously-registered relay
         // during a switch.
         discoveredGroups.apply(snapshot: result.typedDiscoveredGroups)
+        if let selectedGroupId {
+            discoveredGroups.markGroupRead(groupId: selectedGroupId)
+        }
 
         kmApplyLog.debug(
             "NMP_PERF swift_apply rev=\(result.rev, privacy: .public) payload_bytes=\(result.payloadBytes, privacy: .public) decode_us=\(result.decodeMicros, privacy: .public)")

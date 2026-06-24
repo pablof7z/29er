@@ -25,6 +25,7 @@ public struct nmp_nip29_GroupChatMessage: FlatBufferTable, FlatbuffersVectorInit
     case content = 8
     case createdAt = 10
     case kind = 12
+    case rawJson = 14
     var v: Int32 { Int32(self.rawValue) }
     var p: VOffset { self.rawValue }
   }
@@ -37,12 +38,15 @@ public struct nmp_nip29_GroupChatMessage: FlatBufferTable, FlatbuffersVectorInit
   public var contentSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.content.v) }
   public var createdAt: UInt64 { let o = _accessor.offset(VTOFFSET.createdAt.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
   public var kind: UInt32 { let o = _accessor.offset(VTOFFSET.kind.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt32.self, at: o) }
-  public static func startGroupChatMessage(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 5) }
+  public var rawJson: String? { let o = _accessor.offset(VTOFFSET.rawJson.v); return o == 0 ? nil : _accessor.string(at: o) }
+  public var rawJsonSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.rawJson.v) }
+  public static func startGroupChatMessage(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 6) }
   public static func add(id: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: id, at: VTOFFSET.id.p) }
   public static func add(pubkey: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: pubkey, at: VTOFFSET.pubkey.p) }
   public static func add(content: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: content, at: VTOFFSET.content.p) }
   public static func add(createdAt: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: createdAt, def: 0, at: VTOFFSET.createdAt.p) }
   public static func add(kind: UInt32, _ fbb: inout FlatBufferBuilder) { fbb.add(element: kind, def: 0, at: VTOFFSET.kind.p) }
+  public static func add(rawJson: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: rawJson, at: VTOFFSET.rawJson.p) }
   public static func endGroupChatMessage(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createGroupChatMessage(
     _ fbb: inout FlatBufferBuilder,
@@ -50,7 +54,8 @@ public struct nmp_nip29_GroupChatMessage: FlatBufferTable, FlatbuffersVectorInit
     pubkeyOffset pubkey: Offset = Offset(),
     contentOffset content: Offset = Offset(),
     createdAt: UInt64 = 0,
-    kind: UInt32 = 0
+    kind: UInt32 = 0,
+    rawJsonOffset rawJson: Offset = Offset()
   ) -> Offset {
     let __start = nmp_nip29_GroupChatMessage.startGroupChatMessage(&fbb)
     nmp_nip29_GroupChatMessage.add(id: id, &fbb)
@@ -58,6 +63,7 @@ public struct nmp_nip29_GroupChatMessage: FlatBufferTable, FlatbuffersVectorInit
     nmp_nip29_GroupChatMessage.add(content: content, &fbb)
     nmp_nip29_GroupChatMessage.add(createdAt: createdAt, &fbb)
     nmp_nip29_GroupChatMessage.add(kind: kind, &fbb)
+    nmp_nip29_GroupChatMessage.add(rawJson: rawJson, &fbb)
     return nmp_nip29_GroupChatMessage.endGroupChatMessage(&fbb, start: __start)
   }
 
@@ -68,6 +74,7 @@ public struct nmp_nip29_GroupChatMessage: FlatBufferTable, FlatbuffersVectorInit
     try _v.visit(field: VTOFFSET.content.p, fieldName: "content", required: false, type: ForwardOffset<String>.self)
     try _v.visit(field: VTOFFSET.createdAt.p, fieldName: "createdAt", required: false, type: UInt64.self)
     try _v.visit(field: VTOFFSET.kind.p, fieldName: "kind", required: false, type: UInt32.self)
+    try _v.visit(field: VTOFFSET.rawJson.p, fieldName: "rawJson", required: false, type: ForwardOffset<String>.self)
     _v.finish()
   }
 }

@@ -39,7 +39,7 @@ extension KernelModel {
         // `nmp_app_29er_register`), but the bootstrap relay is a 29er product
         // decision — surfaced here so the shell keeps a single explicit
         // default (mirroring Chirp's `RelaySeeding.swift` posture).
-        kernel.addRelay(url: "wss://nip29.f7z.io", role: "outbox")
+        kernel.addRelay(url: "wss://nip29.f7z.io", role: "both")
         kernel.start(visibleLimit: visibleLimit, emitHz: emitHz)
         // S03 verification hook: auto-submit an nsec from the environment so
         // simulator runs can exercise the post-onboarding group tree without

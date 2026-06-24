@@ -77,6 +77,7 @@ final class KernelModel: ObservableObject {
 
     func openGroupTimeline(_ groupId: String) {
         selectedGroupId = groupId
+        discoveredGroups.markGroupRead(groupId: groupId)
         guard let node = groupTree.allNodes[groupId] else { return }
         kernel.registerGroupChat(groupId: GroupId(
             hostRelayUrl: node.hostRelayUrl,

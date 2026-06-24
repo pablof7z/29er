@@ -30,6 +30,11 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     case public_ = 18
     case open_ = 20
     case branch = 22
+    case lastMessageId = 24
+    case lastMessagePubkey = 26
+    case lastMessagePreview = 28
+    case lastMessageCreatedAt = 30
+    case unreadCount = 32
     var v: Int32 { Int32(self.rawValue) }
     var p: VOffset { self.rawValue }
   }
@@ -48,7 +53,15 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
   public var public_: Bool { let o = _accessor.offset(VTOFFSET.public_.v); return o == 0 ? true : _accessor.readBuffer(of: Bool.self, at: o) }
   public var open_: Bool { let o = _accessor.offset(VTOFFSET.open_.v); return o == 0 ? true : _accessor.readBuffer(of: Bool.self, at: o) }
   public var branch: Bool { let o = _accessor.offset(VTOFFSET.branch.v); return o == 0 ? false : _accessor.readBuffer(of: Bool.self, at: o) }
-  public static func startGroupTreeNode(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 10) }
+  public var lastMessageId: String? { let o = _accessor.offset(VTOFFSET.lastMessageId.v); return o == 0 ? nil : _accessor.string(at: o) }
+  public var lastMessageIdSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.lastMessageId.v) }
+  public var lastMessagePubkey: String? { let o = _accessor.offset(VTOFFSET.lastMessagePubkey.v); return o == 0 ? nil : _accessor.string(at: o) }
+  public var lastMessagePubkeySegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.lastMessagePubkey.v) }
+  public var lastMessagePreview: String? { let o = _accessor.offset(VTOFFSET.lastMessagePreview.v); return o == 0 ? nil : _accessor.string(at: o) }
+  public var lastMessagePreviewSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.lastMessagePreview.v) }
+  public var lastMessageCreatedAt: UInt64 { let o = _accessor.offset(VTOFFSET.lastMessageCreatedAt.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
+  public var unreadCount: UInt32 { let o = _accessor.offset(VTOFFSET.unreadCount.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt32.self, at: o) }
+  public static func startGroupTreeNode(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 15) }
   public static func add(groupId: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: groupId, at: VTOFFSET.groupId.p) }
   public static func add(hostRelayUrl: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: hostRelayUrl, at: VTOFFSET.hostRelayUrl.p) }
   public static func add(name: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: name, at: VTOFFSET.name.p) }
@@ -62,6 +75,11 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
    at: VTOFFSET.open_.p) }
   public static func add(branch: Bool, _ fbb: inout FlatBufferBuilder) { fbb.add(element: branch, def: false,
    at: VTOFFSET.branch.p) }
+  public static func add(lastMessageId: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: lastMessageId, at: VTOFFSET.lastMessageId.p) }
+  public static func add(lastMessagePubkey: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: lastMessagePubkey, at: VTOFFSET.lastMessagePubkey.p) }
+  public static func add(lastMessagePreview: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: lastMessagePreview, at: VTOFFSET.lastMessagePreview.p) }
+  public static func add(lastMessageCreatedAt: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: lastMessageCreatedAt, def: 0, at: VTOFFSET.lastMessageCreatedAt.p) }
+  public static func add(unreadCount: UInt32, _ fbb: inout FlatBufferBuilder) { fbb.add(element: unreadCount, def: 0, at: VTOFFSET.unreadCount.p) }
   public static func endGroupTreeNode(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); fbb.require(table: end, fields: [4, 6]); return end }
   public static func createGroupTreeNode(
     _ fbb: inout FlatBufferBuilder,
@@ -74,7 +92,12 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     adminCount: UInt32 = 0,
     public_: Bool = true,
     open_: Bool = true,
-    branch: Bool = false
+    branch: Bool = false,
+    lastMessageIdOffset lastMessageId: Offset = Offset(),
+    lastMessagePubkeyOffset lastMessagePubkey: Offset = Offset(),
+    lastMessagePreviewOffset lastMessagePreview: Offset = Offset(),
+    lastMessageCreatedAt: UInt64 = 0,
+    unreadCount: UInt32 = 0
   ) -> Offset {
     let __start = nmp_app_29er_GroupTreeNode.startGroupTreeNode(&fbb)
     nmp_app_29er_GroupTreeNode.add(groupId: groupId, &fbb)
@@ -87,6 +110,11 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     nmp_app_29er_GroupTreeNode.add(public_: public_, &fbb)
     nmp_app_29er_GroupTreeNode.add(open_: open_, &fbb)
     nmp_app_29er_GroupTreeNode.add(branch: branch, &fbb)
+    nmp_app_29er_GroupTreeNode.add(lastMessageId: lastMessageId, &fbb)
+    nmp_app_29er_GroupTreeNode.add(lastMessagePubkey: lastMessagePubkey, &fbb)
+    nmp_app_29er_GroupTreeNode.add(lastMessagePreview: lastMessagePreview, &fbb)
+    nmp_app_29er_GroupTreeNode.add(lastMessageCreatedAt: lastMessageCreatedAt, &fbb)
+    nmp_app_29er_GroupTreeNode.add(unreadCount: unreadCount, &fbb)
     return nmp_app_29er_GroupTreeNode.endGroupTreeNode(&fbb, start: __start)
   }
 
@@ -102,6 +130,11 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     try _v.visit(field: VTOFFSET.public_.p, fieldName: "public_", required: false, type: Bool.self)
     try _v.visit(field: VTOFFSET.open_.p, fieldName: "open_", required: false, type: Bool.self)
     try _v.visit(field: VTOFFSET.branch.p, fieldName: "branch", required: false, type: Bool.self)
+    try _v.visit(field: VTOFFSET.lastMessageId.p, fieldName: "lastMessageId", required: false, type: ForwardOffset<String>.self)
+    try _v.visit(field: VTOFFSET.lastMessagePubkey.p, fieldName: "lastMessagePubkey", required: false, type: ForwardOffset<String>.self)
+    try _v.visit(field: VTOFFSET.lastMessagePreview.p, fieldName: "lastMessagePreview", required: false, type: ForwardOffset<String>.self)
+    try _v.visit(field: VTOFFSET.lastMessageCreatedAt.p, fieldName: "lastMessageCreatedAt", required: false, type: UInt64.self)
+    try _v.visit(field: VTOFFSET.unreadCount.p, fieldName: "unreadCount", required: false, type: UInt32.self)
     _v.finish()
   }
 }
