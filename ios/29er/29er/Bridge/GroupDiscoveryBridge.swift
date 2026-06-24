@@ -23,6 +23,20 @@ private let gdLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupD
 // ── KernelHandle NIP-29 discovery + join extension (C-FFI surface) ────────
 
 extension KernelHandle {
+    /// Wire a NIP-29 `GroupChatProjection` for `groupId` into the kernel. Pure
+    /// consumption: messages surface under `nmp.nip29.group_chat` on snapshots.
+    func registerGroupChat(groupId: GroupId) {
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: groupId.jsonObject),
+            let json = String(data: data, encoding: .utf8)
+        else {
+            gdLog.error("registerGroupChat: failed to encode GroupId JSON")
+            return
+        }
+        json.withCString { nmp_app_29er_register_group_chat(raw, $0) }
+        gdLog.info("registered NIP-29 group chat projection for \(groupId.localId, privacy: .public)")
+    }
+
     /// Open a NIP-29 group-discovery session for `hostRelayUrl`.
     ///
     /// Returns an opaque handle the caller MUST pass to

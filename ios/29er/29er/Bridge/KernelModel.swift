@@ -45,6 +45,10 @@ final class KernelModel: ObservableObject {
     /// this from the NIP-29 discovery projection; Swift only renders it.
     @Published var typedGroupTree: GroupTreeSnapshot?
 
+    /// Typed `nmp.nip29.group_chat` sidecar (`NGCS`). Rust owns the selected
+    /// group's event filter and newest-first ordering; Swift renders it.
+    @Published var typedGroupChat: GroupChatSnapshot?
+
     /// Typed `active_account` sidecar (`KACT`). `nil` ⇒ no active account on
     /// the last tick (startup before sign-in). Read through the
     /// `activeAccountPubkey` accessor.
@@ -69,6 +73,15 @@ final class KernelModel: ObservableObject {
     /// no-op for SwiftUI's diffing.
     func selectGroup(_ groupId: String) {
         selectedGroupId = groupId
+    }
+
+    func openGroupTimeline(_ groupId: String) {
+        selectedGroupId = groupId
+        guard let node = groupTree.allNodes[groupId] else { return }
+        kernel.registerGroupChat(groupId: GroupId(
+            hostRelayUrl: node.hostRelayUrl,
+            localId: node.groupId
+        ))
     }
 
     // ── Local mutable state ──────────────────────────────────────────────

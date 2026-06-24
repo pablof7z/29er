@@ -19,6 +19,26 @@ struct GroupId: Hashable, Equatable {
     }
 }
 
+// ─── NIP-29 group-chat read model ─────────────────────────────────────────
+
+/// One rendered NIP-29 group-chat message. Raw protocol values only; Rust owns
+/// filtering, ordering, and event-kind semantics.
+struct GroupChatMessage: Decodable, Identifiable, Equatable {
+    let id: String
+    let pubkey: String
+    let content: String
+    let createdAt: UInt64
+    let kind: UInt32
+}
+
+/// The serialised read model a group timeline consumes. `messages` is ordered
+/// newest-first by `GroupChatProjection`; Swift does not re-sort.
+struct GroupChatSnapshot: Decodable, Equatable {
+    let messages: [GroupChatMessage]
+
+    static let empty = GroupChatSnapshot(messages: [])
+}
+
 /// One discovered NIP-29 group, ready for the discover/join screen to render.
 ///
 /// Raw protocol data only (ADR-0032). Presentation-layer fields such as

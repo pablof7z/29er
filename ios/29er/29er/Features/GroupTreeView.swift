@@ -51,7 +51,7 @@ struct GroupTreeView: View {
         .navigationTitle(navigationTitle(tree: tree))
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: String.self) { groupId in
-            TimelinePlaceholder(groupId: groupId)
+            GroupTimelineView(groupId: groupId)
         }
         .task {
             if model.discoveredGroups.hostRelayUrl.isEmpty {
@@ -141,26 +141,58 @@ struct GroupRowLabel: View {
     }
 }
 
-/// Placeholder destination pushed by `NavigationLink(value:)`. S04 replaces
-/// this with the real kind:9 group timeline.
-struct TimelinePlaceholder: View {
+/// Projection-backed destination pushed by `NavigationLink(value:)`.
+struct GroupTimelineView: View {
+    @EnvironmentObject private var model: KernelModel
     let groupId: String
 
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "text.bubble")
-                .font(.system(size: 48, weight: .light))
-                .foregroundStyle(.secondary)
-            Text("Timeline for \(groupId)")
-                .font(.headline)
-            Text("S04 wires the live kind:9 group timeline here.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+        Group {
+            if model.groupChat.messages.isEmpty {
+                EmptyStateView(
+                    title: "No Messages",
+                    message: "No live kind:9 messages have arrived for this group yet."
+                )
+            } else {
+                List(model.groupChat.messages) { message in
+                    GroupMessageRow(message: message)
+                }
+                .listStyle(.plain)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle(groupId)
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: groupId) {
+            model.openGroupTimeline(groupId)
+        }
+    }
+}
+
+private struct GroupMessageRow: View {
+    let message: GroupChatMessage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(shortPubkey(message.pubkey))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("kind \(message.kind)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+            }
+            Text(message.content)
+                .font(.body)
+            Text("created_at \(message.createdAt)")
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func shortPubkey(_ pubkey: String) -> String {
+        guard pubkey.count > 12 else { return pubkey }
+        return "\(pubkey.prefix(8))…\(pubkey.suffix(4))"
     }
 }

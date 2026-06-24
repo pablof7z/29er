@@ -17,6 +17,9 @@ struct KernelUpdateResult {
     /// Typed app-owned `nmp.29er.group_tree` projection decode (`N29T`). `nil`
     /// ⇒ discovery has not been opened or the sidecar was absent/malformed.
     let typedGroupTree: GroupTreeSnapshot?
+    /// Typed `nmp.nip29.group_chat` projection decode (`NGCS`). `nil` ⇒ no
+    /// group timeline has been registered or the sidecar was absent/malformed.
+    let typedGroupChat: GroupChatSnapshot?
     /// Typed `active_account` projection decode (`KACT`). `nil` ⇒ no active
     /// account on this tick.
     let typedActiveAccount: String?

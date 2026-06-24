@@ -22,6 +22,22 @@ enum TypedProjectionGlue {
         reader.hasActiveAccount ? (reader.pubkey ?? "") : nil
     }
 
+    // MARK: nmp.nip29.group_chat → GroupChatSnapshot
+
+    static func groupChat(_ reader: nmp_nip29_GroupChatSnapshot) -> GroupChatSnapshot {
+        GroupChatSnapshot(
+            messages: reader.messages.map { row in
+                GroupChatMessage(
+                    id: row.id ?? "",
+                    pubkey: row.pubkey ?? "",
+                    content: row.content ?? "",
+                    createdAt: row.createdAt,
+                    kind: row.kind
+                )
+            }
+        )
+    }
+
     // MARK: nmp.nip29.discovered_groups → DiscoveredGroupsSnapshot
 
     /// Map the typed `nmp.nip29.discovered_groups` sidecar (`NDGS` /

@@ -67,6 +67,28 @@ enum TypedDiscoveredGroupsDecoder {
     }
 }
 
+enum TypedGroupChatDecoder {
+    static let key = "nmp.nip29.group_chat"
+    static let schemaId = "nmp.nip29.group_chat"
+    static let fileIdentifier = "NGCS"
+
+    static func decode(from projections: [TypedProjectionEnvelope]) -> GroupChatSnapshot? {
+        guard let projection = projections.first(where: {
+            $0.key == key && $0.schemaId == schemaId
+        }), !projection.payload.isEmpty else {
+            return nil
+        }
+        return decode(bytes: projection.payload)
+    }
+
+    static func decode(bytes: Data) -> GroupChatSnapshot? {
+        guard !bytes.isEmpty else { return nil }
+        var buffer = ByteBuffer(data: bytes)
+        let reader: nmp_nip29_GroupChatSnapshot = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.groupChat(reader)
+    }
+}
+
 enum TypedGroupTreeDecoder {
     static let key = "nmp.29er.group_tree"
     static let schemaId = "nmp.29er.group_tree"

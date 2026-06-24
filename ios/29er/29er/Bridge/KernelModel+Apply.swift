@@ -24,6 +24,7 @@ extension KernelModel {
         // (mirroring Chirp's `KernelModel+Apply.swift`).
         typedDiscoveredGroups = result.typedDiscoveredGroups
         typedGroupTree = result.typedGroupTree
+        typedGroupChat = result.typedGroupChat
         typedActiveAccount = result.typedActiveAccount
 
         // S02 — derive `identityState` from the `active_account` typed
@@ -74,6 +75,7 @@ extension KernelModel {
     func clearTypedProjections() {
         typedDiscoveredGroups = nil
         typedGroupTree = nil
+        typedGroupChat = nil
         typedActiveAccount = nil
     }
 
@@ -92,5 +94,9 @@ extension KernelModel {
 
     var groupTree: GroupTreeSnapshot {
         typedGroupTree ?? .empty
+    }
+
+    var groupChat: GroupChatSnapshot {
+        typedGroupChat ?? .empty
     }
 }
