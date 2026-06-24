@@ -32,8 +32,7 @@ enum TypedProjectionGlue {
                     pubkey: row.pubkey ?? "",
                     content: row.content ?? "",
                     createdAt: row.createdAt,
-                    kind: row.kind,
-                    rawJson: row.rawJson ?? ""
+                    kind: row.kind
                 )
             }
         )

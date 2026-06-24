@@ -575,11 +575,6 @@ private struct GroupMessageRow: View {
                 Label("Copy Text", systemImage: "doc.on.doc")
             }
             Button {
-                UIPasteboard.general.string = message.rawJson
-            } label: {
-                Label("Copy Raw JSON", systemImage: "curlybraces")
-            }
-            Button {
                 UIPasteboard.general.string = message.id
             } label: {
                 Label("Copy Event ID", systemImage: "number")
