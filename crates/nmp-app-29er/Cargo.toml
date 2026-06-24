@@ -19,6 +19,7 @@ default = ["lmdb-backend"]
 lmdb-backend = ["nmp-core/lmdb-backend"]
 
 [dependencies]
+flatbuffers = { workspace = true }
 nmp-core = { workspace = true }
 nmp-ffi = { workspace = true, features = ["signer-broker"] }
 nmp-defaults = { workspace = true }

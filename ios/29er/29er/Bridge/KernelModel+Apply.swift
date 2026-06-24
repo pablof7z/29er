@@ -23,6 +23,7 @@ extension KernelModel {
         // more projections, wire the cache-merge layer + the `changedKeys` gate
         // (mirroring Chirp's `KernelModel+Apply.swift`).
         typedDiscoveredGroups = result.typedDiscoveredGroups
+        typedGroupTree = result.typedGroupTree
         typedActiveAccount = result.typedActiveAccount
 
         // S02 — derive `identityState` from the `active_account` typed
@@ -72,6 +73,7 @@ extension KernelModel {
     /// reassigns each slot, so this is a transient blank, not a steady state.
     func clearTypedProjections() {
         typedDiscoveredGroups = nil
+        typedGroupTree = nil
         typedActiveAccount = nil
     }
 
@@ -86,5 +88,9 @@ extension KernelModel {
     /// `typedDiscoveredGroups` slot.
     var discoveredGroupsSnapshot: DiscoveredGroupsSnapshot? {
         typedDiscoveredGroups
+    }
+
+    var groupTree: GroupTreeSnapshot {
+        typedGroupTree ?? .empty
     }
 }

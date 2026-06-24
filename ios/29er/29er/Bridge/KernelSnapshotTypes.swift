@@ -28,6 +28,11 @@ struct GroupId: Hashable, Equatable {
 /// No explicit `CodingKeys`: the top-level `.convertFromSnakeCase` strategy
 /// maps `"group_id"` / `"host_relay_url"` / `"member_count"` / `"admin_count"`
 /// automatically.
+///
+/// `parent` / `children` are populated from the subgroups PR #2319
+/// `parent`/`child` tags on `kind:39000`. Both default to empty/`nil` when the
+/// relay has not published them — the S03 group tree walker reconciles the two
+/// directions into a forest (see `GroupTree.derive`).
 struct DiscoveredGroup: Decodable, Identifiable, Equatable {
     /// The NIP-29 in-relay group id (the `["d", _]` tag value). Stable
     /// list identity inside the discover screen.
@@ -43,6 +48,14 @@ struct DiscoveredGroup: Decodable, Identifiable, Equatable {
     let adminCount: UInt32
     let `public`: Bool
     let open: Bool
+    /// `["parent", _]` tag value on the latest 39000, if any. Subgroups
+    /// PR #2319: a group without a `parent` tag is a root; the rest are
+    /// grouped under the `d` referenced by their `parent` tag.
+    let parent: String?
+    /// `["child", _]` tag values on the latest 39000. Subgroups PR #2319:
+    /// the declared child group ids. Empty until a 39000 carrying `child`
+    /// tags arrives.
+    let children: [String]
 
     var id: String { "\(hostRelayUrl)|\(groupId)" }
 }

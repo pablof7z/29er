@@ -769,6 +769,7 @@ checksum = "f0efe882e02d206d8d279c20eb40e03baf7cb5136a1476dc084a324fbc3ec42d"
 name = "nmp-app-29er"
 version = "0.1.0"
 dependencies = [
+ "flatbuffers",
  "nmp-core",
  "nmp-defaults",
  "nmp-ffi",

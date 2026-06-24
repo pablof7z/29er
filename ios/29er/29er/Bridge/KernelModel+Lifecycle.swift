@@ -41,6 +41,14 @@ extension KernelModel {
         // default (mirroring Chirp's `RelaySeeding.swift` posture).
         kernel.addRelay(url: "wss://nip29.f7z.io", role: "outbox")
         kernel.start(visibleLimit: visibleLimit, emitHz: emitHz)
+        // S03 verification hook: auto-submit an nsec from the environment so
+        // simulator runs can exercise the post-onboarding group tree without
+        // driving the UI. Debug-only — never set in production. The nsec is
+        // a throwaway generated with `nak key generate`.
+        if let autoNsec = ProcessInfo.processInfo.environment["S03_AUTO_SIGN_IN_NSEC"],
+           autoNsec.hasPrefix("nsec1") {
+            submitNsec(autoNsec)
+        }
     }
 
     func stop() {

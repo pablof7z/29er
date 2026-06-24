@@ -4,14 +4,20 @@
 //! chat, dispatch action bytes, declare consumed projections, unregister.
 
 use std::ffi::c_char;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use nmp_core::dispatch_envelope::{encode_dispatch_envelope, DISPATCH_ENVELOPE_SCHEMA_VERSION};
-use nmp_core::substrate::ActionPayload;
+use nmp_core::substrate::{ActionPayload, EventObserverRegistrar, SnapshotProjectionRegistrar};
+use nmp_core::{KernelEventObserver, KernelEventObserverId, TypedProjectionData};
 use nmp_ffi::{nmp_app_dispatch_action_bytes, NmpApp};
 use nmp_nip29::group_id::GroupId;
-use nmp_nip29::register::{
-    close_group_discovery, open_group_discovery, wire_group_chat, GroupDiscoveryHandle,
+use nmp_nip29::projection::DiscoveredGroupsProjection;
+use nmp_nip29::register::wire_group_chat;
+
+use crate::group_tree::{
+    encode_group_tree_snapshot, GROUP_TREE_FILE_IDENTIFIER, GROUP_TREE_SCHEMA_ID,
+    GROUP_TREE_SCHEMA_VERSION,
 };
 
 /// Opaque handle returned by [`nmp_app_29er_register`] and consumed by
@@ -19,6 +25,14 @@ use nmp_nip29::register::{
 pub struct TwentyNinerHandle {
     app: *mut NmpApp,
 }
+
+pub struct TwentyNinerGroupDiscoveryHandle {
+    observer_id: KernelEventObserverId,
+    teardown_fn: Box<dyn FnOnce(KernelEventObserverId) + Send>,
+}
+
+unsafe impl Send for TwentyNinerGroupDiscoveryHandle {}
+unsafe impl Sync for TwentyNinerGroupDiscoveryHandle {}
 
 // SAFETY: `TwentyNinerHandle` only carries a `*mut NmpApp` whose lifetime is
 // managed by the caller (the Swift shell frees the app via `nmp_app_free`
@@ -221,7 +235,7 @@ pub extern "C" fn nmp_app_29er_register_group_chat(
 pub extern "C" fn nmp_app_29er_open_group_discovery(
     app: *mut NmpApp,
     host_relay_url: *const c_char,
-) -> *mut GroupDiscoveryHandle {
+) -> *mut TwentyNinerGroupDiscoveryHandle {
     if app.is_null() {
         return std::ptr::null_mut();
     }
@@ -233,10 +247,68 @@ pub extern "C" fn nmp_app_29er_open_group_discovery(
         return std::ptr::null_mut();
     };
 
-    match open_group_discovery(app_ref, relay_url) {
+    match open_group_discovery_with_tree(app_ref, relay_url) {
         Some(handle) => Box::into_raw(Box::new(handle)),
         None => std::ptr::null_mut(),
     }
+}
+
+fn open_group_discovery_with_tree<A>(
+    app: &A,
+    relay_url: String,
+) -> Option<TwentyNinerGroupDiscoveryHandle>
+where
+    A: EventObserverRegistrar + SnapshotProjectionRegistrar + Send + Sync,
+{
+    let projection = Arc::new(DiscoveredGroupsProjection::new(relay_url));
+    let observer_id =
+        app.register_event_observer(Arc::clone(&projection) as Arc<dyn KernelEventObserver>);
+    if observer_id.0 == 0 {
+        return None;
+    }
+
+    let discovered_projection = Arc::clone(&projection);
+    app.register_typed_snapshot_projection("nmp.nip29.discovered_groups", move || {
+        let snapshot = discovered_projection.snapshot();
+        Some(TypedProjectionData {
+            key: "nmp.nip29.discovered_groups".to_string(),
+            schema_id: nmp_nip29::wire::discovered_groups_fb::DISCOVERED_GROUPS_SCHEMA_ID
+                .to_string(),
+            schema_version: nmp_nip29::wire::discovered_groups_fb::DISCOVERED_GROUPS_SCHEMA_VERSION,
+            file_identifier: String::from_utf8_lossy(
+                nmp_nip29::wire::discovered_groups_fb::DISCOVERED_GROUPS_FILE_IDENTIFIER,
+            )
+            .into_owned(),
+            payload: nmp_nip29::wire::discovered_groups_fb::encode_discovered_groups_snapshot(
+                &snapshot,
+            ),
+            ..Default::default()
+        })
+    });
+
+    let tree_projection = Arc::clone(&projection);
+    app.register_typed_snapshot_projection("nmp.29er.group_tree", move || {
+        let snapshot = tree_projection.snapshot();
+        Some(TypedProjectionData {
+            key: "nmp.29er.group_tree".to_string(),
+            schema_id: GROUP_TREE_SCHEMA_ID.to_string(),
+            schema_version: GROUP_TREE_SCHEMA_VERSION,
+            file_identifier: String::from_utf8_lossy(GROUP_TREE_FILE_IDENTIFIER).into_owned(),
+            payload: encode_group_tree_snapshot(&snapshot),
+            ..Default::default()
+        })
+    });
+
+    let app_addr = (app as *const A) as usize;
+    Some(TwentyNinerGroupDiscoveryHandle {
+        observer_id,
+        teardown_fn: Box::new(move |id| {
+            let app = unsafe { &*(app_addr as *const A) };
+            app.unregister_event_observer(id);
+            app.remove_snapshot_projection("nmp.nip29.discovered_groups");
+            app.remove_snapshot_projection("nmp.29er.group_tree");
+        }),
+    })
 }
 
 /// Close a NIP-29 group-discovery session opened by
@@ -255,7 +327,9 @@ pub extern "C" fn nmp_app_29er_open_group_discovery(
 /// `nmp_app_29er_open_group_discovery` or null.
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub extern "C" fn nmp_app_29er_close_group_discovery(handle: *mut GroupDiscoveryHandle) {
+pub extern "C" fn nmp_app_29er_close_group_discovery(
+    handle: *mut TwentyNinerGroupDiscoveryHandle,
+) {
     if handle.is_null() {
         return;
     }
@@ -264,7 +338,7 @@ pub extern "C" fn nmp_app_29er_close_group_discovery(handle: *mut GroupDiscovery
     // call. `Box::from_raw` takes ownership; `close_group_discovery` tears
     // down the observer + projection before the box is dropped.
     let handle = unsafe { *Box::from_raw(handle) };
-    close_group_discovery(handle);
+    (handle.teardown_fn)(handle.observer_id);
 }
 
 /// Process-local correlation-id source for 29er's byte-doorway dispatches.

@@ -13,14 +13,18 @@
 		1B936EDC3EB01641F7D22735 /* KernelUpdateFrameDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6042A9266ACB4F8A1BAC1E3 /* KernelUpdateFrameDecoder.swift */; };
 		299322783E4F97821BCDEA75 /* TypedProjectionGlue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57C6389FB46990ABFC8B387E /* TypedProjectionGlue.swift */; };
 		2AC60DBC2F60DE169BDAE1AC /* KernelModel+Apply.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBF03993A560914185BA3E8A /* KernelModel+Apply.swift */; };
+		2E3B9C62EDF8200593D23781 /* GroupTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99696704A85A57CC885F55AF /* GroupTree.swift */; };
 		42698E6B26592C89A9A89CDA /* KeychainCapability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91C35535B6E84575DDC847F5 /* KeychainCapability.swift */; };
 		502091213898ECEAF798A254 /* DiscoveredGroups.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F0838D20014D25E25BFE6D7 /* DiscoveredGroups.generated.swift */; };
 		78A47E212755CAECACF88B67 /* KernelUpdateTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398E1727FD663BB294EBBFC8 /* KernelUpdateTypes.swift */; };
 		86BF88172B8EBF6FEE37D0BB /* KernelModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44EFA1C646FBE80DAC3D74A /* KernelModel.swift */; };
 		8CC741A425C070F2840643E6 /* KernelModel+Lifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FEB12768B0FD8100165158C /* KernelModel+Lifecycle.swift */; };
 		98E1E66EA87E5D5B6533C34B /* ActiveAccount.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E4D7ADA8368CFA74D520CB /* ActiveAccount.generated.swift */; };
+		A3C9A4EBF2FD6DD86860148A /* DataStates.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE6218BA6F39080D94199D8C /* DataStates.swift */; };
+		A9019E2169DEFAE360008EAF /* GroupTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3574649692B54614314DB3FB /* GroupTreeView.swift */; };
 		CB6817C74046035284BDFB8C /* TypedProjectionDecoders.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40EB7A574E4557A226148EE7 /* TypedProjectionDecoders.swift */; };
 		CEECD7F72DD05BE9847DF3AA /* KernelSnapshotTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9E3A95744A539A755CCD359 /* KernelSnapshotTypes.swift */; };
+		DC9DF228B6B708C8A180DF5D /* group_tree_generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = C93BB1F3B7983052316B136A /* group_tree_generated.swift */; };
 		E9A83B8AD108D592CB4581D8 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC0F99E54E0D07D0CD105A5E /* OnboardingView.swift */; };
 		ED2181C6AE7C7BD804C1294B /* TwentyNinerCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = B145FF42AA446276AEFA3B3D /* TwentyNinerCapabilities.swift */; };
 		F022F5F5AD1D3FEB8A3C95F1 /* GroupDiscoveryBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A9DE15067F695623D8E628E /* GroupDiscoveryBridge.swift */; };
@@ -30,6 +34,7 @@
 /* Begin PBXFileReference section */
 		1DB0967B8681681998F8975C /* NmpCore.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NmpCore.h; sourceTree = "<group>"; };
 		2F0838D20014D25E25BFE6D7 /* DiscoveredGroups.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveredGroups.generated.swift; sourceTree = "<group>"; };
+		3574649692B54614314DB3FB /* GroupTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupTreeView.swift; sourceTree = "<group>"; };
 		398E1727FD663BB294EBBFC8 /* KernelUpdateTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KernelUpdateTypes.swift; sourceTree = "<group>"; };
 		40EB7A574E4557A226148EE7 /* TypedProjectionDecoders.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TypedProjectionDecoders.swift; sourceTree = "<group>"; };
 		4FEB12768B0FD8100165158C /* KernelModel+Lifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KernelModel+Lifecycle.swift"; sourceTree = "<group>"; };
@@ -39,9 +44,11 @@
 		5A9DE15067F695623D8E628E /* GroupDiscoveryBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupDiscoveryBridge.swift; sourceTree = "<group>"; };
 		7092CE6CC5D073A49E895172 /* 29er.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = 29er.entitlements; sourceTree = "<group>"; };
 		91C35535B6E84575DDC847F5 /* KeychainCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCapability.swift; sourceTree = "<group>"; };
+		99696704A85A57CC885F55AF /* GroupTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupTree.swift; sourceTree = "<group>"; };
 		A44EFA1C646FBE80DAC3D74A /* KernelModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KernelModel.swift; sourceTree = "<group>"; };
 		B145FF42AA446276AEFA3B3D /* TwentyNinerCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwentyNinerCapabilities.swift; sourceTree = "<group>"; };
 		BAE20A89BDA40FFA8C355E18 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		C93BB1F3B7983052316B136A /* group_tree_generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = group_tree_generated.swift; sourceTree = "<group>"; };
 		D0A8194E83F64EFB225496D9 /* KernelBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KernelBridge.swift; sourceTree = "<group>"; };
 		E517E4888FC04BDFBA36B1C3 /* NmpUpdate.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NmpUpdate.generated.swift; sourceTree = "<group>"; };
 		E8E4D7ADA8368CFA74D520CB /* ActiveAccount.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveAccount.generated.swift; sourceTree = "<group>"; };
@@ -49,6 +56,7 @@
 		EBF03993A560914185BA3E8A /* KernelModel+Apply.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KernelModel+Apply.swift"; sourceTree = "<group>"; };
 		F6042A9266ACB4F8A1BAC1E3 /* KernelUpdateFrameDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KernelUpdateFrameDecoder.swift; sourceTree = "<group>"; };
 		FC0F99E54E0D07D0CD105A5E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		FE6218BA6F39080D94199D8C /* DataStates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataStates.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -67,6 +75,7 @@
 			isa = PBXGroup;
 			children = (
 				5A9DE15067F695623D8E628E /* GroupDiscoveryBridge.swift */,
+				99696704A85A57CC885F55AF /* GroupTree.swift */,
 				D0A8194E83F64EFB225496D9 /* KernelBridge.swift */,
 				A44EFA1C646FBE80DAC3D74A /* KernelModel.swift */,
 				EBF03993A560914185BA3E8A /* KernelModel+Apply.swift */,
@@ -93,6 +102,8 @@
 		5CE47AC93F41DF0AA3BCDFA7 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				FE6218BA6F39080D94199D8C /* DataStates.swift */,
+				3574649692B54614314DB3FB /* GroupTreeView.swift */,
 				FC0F99E54E0D07D0CD105A5E /* OnboardingView.swift */,
 			);
 			path = Features;
@@ -133,6 +144,7 @@
 			children = (
 				E8E4D7ADA8368CFA74D520CB /* ActiveAccount.generated.swift */,
 				2F0838D20014D25E25BFE6D7 /* DiscoveredGroups.generated.swift */,
+				C93BB1F3B7983052316B136A /* group_tree_generated.swift */,
 				E517E4888FC04BDFBA36B1C3 /* NmpUpdate.generated.swift */,
 			);
 			path = Generated;
@@ -203,8 +215,11 @@
 			files = (
 				98E1E66EA87E5D5B6533C34B /* ActiveAccount.generated.swift in Sources */,
 				105B3B5416BFBE5FCCBFB4AE /* App.swift in Sources */,
+				A3C9A4EBF2FD6DD86860148A /* DataStates.swift in Sources */,
 				502091213898ECEAF798A254 /* DiscoveredGroups.generated.swift in Sources */,
 				F022F5F5AD1D3FEB8A3C95F1 /* GroupDiscoveryBridge.swift in Sources */,
+				2E3B9C62EDF8200593D23781 /* GroupTree.swift in Sources */,
+				A9019E2169DEFAE360008EAF /* GroupTreeView.swift in Sources */,
 				F34F6188F65585822D6F52D3 /* KernelBridge.swift in Sources */,
 				2AC60DBC2F60DE169BDAE1AC /* KernelModel+Apply.swift in Sources */,
 				8CC741A425C070F2840643E6 /* KernelModel+Lifecycle.swift in Sources */,
@@ -218,6 +233,7 @@
 				ED2181C6AE7C7BD804C1294B /* TwentyNinerCapabilities.swift in Sources */,
 				CB6817C74046035284BDFB8C /* TypedProjectionDecoders.swift in Sources */,
 				299322783E4F97821BCDEA75 /* TypedProjectionGlue.swift in Sources */,
+				DC9DF228B6B708C8A180DF5D /* group_tree_generated.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -41,6 +41,10 @@ final class KernelModel: ObservableObject {
     /// the last tick. Read through the `discoveredGroups` accessor.
     @Published var typedDiscoveredGroups: DiscoveredGroupsSnapshot?
 
+    /// Typed app-owned `nmp.29er.group_tree` sidecar (`N29T`). Rust derives
+    /// this from the NIP-29 discovery projection; Swift only renders it.
+    @Published var typedGroupTree: GroupTreeSnapshot?
+
     /// Typed `active_account` sidecar (`KACT`). `nil` ⇒ no active account on
     /// the last tick (startup before sign-in). Read through the
     /// `activeAccountPubkey` accessor.
@@ -52,6 +56,20 @@ final class KernelModel: ObservableObject {
     /// plus the local submit/load transitions driven by `submitNsec`. See
     /// `IdentityState` for the state machine.
     @Published var identityState: IdentityState = .unknown
+
+    // ── Group-tree selection (S03) ────────────────────────────────────────
+
+    /// The currently selected group id in the group-tree navigation, or
+    /// `nil` when nothing is selected. Selection is UI state only; group tree
+    /// data comes from the Rust `nmp.29er.group_tree` projection.
+    @Published var selectedGroupId: String?
+
+    /// Set the selected group id. Called from `GroupTreeRow`'s
+    /// `NavigationLink` tap. Idempotent — setting the same id twice is a
+    /// no-op for SwiftUI's diffing.
+    func selectGroup(_ groupId: String) {
+        selectedGroupId = groupId
+    }
 
     // ── Local mutable state ──────────────────────────────────────────────
 

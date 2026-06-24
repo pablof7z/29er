@@ -31,6 +31,7 @@
 //!   explicit status codes for ordering errors.
 
 pub mod ffi;
+mod group_tree;
 
 pub use ffi::{
     nmp_app_29er_close_group_discovery, nmp_app_29er_declare_consumed_projections,

@@ -80,55 +80,18 @@ struct RootView: View {
     }
 }
 
-/// S02 authenticated app shell — the scaffold S03/S04 will fill with the
-/// real expandable NavigationStack group tree. For now it renders the live
-/// discovered-groups list (the S01 `ShakeoutView` data) so the post-onboarding
-/// screen is not empty.
+/// S03 authenticated app shell. Per D009: a single `NavigationStack` with
+/// push navigation (no `.sidebar` split column — iPhone-only). The root
+/// content is `GroupTreeView`, which derives the expandable group forest
+/// from `model.discoveredGroups.groups` and pushes a placeholder timeline
+/// view (`TimelinePlaceholder`) for the selected group. S04 swaps the
+/// placeholder for the real kind:9 timeline.
 struct MainScaffold: View {
     @EnvironmentObject private var model: KernelModel
 
     var body: some View {
         NavigationStack {
-            Group {
-                let groups = model.discoveredGroups.groups
-                if model.discoveredGroups.isSearching && groups.isEmpty {
-                    ProgressView("Discovering groups on nip29.f7z.io…")
-                } else if groups.isEmpty {
-                    ContentUnavailableView(
-                        "No Groups",
-                        systemImage: "rectangle.stack",
-                        description: Text("Discovery has not returned any groups yet.")
-                    )
-                } else {
-                    List(groups.prefix(50)) { group in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(group.displayName)
-                                .font(.headline)
-                            Text(group.groupId)
-                                .font(.caption.monospaced())
-                                .foregroundStyle(.secondary)
-                            HStack(spacing: 12) {
-                                Label("\(group.memberCount)", systemImage: "person.2")
-                                Label("\(group.adminCount)", systemImage: "shield")
-                                if group.public {
-                                    Label("public", systemImage: "globe")
-                                }
-                                if !group.open {
-                                    Label("closed", systemImage: "lock")
-                                }
-                            }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 2)
-                    }
-                }
-            }
-            .navigationTitle("29er · \(model.discoveredGroups.groups.count) groups")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-        .task {
-            model.openGroupDiscovery(hostRelayUrl: "wss://nip29.f7z.io")
+            GroupTreeView()
         }
     }
 }

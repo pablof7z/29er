@@ -306,12 +306,14 @@ extension KernelHandle {
                 _ = sessionId
                 _ = snapshotEpoch
                 let typedDiscoveredGroups = TypedDiscoveredGroupsDecoder.decode(from: envelopes)
+                let typedGroupTree = TypedGroupTreeDecoder.decode(from: envelopes)
                 let typedActiveAccount = TypedActiveAccountDecoder.decode(from: envelopes)
                 let duration = start.duration(to: .now)
                 kbLog.info("decoded ok rev=\(rev) activeAccount=\(typedActiveAccount ?? "nil")")
                 return .snapshot(
                     KernelUpdateResult(
                         typedDiscoveredGroups: typedDiscoveredGroups,
+                        typedGroupTree: typedGroupTree,
                         typedActiveAccount: typedActiveAccount,
                         rev: rev,
                         running: running,
