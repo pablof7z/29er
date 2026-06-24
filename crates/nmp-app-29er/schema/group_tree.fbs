@@ -1,0 +1,25 @@
+namespace nmp_app_29er;
+
+table GroupTreeNode {
+  group_id:string (required);
+  host_relay_url:string (required);
+  name:string;
+  parent_id:string;
+  child_ids:[string];
+  member_count:uint32;
+  admin_count:uint32;
+  public:bool = true;
+  open:bool = true;
+  branch:bool = false;
+}
+
+table GroupTreeSnapshot {
+  schema_version:uint32 = 1;
+  host_relay_url:string (required);
+  roots:[GroupTreeNode];
+  nodes:[GroupTreeNode];
+  total_count:uint32;
+}
+
+root_type GroupTreeSnapshot;
+file_identifier "N29T";

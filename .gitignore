@@ -36,7 +36,8 @@ __pycache__/
 .venv/
 venv/
 target/
-vendor/
+vendor/*
+!vendor/nmp
 *.log
 coverage/
 .cache/
@@ -46,3 +47,10 @@ tmp/
 xcuserdata/
 *.xcuserstate
 *.xcscmblueprint
+
+# ── iOS build artifacts ──
+# Xcode per-user derived data.
+ios/**/DerivedData/
+# The NmpCore.xcframework is a built artifact of
+# `scripts/build-nmp-xcframework.sh`; do not commit. Rebuild via the script.
+ios/**/Vendor/NmpCore.xcframework

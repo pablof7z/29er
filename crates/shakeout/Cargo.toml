@@ -1,0 +1,20 @@
+[package]
+name = "shakeout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "S01 integration check: connects to a NIP-29 relay, decodes discovered groups, and logs them."
+
+[[bin]]
+name = "shakeout"
+path = "src/main.rs"
+
+[dependencies]
+nmp-core = { workspace = true }
+nmp-ffi = { workspace = true }
+nmp-defaults = { workspace = true }
+nmp-nip29 = { workspace = true }
+nmp-planner = { workspace = true }
+nostr = { version = "0.44", features = ["std"] }
+serde_json = { workspace = true }

@@ -1,0 +1,3 @@
+[submodule "vendor/nmp"]
+	path = vendor/nmp
+	url = git@github.com:pablof7z/nostr-multi-platform.git

@@ -1,0 +1,29 @@
+[workspace]
+resolver = "2"
+members = ["crates/shakeout", "crates/nmp-app-29er"]
+exclude = ["vendor/nmp"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/pablof7z/29er"
+version = "0.1.0"
+
+[workspace.dependencies]
+nmp-core = { path = "vendor/nmp/crates/nmp-core" }
+nmp-ffi = { path = "vendor/nmp/crates/nmp-ffi" }
+nmp-defaults = { path = "vendor/nmp/crates/nmp-defaults" }
+nmp-nip29 = { path = "vendor/nmp/crates/nmp-nip29" }
+nmp-planner = { path = "vendor/nmp/crates/nmp-planner" }
+nmp-network = { path = "vendor/nmp/crates/nmp-network" }
+nmp-signer-iface = { path = "vendor/nmp/crates/nmp-signer-iface" }
+flatbuffers = "25.12.19"
+nostr = "0.44"
+serde = "1.0"
+serde_json = "1.0"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
