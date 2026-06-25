@@ -106,6 +106,7 @@ struct GroupTreeRow: View {
                 NavigationLink(value: node.groupId) {
                     GroupRowLabel(node: node)
                 }
+                .accessibilityIdentifier("group-row-\(node.groupId)")
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .buttonStyle(.plain)
 
@@ -118,6 +119,7 @@ struct GroupTreeRow: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("group-children-\(node.groupId)")
                     .accessibilityLabel("Show child groups for \(node.displayName)")
                 }
             }
@@ -584,6 +586,7 @@ struct GroupTimelineView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .accessibilityIdentifier("membership-status-\(groupId)")
 
             if let item = latestMembershipOutboxItem {
                 if item.canRetry {
@@ -611,6 +614,7 @@ struct GroupTimelineView: View {
                     Label("Admin", systemImage: "slider.horizontal.3")
                 }
                 .buttonStyle(.glass)
+                .accessibilityIdentifier("admin-button-\(groupId)")
             }
 
             if isCurrentMember {
@@ -620,6 +624,7 @@ struct GroupTimelineView: View {
                     Label("Leave", systemImage: "person.badge.minus")
                 }
                 .buttonStyle(.glass)
+                .accessibilityIdentifier("leave-button-\(groupId)")
                 .disabled(hasPendingMembershipAction)
             } else {
                 Button {
@@ -628,6 +633,7 @@ struct GroupTimelineView: View {
                     Label("Join", systemImage: "person.badge.plus")
                 }
                 .buttonStyle(.glassProminent)
+                .accessibilityIdentifier("join-button-\(groupId)")
                 .disabled(
                     hasPendingMembershipAction ||
                         !membersProjectionMatchesGroup ||
@@ -872,8 +878,10 @@ private struct JoinGroupSheet: View {
                     TextField("Invite code", text: $inviteCode)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .accessibilityIdentifier("join-invite-code-field")
                     TextField("Reason", text: $reason, axis: .vertical)
                         .lineLimit(2...4)
+                        .accessibilityIdentifier("join-reason-field")
                 }
 
                 if let error {
@@ -901,6 +909,7 @@ private struct JoinGroupSheet: View {
                             error = "Could not send join request."
                         }
                     }
+                    .accessibilityIdentifier("join-submit-button")
                     .disabled(requiresInviteCode && trimmedInviteCode.isEmpty)
                 }
             }
@@ -926,6 +935,7 @@ private struct LeaveGroupSheet: View {
                 Section {
                     TextField("Reason", text: $reason, axis: .vertical)
                         .lineLimit(2...4)
+                        .accessibilityIdentifier("leave-reason-field")
                 }
 
                 if let error {
@@ -952,6 +962,7 @@ private struct LeaveGroupSheet: View {
                     } label: {
                         Text("Leave")
                     }
+                    .accessibilityIdentifier("leave-submit-button")
                 }
             }
         }
@@ -1025,6 +1036,7 @@ private struct AdminActionsSheet: View {
                         .lineLimit(1...3)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .accessibilityIdentifier("admin-invite-codes-field")
 
                     HStack {
                         Button {
@@ -1032,6 +1044,7 @@ private struct AdminActionsSheet: View {
                         } label: {
                             Label("Generate", systemImage: "wand.and.sparkles")
                         }
+                        .accessibilityIdentifier("admin-generate-invite-button")
 
                         Spacer()
 
@@ -1040,6 +1053,7 @@ private struct AdminActionsSheet: View {
                         } label: {
                             Label("Create Invite", systemImage: "ticket")
                         }
+                        .accessibilityIdentifier("admin-create-invite-button")
                         .disabled(parsedInviteCodes.isEmpty)
                     }
                 }
@@ -1048,17 +1062,21 @@ private struct AdminActionsSheet: View {
                     TextField("Pubkey", text: $targetPubkey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .accessibilityIdentifier("admin-target-pubkey-field")
                     TextField("Role", text: $role)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .accessibilityIdentifier("admin-role-field")
                     TextField("Reason", text: $reason, axis: .vertical)
                         .lineLimit(2...4)
+                        .accessibilityIdentifier("admin-reason-field")
 
                     Button {
                         submitPutUser()
                     } label: {
                         Label("Add User", systemImage: "person.badge.plus")
                     }
+                    .accessibilityIdentifier("admin-add-user-button")
                     .disabled(trimmedTargetPubkey.isEmpty)
                 }
 
@@ -1066,27 +1084,33 @@ private struct AdminActionsSheet: View {
                     TextField("Local ID", text: $childLocalId)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .accessibilityIdentifier("admin-child-local-id-field")
                     TextField("Name", text: $childName)
+                        .accessibilityIdentifier("admin-child-name-field")
                     TextField("About", text: $childAbout, axis: .vertical)
                         .lineLimit(2...4)
+                        .accessibilityIdentifier("admin-child-about-field")
 
                     Picker("Visibility", selection: $childVisibility) {
                         Text("Public").tag("public")
                         Text("Private").tag("private")
                     }
                     .pickerStyle(.segmented)
+                    .accessibilityIdentifier("admin-child-visibility-picker")
 
                     Picker("Access", selection: $childAccess) {
                         Text("Open").tag("open")
                         Text("Closed").tag("closed")
                     }
                     .pickerStyle(.segmented)
+                    .accessibilityIdentifier("admin-child-access-picker")
 
                     Button {
                         submitCreateChild()
                     } label: {
                         Label("Create Child", systemImage: "folder.badge.plus")
                     }
+                    .accessibilityIdentifier("admin-create-child-button")
                     .disabled(trimmedChildLocalId.isEmpty || trimmedChildName.isEmpty)
                 }
 
@@ -1097,12 +1121,34 @@ private struct AdminActionsSheet: View {
                             Text(candidate.title).tag(candidate.id)
                         }
                     }
+                    .accessibilityIdentifier("admin-parent-picker")
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Button {
+                            parentSelection = rootParentSelection
+                        } label: {
+                            parentCandidateLabel(title: "Root", selected: parentSelection == rootParentSelection)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("admin-parent-option-root")
+
+                        ForEach(parentCandidates) { candidate in
+                            Button {
+                                parentSelection = candidate.id
+                            } label: {
+                                parentCandidateLabel(title: candidate.title, selected: parentSelection == candidate.id)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("admin-parent-option-\(candidate.id)")
+                        }
+                    }
 
                     Button {
                         submitSetParent()
                     } label: {
                         Label(parentSelection == rootParentSelection ? "Detach to Root" : "Move Channel", systemImage: "arrow.triangle.branch")
                     }
+                    .accessibilityIdentifier("admin-set-parent-button")
                     .disabled(!canSubmitSetParent)
                 }
 
@@ -1154,6 +1200,17 @@ private struct AdminActionsSheet: View {
                 }
             }
         }
+    }
+
+    private func parentCandidateLabel(title: String, selected: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            Text(title)
+                .foregroundStyle(.primary)
+            Spacer()
+        }
+        .contentShape(Rectangle())
     }
 
     private func submitInvite() {

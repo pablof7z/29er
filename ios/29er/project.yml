@@ -87,8 +87,27 @@ targets:
         # vendor/nmp/ios/Chirp/project.yml for the upstream reference.
         ENABLE_DEBUG_DYLIB: NO
         "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]": "/tmp/LocalFrameworks $(inherited)"
+  29erUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: 29erUITests
+    dependencies:
+      - target: 29er
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.f7z.app29erUITests
+        PRODUCT_NAME: 29erUITests
+        GENERATE_INFOPLIST_FILE: YES
+        DEVELOPMENT_TEAM: 456SHKPP26
+        TEST_TARGET_NAME: 29er
+        SWIFT_VERSION: "5.0"
 schemes:
   29er:
     build:
       targets:
         29er: all
+        29erUITests: [test]
+    test:
+      targets:
+        - 29erUITests
