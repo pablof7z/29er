@@ -38,7 +38,7 @@ final class M002RelayFlowUITests: XCTestCase {
         app.launchEnvironment["S03_AUTO_SIGN_IN_NSEC"] = appNsec
         app.launch()
 
-        XCTAssertTrue(app.staticTexts["No Groups"].waitForExistence(timeout: 15), "App did not reach empty group tree")
+        XCTAssertTrue(app.staticTexts["No Rooms"].waitForExistence(timeout: 15), "App did not reach empty group tree")
         publishSeedEvents(seedEvents)
 
         tap("group-row-\(joinableGroup)", in: app, timeout: 20)
@@ -77,6 +77,7 @@ final class M002RelayFlowUITests: XCTestCase {
             }.hasTag(["h", adminGroup])
         )
 
+        tapVisibleControl(named: "People", in: app)
         type("admin-target-pubkey-field", text: targetPubkey, in: app)
         type("admin-role-field", text: "member", in: app)
         type("admin-reason-field", text: "adding from M002 UI UAT", in: app)
@@ -90,6 +91,7 @@ final class M002RelayFlowUITests: XCTestCase {
         publishRelayEvent(projectionEvents.adminMembers)
         XCTAssertTrue(app.buttons["2 members"].waitForExistence(timeout: 10))
 
+        tapVisibleControl(named: "Room", in: app)
         scrollTo("admin-child-local-id-field", in: app)
         type("admin-child-local-id-field", text: childGroup, in: app)
         type("admin-child-name-field", text: "M002 Child UI", in: app)
@@ -106,14 +108,15 @@ final class M002RelayFlowUITests: XCTestCase {
         publishRelayEvent(projectionEvents.child)
 
         tapVisibleButton(named: "Done", in: app)
-        back(app)
         tap("group-children-\(adminGroup)", in: app, timeout: 15)
         tap("group-row-\(childGroup)", in: app, timeout: 10)
+        back(app)
         back(app)
         back(app)
 
         tap("group-row-\(movableGroup)", in: app)
         tap("admin-button-\(movableGroup)", in: app)
+        tapVisibleControl(named: "Move", in: app)
         scrollTo("admin-parent-option-\(altParentGroup)", in: app)
         tap("admin-parent-option-\(altParentGroup)", in: app)
         tap("admin-set-parent-button", in: app)
@@ -126,6 +129,7 @@ final class M002RelayFlowUITests: XCTestCase {
         publishRelayEvent(projectionEvents.moved)
         tapVisibleButton(named: "Done", in: app)
         back(app)
+        tap("group-row-\(altParentGroup)", in: app, timeout: 15)
         tap("group-children-\(altParentGroup)", in: app, timeout: 15)
         XCTAssertTrue(app.descendants(matching: .any)["group-row-\(movableGroup)"].waitForExistence(timeout: 10))
     }
@@ -157,6 +161,17 @@ final class M002RelayFlowUITests: XCTestCase {
         let button = app.buttons[name].firstMatch
         XCTAssertTrue(button.waitForExistence(timeout: 5), "Missing button \(name)")
         button.tap()
+    }
+
+    private func tapVisibleControl(named name: String, in app: XCUIApplication) {
+        let button = app.buttons[name].firstMatch
+        if button.waitForExistence(timeout: 3) {
+            button.tap()
+            return
+        }
+        let text = app.staticTexts[name].firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 5), "Missing control \(name)")
+        text.tap()
     }
 
     private func tapVisibleText(_ text: String, in app: XCUIApplication) {

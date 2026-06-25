@@ -9,12 +9,10 @@ private let gtLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupT
 ///
 ///   - `NavigationStack` + push navigation (no `.sidebar` split column —
 ///     iPhone-only).
-///   - Branch rows keep the branch's own `NavigationLink` (D003 — branch nodes
-///     are real groups; tapping the row navigates to the group's timeline,
-///     tapping the trailing chevron pushes the child groups).
-///   - Leaf rows are plain chat-list rows.
-///   - Pushed destination is a placeholder timeline view (`TimelinePlaceholder`)
-///     — S04 replaces it with the real kind:9 timeline.
+///   - Rows are single-target chat-list rows. Branch nodes are real groups, so
+///     tapping any row opens that group's timeline.
+///   - Child groups are reached from the room toolbar once the parent room is
+///     open, keeping the root list free of split row targets.
 ///
 /// Three distinct data states (T05):
 ///   - `isSearching && tree.roots.isEmpty` → `LoadingView`
@@ -33,17 +31,17 @@ struct GroupTreeView: View {
                     message: "The background service stopped. Relaunch the app to recover."
                 )
             } else if model.discoveredGroups.isSearching && tree.roots.isEmpty {
-                LoadingView(label: "Discovering groups on \(model.discoveredGroups.hostRelayUrl)…")
+                LoadingView(label: "Loading rooms…")
             } else if tree.roots.isEmpty {
                 EmptyStateView(
-                    title: "No Groups",
-                    message: "Discovery has not returned any groups yet."
+                    title: "No Rooms",
+                    message: "Rooms will appear here when this relay publishes them."
                 )
             } else {
                 GroupTreeList(nodes: tree.roots, tree: tree)
             }
         }
-        .navigationTitle(navigationTitle(tree: tree))
+        .navigationTitle("29er")
         .navigationBarTitleDisplayMode(.large)
         .navigationDestination(for: String.self) { groupId in
             GroupTimelineView(groupId: groupId)
@@ -61,13 +59,6 @@ struct GroupTreeView: View {
         }
     }
 
-    private func navigationTitle(tree: GroupTreeSnapshot) -> String {
-        if tree.totalCount == 0 {
-            return "29er"
-        }
-        let suffix = tree.totalCount == 1 ? "1 group" : "\(tree.totalCount) groups"
-        return "29er · \(suffix)"
-    }
 }
 
 private struct GroupChildrenRoute: Hashable {
@@ -82,47 +73,30 @@ private struct GroupTreeList: View {
         List {
             ForEach(nodes) { node in
                 GroupTreeRow(node: node, tree: tree)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 8))
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 12))
                     .listRowSeparator(.visible)
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Color(.systemBackground))
     }
 }
 
-/// Branch rows expose two targets: the row opens the group's own timeline,
-/// while the trailing chevron pushes a list of that group's children.
+/// A single chat-list row. Subroom browsing is exposed from the room toolbar,
+/// not as a competing root-list tap target.
 struct GroupTreeRow: View {
     let node: GroupTreeNode
     let tree: GroupTreeSnapshot
 
     var body: some View {
-        HStack(spacing: 8) {
-            NavigationLink(value: node.groupId) {
-                GroupRowLabel(node: node)
-            }
-            .accessibilityIdentifier("group-row-\(node.groupId)")
-            .buttonStyle(.plain)
-
-            if !children.isEmpty {
-                NavigationLink(value: GroupChildrenRoute(groupId: node.groupId)) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 17, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 40, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("group-children-\(node.groupId)")
-                .accessibilityLabel("Show child groups for \(node.displayName)")
-            }
+        NavigationLink(value: node.groupId) {
+            GroupRowLabel(node: node)
         }
-        .frame(minHeight: 68)
+        .accessibilityIdentifier("group-row-\(node.groupId)")
+        .frame(minHeight: 60)
     }
 
-    private var children: [GroupTreeNode] {
-        node.childIds.compactMap { tree.allNodes[$0] }
-    }
 }
 
 private struct GroupChildrenView: View {
@@ -165,40 +139,43 @@ struct GroupRowLabel: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .fill(Color.blue)
+                    .fill(node.groupId.pubkeyColor)
                 Text(initials)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
             }
-            .frame(width: 52, height: 52)
+            .frame(width: 46, height: 46)
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(node.displayName)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.primary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(node.displayName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+
+                Text(previewText)
+                    .font(.subheadline)
+                    .foregroundStyle(node.hasLastMessage ? .secondary : .tertiary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 5) {
+                if node.hasLastMessage {
+                    Text(node.lastMessageCreatedAt.relativeTimeFromUnixSeconds)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                         .lineLimit(1)
-
-                    Spacer(minLength: 8)
-
-                    if node.unreadCount > 0 {
-                        Text(unreadText)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.white)
-                            .monospacedDigit()
-                            .padding(.horizontal, node.unreadCount > 9 ? 7 : 6)
-                            .frame(minWidth: 22, minHeight: 22)
-                            .background(Capsule().fill(Color.accentColor))
-                    }
                 }
 
-                HStack(spacing: 6) {
-                    Text(previewText)
-                        .font(.subheadline)
-                        .foregroundStyle(node.hasLastMessage ? .secondary : .tertiary)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 8)
+                if node.unreadCount > 0 {
+                    Text(unreadText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .monospacedDigit()
+                        .padding(.horizontal, node.unreadCount > 9 ? 7 : 6)
+                        .frame(minWidth: 22, minHeight: 22)
+                        .background(Capsule().fill(Color.accentColor))
                 }
             }
         }
@@ -272,7 +249,11 @@ struct GroupTimelineView: View {
     }
 
     private var canSend: Bool {
-        !trimmedDraft.isEmpty && node != nil && !model.kernelIsDead
+        canCompose && !trimmedDraft.isEmpty
+    }
+
+    private var canCompose: Bool {
+        membersProjectionMatchesGroup && isCurrentMember && node != nil && !model.kernelIsDead
     }
 
     private var currentMembers: [GroupMember] {
@@ -433,7 +414,9 @@ struct GroupTimelineView: View {
                     messageStream(proxy: proxy)
                 }
 
-                membershipBar
+                if shouldShowMembershipBar {
+                    membershipBar
+                }
                 composer
             }
             .background(Color(.systemBackground))
@@ -463,19 +446,8 @@ struct GroupTimelineView: View {
                     }
                 }
 
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    if let node {
-                        Button {
-                            showingMembers = true
-                        } label: {
-                            Label(
-                                node.memberCount == 1 ? "1 member" : "\(node.memberCount) members",
-                                systemImage: "person.2"
-                            )
-                        }
-                        .labelStyle(.iconOnly)
-                        .accessibilityLabel(node.memberCount == 1 ? "1 member" : "\(node.memberCount) members")
-                    }
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    roomToolbarActions
                 }
             }
             .sheet(isPresented: $showingMembers) {
@@ -557,9 +529,61 @@ struct GroupTimelineView: View {
         ContentUnavailableView(
             "No messages yet",
             systemImage: "bubble.left.and.bubble.right",
-            description: Text("Start the conversation in this NIP-29 group.")
+            description: Text(isCurrentMember ? "Start the conversation." : "Join this room to send the first message.")
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var roomToolbarActions: some View {
+        if let node {
+            if !node.childIds.isEmpty {
+                NavigationLink(value: GroupChildrenRoute(groupId: groupId)) {
+                    Label(
+                        node.childIds.count == 1 ? "1 subroom" : "\(node.childIds.count) subrooms",
+                        systemImage: "bubble.left.and.bubble.right"
+                    )
+                }
+                .labelStyle(.iconOnly)
+                .accessibilityIdentifier("group-children-\(groupId)")
+                .accessibilityLabel(node.childIds.count == 1 ? "1 subroom" : "\(node.childIds.count) subrooms")
+            }
+
+            Button {
+                showingMembers = true
+            } label: {
+                Label(
+                    node.memberCount == 1 ? "1 member" : "\(node.memberCount) members",
+                    systemImage: "person.2"
+                )
+            }
+            .labelStyle(.iconOnly)
+            .accessibilityLabel(node.memberCount == 1 ? "1 member" : "\(node.memberCount) members")
+
+            if isCurrentAdmin {
+                Button {
+                    showingAdminSheet = true
+                } label: {
+                    Label("Admin", systemImage: "slider.horizontal.3")
+                }
+                .labelStyle(.iconOnly)
+                .accessibilityIdentifier("admin-button-\(groupId)")
+            } else if isCurrentMember {
+                Button(role: .destructive) {
+                    showingLeaveSheet = true
+                } label: {
+                    Label("Leave Group", systemImage: "person.badge.minus")
+                }
+                .labelStyle(.iconOnly)
+                .accessibilityIdentifier("leave-button-\(groupId)")
+                .accessibilityLabel("Leave Group")
+                .disabled(hasPendingMembershipAction)
+            }
+        }
+    }
+
+    private var shouldShowMembershipBar: Bool {
+        hasPendingMembershipAction || !membersProjectionMatchesGroup || !isCurrentMember
     }
 
     private var membershipBar: some View {
@@ -589,28 +613,7 @@ struct GroupTimelineView: View {
 
             Spacer(minLength: 8)
 
-            if isCurrentAdmin {
-                Button {
-                    showingAdminSheet = true
-                } label: {
-                    Label("Admin", systemImage: "slider.horizontal.3")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .accessibilityIdentifier("admin-button-\(groupId)")
-            }
-
-            if isCurrentMember {
-                Button {
-                    showingLeaveSheet = true
-                } label: {
-                    Label("Leave", systemImage: "person.badge.minus")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .accessibilityIdentifier("leave-button-\(groupId)")
-                .disabled(hasPendingMembershipAction)
-            } else {
+            if !isCurrentMember {
                 Button {
                     showingJoinSheet = true
                 } label: {
@@ -640,6 +643,7 @@ struct GroupTimelineView: View {
                     let pending = outboxItem(for: message.id)
                     GroupMessageRow(
                         message: message,
+                        senderTitle: memberTitle(for: message.pubkey),
                         isOwnMessage: message.pubkey == model.activeAccountPubkey,
                         pendingStatus: pending?.status,
                         canRetry: pending?.canRetry ?? false,
@@ -679,48 +683,83 @@ struct GroupTimelineView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
-            if !mentionSuggestions.isEmpty {
+            if canCompose && !mentionSuggestions.isEmpty {
                 mentionSuggestionBar
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("Message \(title)", text: $draft, axis: .vertical)
-                    .focused($composerFocused)
-                    .font(.body)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...4)
+            Group {
+                if canCompose {
+                    HStack(alignment: .bottom, spacing: 8) {
+                        TextField("Message \(title)", text: $draft, axis: .vertical)
+                            .focused($composerFocused)
+                            .font(.body)
+                            .textFieldStyle(.plain)
+                            .lineLimit(1...4)
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 9)
+                            .background(
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .fill(Color(.secondarySystemBackground))
+                            )
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .stroke(Color(.separator).opacity(0.35), lineWidth: 0.5)
+                            }
+                            .accessibilityIdentifier("group-chat-message-editor")
+
+                        Button(action: sendDraft) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 17, weight: .bold))
+                                .foregroundStyle(canSend ? .white : Color(.tertiaryLabel))
+                                .frame(width: 34, height: 34)
+                                .background(
+                                    Circle()
+                                        .fill(canSend ? Color.accentColor : Color(.tertiarySystemFill))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canSend)
+                        .accessibilityLabel("Send message")
+                        .accessibilityIdentifier("group-chat-send-button")
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        Image(systemName: composerPromptIcon)
+                            .foregroundStyle(.secondary)
+                        Text(composerPromptText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                    }
                     .padding(.horizontal, 13)
-                    .padding(.vertical, 9)
+                    .padding(.vertical, 11)
                     .background(
                         RoundedRectangle(cornerRadius: 20, style: .continuous)
                             .fill(Color(.secondarySystemBackground))
                     )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .stroke(Color(.separator).opacity(0.35), lineWidth: 0.5)
-                    }
-                    .accessibilityIdentifier("group-chat-message-editor")
-
-                Button(action: sendDraft) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(canSend ? .white : Color(.tertiaryLabel))
-                        .frame(width: 34, height: 34)
-                        .background(
-                            Circle()
-                                .fill(canSend ? Color.accentColor : Color(.tertiarySystemFill))
-                        )
+                    .accessibilityIdentifier("group-chat-readonly-composer")
                 }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
-                .accessibilityLabel("Send message")
-                .accessibilityIdentifier("group-chat-send-button")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
         }
         .background(Color(.systemBackground))
         .overlay(alignment: .top) { Divider() }
+    }
+
+    private var composerPromptIcon: String {
+        if !membersProjectionMatchesGroup {
+            return "clock"
+        }
+        return node?.isOpen == true ? "person.crop.circle.badge.plus" : "lock.fill"
+    }
+
+    private var composerPromptText: String {
+        if !membersProjectionMatchesGroup {
+            return "Checking room access"
+        }
+        return node?.isOpen == true ? "Join to send messages" : "Invite required to send messages"
     }
 
     private var mentionSuggestionBar: some View {
@@ -837,11 +876,37 @@ struct GroupTimelineView: View {
     private func outboxItem(for eventId: String) -> PublishOutboxItem? {
         model.publishOutbox.first { $0.eventId == eventId }
     }
+
+    private func memberTitle(for pubkey: String) -> String {
+        currentMembers.first { $0.pubkey == pubkey }?.title ?? pubkey.shortHex
+    }
 }
 
 private struct GroupParentCandidate: Identifiable, Hashable {
     let id: String
     let title: String
+}
+
+private enum AdminTaskMode: String, CaseIterable, Identifiable {
+    case invites
+    case people
+    case room
+    case hierarchy
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .invites:
+            return "Invites"
+        case .people:
+            return "People"
+        case .room:
+            return "Room"
+        case .hierarchy:
+            return "Move"
+        }
+    }
 }
 
 private struct JoinGroupSheet: View {
@@ -984,6 +1049,7 @@ private struct AdminActionsSheet: View {
     @State private var childVisibility = "public"
     @State private var childAccess = "open"
     @State private var parentSelection = ""
+    @State private var mode: AdminTaskMode = .invites
     @State private var error: String?
 
     private var parsedInviteCodes: [String] {
@@ -1022,125 +1088,25 @@ private struct AdminActionsSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Invites") {
-                    TextField("Codes", text: $inviteCodes, axis: .vertical)
-                        .lineLimit(1...3)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("admin-invite-codes-field")
-
-                    HStack {
-                        Button {
-                            inviteCodes = generatedInviteCode()
-                        } label: {
-                            Label("Generate", systemImage: "wand.and.sparkles")
+                Section {
+                    Picker("Admin task", selection: $mode) {
+                        ForEach(AdminTaskMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
                         }
-                        .accessibilityIdentifier("admin-generate-invite-button")
-
-                        Spacer()
-
-                        Button {
-                            submitInvite()
-                        } label: {
-                            Label("Create Invite", systemImage: "ticket")
-                        }
-                        .accessibilityIdentifier("admin-create-invite-button")
-                        .disabled(parsedInviteCodes.isEmpty)
-                    }
-                }
-
-                Section("Add User") {
-                    TextField("Pubkey", text: $targetPubkey)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("admin-target-pubkey-field")
-                    TextField("Role", text: $role)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("admin-role-field")
-                    TextField("Reason", text: $reason, axis: .vertical)
-                        .lineLimit(2...4)
-                        .accessibilityIdentifier("admin-reason-field")
-
-                    Button {
-                        submitPutUser()
-                    } label: {
-                        Label("Add User", systemImage: "person.badge.plus")
-                    }
-                    .accessibilityIdentifier("admin-add-user-button")
-                    .disabled(trimmedTargetPubkey.isEmpty)
-                }
-
-                Section("Child Channel") {
-                    TextField("Local ID", text: $childLocalId)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .accessibilityIdentifier("admin-child-local-id-field")
-                    TextField("Name", text: $childName)
-                        .accessibilityIdentifier("admin-child-name-field")
-                    TextField("About", text: $childAbout, axis: .vertical)
-                        .lineLimit(2...4)
-                        .accessibilityIdentifier("admin-child-about-field")
-
-                    Picker("Visibility", selection: $childVisibility) {
-                        Text("Public").tag("public")
-                        Text("Private").tag("private")
                     }
                     .pickerStyle(.segmented)
-                    .accessibilityIdentifier("admin-child-visibility-picker")
-
-                    Picker("Access", selection: $childAccess) {
-                        Text("Open").tag("open")
-                        Text("Closed").tag("closed")
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("admin-child-access-picker")
-
-                    Button {
-                        submitCreateChild()
-                    } label: {
-                        Label("Create Child", systemImage: "folder.badge.plus")
-                    }
-                    .accessibilityIdentifier("admin-create-child-button")
-                    .disabled(trimmedChildLocalId.isEmpty || trimmedChildName.isEmpty)
+                    .accessibilityIdentifier("admin-mode-picker")
                 }
 
-                Section("Hierarchy") {
-                    Picker("Parent", selection: $parentSelection) {
-                        Text("Root").tag(rootParentSelection)
-                        ForEach(parentCandidates) { candidate in
-                            Text(candidate.title).tag(candidate.id)
-                        }
-                    }
-                    .accessibilityIdentifier("admin-parent-picker")
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Button {
-                            parentSelection = rootParentSelection
-                        } label: {
-                            parentCandidateLabel(title: "Root", selected: parentSelection == rootParentSelection)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("admin-parent-option-root")
-
-                        ForEach(parentCandidates) { candidate in
-                            Button {
-                                parentSelection = candidate.id
-                            } label: {
-                                parentCandidateLabel(title: candidate.title, selected: parentSelection == candidate.id)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityIdentifier("admin-parent-option-\(candidate.id)")
-                        }
-                    }
-
-                    Button {
-                        submitSetParent()
-                    } label: {
-                        Label(parentSelection == rootParentSelection ? "Detach to Root" : "Move Channel", systemImage: "arrow.triangle.branch")
-                    }
-                    .accessibilityIdentifier("admin-set-parent-button")
-                    .disabled(!canSubmitSetParent)
+                switch mode {
+                case .invites:
+                    inviteSection
+                case .people:
+                    peopleSection
+                case .room:
+                    roomSection
+                case .hierarchy:
+                    hierarchySection
                 }
 
                 if !pendingItems.isEmpty {
@@ -1190,6 +1156,125 @@ private struct AdminActionsSheet: View {
                     parentSelection = currentParentId ?? rootParentSelection
                 }
             }
+        }
+    }
+
+    private var inviteSection: some View {
+        Section("Invites") {
+            TextField("Code", text: $inviteCodes, axis: .vertical)
+                .lineLimit(1...3)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("admin-invite-codes-field")
+
+            HStack {
+                Button {
+                    inviteCodes = generatedInviteCode()
+                } label: {
+                    Label("Generate", systemImage: "wand.and.sparkles")
+                }
+                .accessibilityIdentifier("admin-generate-invite-button")
+
+                Spacer()
+
+                Button {
+                    submitInvite()
+                } label: {
+                    Label("Create Invite", systemImage: "ticket")
+                }
+                .accessibilityIdentifier("admin-create-invite-button")
+                .disabled(parsedInviteCodes.isEmpty)
+            }
+        }
+    }
+
+    private var peopleSection: some View {
+        Section("People") {
+            TextField("Pubkey", text: $targetPubkey)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("admin-target-pubkey-field")
+            TextField("Role", text: $role)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("admin-role-field")
+            TextField("Reason", text: $reason, axis: .vertical)
+                .lineLimit(2...4)
+                .accessibilityIdentifier("admin-reason-field")
+
+            Button {
+                submitPutUser()
+            } label: {
+                Label("Add User", systemImage: "person.badge.plus")
+            }
+            .accessibilityIdentifier("admin-add-user-button")
+            .disabled(trimmedTargetPubkey.isEmpty)
+        }
+    }
+
+    private var roomSection: some View {
+        Section("New Room") {
+            TextField("Room ID", text: $childLocalId)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("admin-child-local-id-field")
+            TextField("Name", text: $childName)
+                .accessibilityIdentifier("admin-child-name-field")
+            TextField("Description", text: $childAbout, axis: .vertical)
+                .lineLimit(2...4)
+                .accessibilityIdentifier("admin-child-about-field")
+
+            Picker("Visibility", selection: $childVisibility) {
+                Text("Public").tag("public")
+                Text("Private").tag("private")
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("admin-child-visibility-picker")
+
+            Picker("Access", selection: $childAccess) {
+                Text("Open").tag("open")
+                Text("Closed").tag("closed")
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("admin-child-access-picker")
+
+            Button {
+                submitCreateChild()
+            } label: {
+                Label("Create Room", systemImage: "plus.bubble")
+            }
+            .accessibilityIdentifier("admin-create-child-button")
+            .disabled(trimmedChildLocalId.isEmpty || trimmedChildName.isEmpty)
+        }
+    }
+
+    private var hierarchySection: some View {
+        Section("Move Room") {
+            Button {
+                parentSelection = rootParentSelection
+            } label: {
+                parentCandidateLabel(title: "Root", selected: parentSelection == rootParentSelection)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("admin-parent-option-root")
+
+            ForEach(parentCandidates) { candidate in
+                Button {
+                    parentSelection = candidate.id
+                } label: {
+                    parentCandidateLabel(title: candidate.title, selected: parentSelection == candidate.id)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("admin-parent-option-\(candidate.id)")
+            }
+
+            Button {
+                submitSetParent()
+            } label: {
+                Label(parentSelection == rootParentSelection ? "Move to Root" : "Move Room", systemImage: "arrow.triangle.branch")
+            }
+            .accessibilityIdentifier("admin-set-parent-button")
+            .disabled(!canSubmitSetParent)
         }
     }
 
@@ -1313,9 +1398,6 @@ private struct MemberListSheet: View {
                         systemImage: "person.2.slash",
                         description: Text("This group has not published a member list yet.")
                     )
-                    .padding(24)
-                    .frame(maxWidth: 360)
-                    .glassPanel(cornerRadius: 22)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(.systemGroupedBackground))
                 } else {
@@ -1357,6 +1439,7 @@ private struct MemberListSheet: View {
 
 private struct GroupMessageRow: View {
     let message: GroupChatMessage
+    let senderTitle: String
     let isOwnMessage: Bool
     let pendingStatus: String?
     let canRetry: Bool
@@ -1374,7 +1457,7 @@ private struct GroupMessageRow: View {
             VStack(alignment: isOwnMessage ? .trailing : .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     if !isOwnMessage {
-                        Text(message.pubkey.shortHex)
+                        Text(senderTitle)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

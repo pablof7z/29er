@@ -216,12 +216,13 @@ pub extern "C" fn nmp_app_29er_register_group_chat(app: *mut NmpApp, group_id_js
     };
 
     wire_group_chat(app_ref, group_id.clone());
-    app_ref.push_interest(group_chat_interest(&group_id));
+    app_ref.push_interest(group_chat_history_interest(&group_id));
+    app_ref.push_interest(group_chat_live_interest(&group_id));
 }
 
-fn group_chat_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
+fn group_chat_history_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
     let id = stable_hash64((
-        "29er.nip29.group_chat",
+        "29er.nip29.group_chat.history",
         group_id.host_relay_url.as_str(),
         group_id.local_id.as_str(),
     ));
@@ -230,10 +231,25 @@ fn group_chat_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
         group_id,
         [KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
         BTreeMap::new(),
-        InterestLifecycle::Tailing,
+        InterestLifecycle::OneShot,
     );
     interest.shape.limit = Some(GROUP_CHAT_HISTORY_LIMIT);
     interest
+}
+
+fn group_chat_live_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
+    let id = stable_hash64((
+        "29er.nip29.group_chat.live",
+        group_id.host_relay_url.as_str(),
+        group_id.local_id.as_str(),
+    ));
+    host_pinned_interest(
+        id,
+        group_id,
+        [KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
+        BTreeMap::new(),
+        InterestLifecycle::Tailing,
+    )
 }
 
 fn group_tree_chat_summary_interest(host_relay_url: &str) -> nmp_planner::LogicalInterest {
@@ -255,9 +271,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn group_chat_interest_is_host_pinned_and_tailing() {
+    fn group_chat_history_interest_is_dedicated_room_fetch() {
         let group = GroupId::new("wss://groups.example.com", "rust-nostr");
-        let interest = group_chat_interest(&group);
+        let interest = group_chat_history_interest(&group);
 
         assert_eq!(
             interest.shape.relay_pin.as_deref(),
@@ -267,17 +283,35 @@ mod tests {
         assert!(interest.shape.kinds.contains(&KIND_DISCUSSION_OR_ARTIFACT));
         assert!(interest.shape.tags.get("h").unwrap().contains("rust-nostr"));
         assert_eq!(interest.shape.limit, Some(GROUP_CHAT_HISTORY_LIMIT));
+        assert_eq!(interest.lifecycle, InterestLifecycle::OneShot);
+    }
+
+    #[test]
+    fn group_chat_live_interest_tails_room_without_history_limit() {
+        let group = GroupId::new("wss://groups.example.com", "rust-nostr");
+        let interest = group_chat_live_interest(&group);
+
+        assert_eq!(
+            interest.shape.relay_pin.as_deref(),
+            Some("wss://groups.example.com")
+        );
+        assert!(interest.shape.kinds.contains(&KIND_CHAT_MESSAGE));
+        assert!(interest.shape.kinds.contains(&KIND_DISCUSSION_OR_ARTIFACT));
+        assert!(interest.shape.tags.get("h").unwrap().contains("rust-nostr"));
+        assert_eq!(interest.shape.limit, None);
         assert_eq!(interest.lifecycle, InterestLifecycle::Tailing);
     }
 
     #[test]
-    fn group_chat_interest_id_is_deterministic_per_group() {
-        let a1 = group_chat_interest(&GroupId::new("wss://groups.example.com", "room-a"));
-        let a2 = group_chat_interest(&GroupId::new("wss://groups.example.com", "room-a"));
-        let b = group_chat_interest(&GroupId::new("wss://groups.example.com", "room-b"));
+    fn group_chat_interest_ids_are_deterministic_per_group_and_lifecycle() {
+        let a1 = group_chat_history_interest(&GroupId::new("wss://groups.example.com", "room-a"));
+        let a2 = group_chat_history_interest(&GroupId::new("wss://groups.example.com", "room-a"));
+        let b = group_chat_history_interest(&GroupId::new("wss://groups.example.com", "room-b"));
+        let live = group_chat_live_interest(&GroupId::new("wss://groups.example.com", "room-a"));
 
         assert_eq!(a1.id, a2.id);
         assert_ne!(a1.id, b.id);
+        assert_ne!(a1.id, live.id);
     }
 
     #[test]
