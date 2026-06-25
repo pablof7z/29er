@@ -29,6 +29,20 @@ pub struct GroupTreeMessageState {
     last_message_by_group: BTreeMap<String, GroupTreeMessageSummary>,
 }
 
+impl GroupTreeMessageState {
+    /// Direct unread count for a group's `local_id` (0 when unknown).
+    #[must_use]
+    pub fn unread_for(&self, group_id: &str) -> u32 {
+        self.direct_unread_by_group.get(group_id).copied().unwrap_or(0)
+    }
+
+    /// Newest message summary for a group's `local_id`, if any.
+    #[must_use]
+    pub fn last_message_for(&self, group_id: &str) -> Option<&GroupTreeMessageSummary> {
+        self.last_message_by_group.get(group_id)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct StoredGroupTreeMessage {
     id: String,

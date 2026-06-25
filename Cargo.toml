@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/shakeout", "crates/nmp-app-29er"]
+members = ["crates/shakeout", "crates/nmp-app-29er", "crates/29er-tui"]
 exclude = ["vendor/nmp"]
 
 [workspace.package]
@@ -17,6 +17,8 @@ nmp-nip29 = { path = "vendor/nmp/crates/nmp-nip29" }
 nmp-planner = { path = "vendor/nmp/crates/nmp-planner" }
 nmp-network = { path = "vendor/nmp/crates/nmp-network" }
 nmp-signer-iface = { path = "vendor/nmp/crates/nmp-signer-iface" }
+nmp-app-29er = { path = "crates/nmp-app-29er" }
+nmp-content = { path = "vendor/nmp/crates/nmp-content" }
 flatbuffers = "25.12.19"
 nostr = "0.44"
 serde = "1.0"
