@@ -1,19 +1,10 @@
-//! NMP composition root + read-model snapshotting for the TUI shell.
-//!
-//! `App` owns the raw `*mut NmpApp` (the kernel runtime), the reusable
-//! projections registered as `KernelEventObserver`s, and the navigation
-//! state. `snapshot()` folds the projections into a plain [`AppState`] that
-//! the render layer consumes. All writes are dispatched as typed actions.
-//!
-//! `App` is intentionally `!Send` (it holds raw pointers); it lives entirely
-//! inside the single-threaded runtime loop and is never spawned onto another
-//! thread.
-
+//! NMP composition root + projection-backed view-model for the TUI.
 use std::collections::HashMap;
-use std::ffi::CString;
-use std::sync::Arc;
+use std::ffi::{CStr, CString};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use nmp_app_29er::group_tree::GroupTreeProjection;
+use nmp_app_29er::group_tree::{GroupTreeMessageState, GroupTreeProjection};
 use nmp_app_29er::{
     nmp_app_29er_declare_consumed_projections, nmp_app_29er_dispatch_action_bytes,
     nmp_app_29er_register, nmp_app_29er_register_group_chat, nmp_app_29er_unregister,
@@ -21,280 +12,510 @@ use nmp_app_29er::{
 };
 use nmp_core::KernelEventObserver;
 use nmp_ffi::{nmp_free_string, NmpApp};
-use nmp_nip29::action::PostChatMessageInput;
-use nmp_nip29::projection::{DiscoveredGroupsProjection, GroupChatMessage, GroupChatProjection};
+use nmp_nip29::projection::{
+    DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, GroupChatMessage,
+    GroupChatProjection, GroupMemberRow, GroupMembersProjection,
+};
 use nmp_nip29::GroupId;
+use tokio::sync::mpsc::UnboundedSender;
 
-/// Which pane currently receives key input.
+type ActiveAccountSlot = Arc<Mutex<Option<String>>>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Focus {
-    RoomList,
-    Input,
+pub enum Screen { Login, App }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Focus { ChannelList, Chat, Composer }
+impl Focus {
+    #[must_use] pub fn next(self) -> Self {
+        match self { Focus::ChannelList => Focus::Chat, Focus::Chat => Focus::Composer, Focus::Composer => Focus::ChannelList }
+    }
 }
 
-/// One renderable room row, derived from discovery + group-tree projections.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IdentityState { LoggedOut, LoggingIn, LoggedIn { npub: String } }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelayState { Disconnected, Connecting, Connected }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutboxStatus { Pending, Confirmed, Failed }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FormKind {
+    JoinWithCode(GroupId),
+    CreateInvite(GroupId),
+    CreateChild(GroupId),
+    PutUser(GroupId),
+    MoveChannel(GroupId),
+}
+
 #[derive(Clone, Debug)]
-pub struct RoomEntry {
+pub struct ChannelListItem {
     pub group_id: GroupId,
+    pub local_id: String,
     pub name: String,
+    pub depth: usize,
     pub unread: u32,
+    pub member_count: u32,
+    pub admin_count: u32,
+    pub is_branch: bool,
     pub last_preview: Option<String>,
+    pub last_timestamp: Option<u64>,
 }
 
-/// The immutable per-tick view-model handed to the UI. Contains zero behavior.
 #[derive(Clone, Debug)]
-pub struct AppState {
-    pub rooms: Vec<RoomEntry>,
+pub struct PublishOutboxItem {
+    pub correlation_id: String,
+    pub group_local_id: String,
+    pub content: String,
+    pub status: OutboxStatus,
+    pub error: Option<String>,
+}
+
+/// The immutable per-frame view-model. Contains ZERO Ratatui types (issue #3).
+#[derive(Clone, Debug)]
+pub struct TuiSnapshot {
+    pub channel_tree: Vec<ChannelListItem>,
+    pub selected_channel_id: Option<GroupId>,
+    pub selected_messages: Vec<GroupChatMessage>,
+    pub selected_members: Vec<GroupMemberRow>,
+    pub is_admin: bool,
+    pub my_pubkey: Option<String>,
+    pub publish_outbox: Vec<PublishOutboxItem>,
+    pub identity_state: IdentityState,
+    pub relay_state: RelayState,
+    pub errors: Vec<String>,
     pub selected_index: usize,
-    pub selected_room: Option<GroupId>,
-    pub messages: Vec<GroupChatMessage>,
-    pub status: String,
-    pub connected: bool,
     pub focus: Focus,
+    pub message_scroll: u16,
+    pub palette_open: bool,
+    pub active_form: Option<FormKind>,
+    pub login_error: Option<String>,
+    pub screen: Screen,
+}
+
+/// Projection-derived fields produced on the poller thread and sent over mpsc.
+#[derive(Clone, Debug, Default)]
+pub struct ProjectionView {
+    pub channel_tree: Vec<ChannelListItem>,
+    pub selected_messages: Vec<GroupChatMessage>,
+    pub selected_members: Vec<GroupMemberRow>,
+    pub is_admin: bool,
+    pub my_pubkey: Option<String>,
+    pub identity_state: IdentityState,
+    pub relay_connected: bool,
+}
+impl Default for IdentityState { fn default() -> Self { IdentityState::LoggedOut } }
+
+/// Send+Sync read-side state shared between App (main thread) and the poller.
+pub struct SharedProjections {
+    pub group_tree: Arc<GroupTreeProjection>,
+    pub discovered: Arc<DiscoveredGroupsProjection>,
+    pub members: Arc<GroupMembersProjection>,
+    pub active_account: Mutex<ActiveAccountSlot>,
+    pub selected_chat: Mutex<Option<Arc<GroupChatProjection>>>,
+    pub selected_group: Mutex<Option<GroupId>>,
+}
+impl SharedProjections {
+    pub fn project(&self) -> ProjectionView {
+        let discovered = self.discovered.snapshot();
+        let tree_state = self.group_tree.snapshot();
+        let channel_tree = derive_channel_tree(&discovered, &tree_state);
+        let selected_messages = self.selected_chat.lock().ok()
+            .and_then(|c| c.as_ref().map(|c| c.snapshot().messages)).unwrap_or_default();
+        let members = self.members.snapshot().members;
+        let me = self.active_account.lock().ok().and_then(|s| s.lock().ok().and_then(|v| v.clone()));
+        let is_admin = me.as_ref().map(|pk| members.iter().any(|m| &m.pubkey == pk && m.admin)).unwrap_or(false);
+        let identity_state = match &me {
+            Some(pk) => IdentityState::LoggedIn { npub: nmp_core::display::to_npub(pk) },
+            None => IdentityState::LoggingIn,
+        };
+        ProjectionView { channel_tree, selected_messages, selected_members: members, is_admin, my_pubkey: me, identity_state, relay_connected: true }
+    }
+}
+
+/// Spawn the 4Hz background poller (issue #10). Captures only Send Arcs.
+pub fn spawn_poller(shared: Arc<SharedProjections>, tx: UnboundedSender<ProjectionView>) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_millis(250));
+        loop {
+            ticker.tick().await;
+            if tx.send(shared.project()).is_err() { break; }
+        }
+    });
 }
 
 pub struct App {
     app_ptr: *mut NmpApp,
     handle: *mut TwentyNinerHandle,
     relay_url: String,
-    group_tree: Arc<GroupTreeProjection>,
-    discovered: Arc<DiscoveredGroupsProjection>,
+    shared: Arc<SharedProjections>,
+    poll_tx: UnboundedSender<ProjectionView>,
     chats: HashMap<String, Arc<GroupChatProjection>>,
-    rooms: Vec<RoomEntry>,
-    selected_index: usize,
-    selected_room: Option<GroupId>,
+    latest: ProjectionView,
+    screen: Screen,
     focus: Focus,
-    status: String,
+    selected_index: usize,
+    selected_channel: Option<GroupId>,
+    outbox: Vec<PublishOutboxItem>,
+    errors: Vec<String>,
+    palette_open: bool,
+    active_form: Option<FormKind>,
+    message_scroll: u16,
+    login_error: Option<String>,
     should_quit: bool,
 }
 
 impl App {
-    pub fn new(relay_url: impl Into<String>) -> Self {
+    pub fn new(relay_url: impl Into<String>, poll_tx: UnboundedSender<ProjectionView>) -> Self {
         let relay_url = relay_url.into();
-        Self {
-            app_ptr: std::ptr::null_mut(),
-            handle: std::ptr::null_mut(),
-            relay_url: relay_url.clone(),
+        let shared = Arc::new(SharedProjections {
             group_tree: Arc::new(GroupTreeProjection::new()),
-            discovered: Arc::new(DiscoveredGroupsProjection::new(relay_url)),
-            chats: HashMap::new(),
-            rooms: Vec::new(),
-            selected_index: 0,
-            selected_room: None,
-            focus: Focus::RoomList,
-            status: "offline".to_string(),
-            should_quit: false,
+            discovered: Arc::new(DiscoveredGroupsProjection::new(relay_url.clone())),
+            members: Arc::new(GroupMembersProjection::new(relay_url.clone())),
+            active_account: Mutex::new(Arc::new(Mutex::new(None))),
+            selected_chat: Mutex::new(None),
+            selected_group: Mutex::new(None),
+        });
+        Self {
+            app_ptr: std::ptr::null_mut(), handle: std::ptr::null_mut(), relay_url,
+            shared, poll_tx, chats: HashMap::new(), latest: ProjectionView::default(),
+            screen: Screen::Login, focus: Focus::ChannelList, selected_index: 0,
+            selected_channel: None, outbox: Vec::new(), errors: Vec::new(),
+            palette_open: false, active_form: None, message_scroll: 0,
+            login_error: None, should_quit: false,
         }
     }
 
-    /// Mirror `ffi.rs`'s init sequence natively: new -> set storage -> register
-    /// (defaults + NIP-29 actions) -> declare consumed projections -> register
-    /// our read-side projections as observers -> add relay -> start -> sign in
-    /// -> kick off discovery. Returns `Err` (and leaves the app in demo mode)
-    /// when `NMP_NSEC` is absent, so the binary still launches without secrets.
-    pub fn init_nmp(&mut self) -> anyhow::Result<()> {
-        let nsec = std::env::var("NMP_NSEC")
-            .map_err(|_| anyhow::anyhow!("NMP_NSEC unset; running in demo mode"))?;
-        let relay = self.relay_url.clone();
+    /// Validate + hand the nsec straight to NMP, never storing it (issue #10).
+    pub fn login(&mut self, nsec: String) {
+        let nsec = nsec.trim().to_string();
+        if !nsec.starts_with("nsec1") {
+            self.login_error = Some("Secret key must start with nsec1\u{2026}".to_string());
+            return;
+        }
+        match self.init_nmp(&nsec) {
+            Ok(()) => { self.screen = Screen::App; self.focus = Focus::ChannelList; self.login_error = None; }
+            Err(e) => { self.login_error = Some(format!("Sign-in failed: {e}")); }
+        }
+        // `nsec` is dropped here.
+    }
 
+    fn init_nmp(&mut self, nsec: &str) -> anyhow::Result<()> {
+        let relay = self.relay_url.clone();
         let storage = std::env::temp_dir().join("29er-tui-store");
         std::fs::create_dir_all(&storage).ok();
         let storage_str = storage.to_string_lossy().into_owned();
-
         unsafe {
             let app = nmp_ffi::nmp_app_new();
-            if app.is_null() {
-                anyhow::bail!("nmp_app_new returned null");
-            }
-
+            if app.is_null() { anyhow::bail!("nmp_app_new returned null"); }
             let c_storage = CString::new(storage_str)?;
             nmp_ffi::nmp_app_set_storage_path(app, c_storage.as_ptr());
-
             let mut handle: *mut TwentyNinerHandle = std::ptr::null_mut();
             let status = nmp_app_29er_register(app, &mut handle as *mut *mut TwentyNinerHandle);
-            if status != 0 {
-                nmp_ffi::nmp_app_free(app);
-                anyhow::bail!("nmp_app_29er_register failed (status {status})");
-            }
+            if status != 0 { nmp_ffi::nmp_app_free(app); anyhow::bail!("register failed ({status})"); }
             nmp_app_29er_declare_consumed_projections(app);
-
-            // Register the read-side projections as kernel event observers.
             let app_ref = &*app;
-            let _ = app_ref.register_event_observer(
-                Arc::clone(&self.group_tree) as Arc<dyn KernelEventObserver>
-            );
-            let _ = app_ref.register_event_observer(
-                Arc::clone(&self.discovered) as Arc<dyn KernelEventObserver>
-            );
-
+            let _ = app_ref.register_event_observer(Arc::clone(&self.shared.group_tree) as Arc<dyn KernelEventObserver>);
+            let _ = app_ref.register_event_observer(Arc::clone(&self.shared.discovered) as Arc<dyn KernelEventObserver>);
+            let _ = app_ref.register_event_observer(Arc::clone(&self.shared.members) as Arc<dyn KernelEventObserver>);
             let c_relay = CString::new(relay.clone())?;
             let c_role = CString::new("read")?;
             nmp_ffi::nmp_app_add_relay(app, c_relay.as_ptr(), c_role.as_ptr());
             nmp_ffi::nmp_app_start(app, 80, 4);
-
             let c_nsec = CString::new(nsec)?;
             nmp_ffi::nmp_app_signin_nsec(app, c_nsec.as_ptr(), 1);
-
+            if let Ok(mut slot) = self.shared.active_account.lock() { *slot = app_ref.active_account_handle(); }
             self.app_ptr = app;
             self.handle = handle;
         }
-
         let discover_body = serde_json::json!({ "relay_url": relay }).to_string();
         self.dispatch_json("nmp.nip29.discover", &discover_body);
-        self.status = format!("connected: {relay}");
+        spawn_poller(Arc::clone(&self.shared), self.poll_tx.clone());
         Ok(())
     }
 
-    /// Recompute the room list from the discovery + group-tree projections.
-    fn refresh_rooms(&mut self) {
-        let tree = self.group_tree.snapshot();
-        let discovered = self.discovered.snapshot();
-        let mut rooms: Vec<RoomEntry> = discovered
-            .groups
-            .into_iter()
-            .map(|g| {
-                let unread = tree.unread_for(&g.group_id);
-                let last_preview = tree.last_message_for(&g.group_id).map(|m| m.preview.clone());
-                let name = g
-                    .name
-                    .clone()
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or_else(|| g.group_id.clone());
-                let group_id = GroupId::new(g.host_relay_url, g.group_id);
-                RoomEntry { group_id, name, unread, last_preview }
-            })
-            .collect();
-        rooms.sort_by_key(|r| r.name.to_lowercase());
-        self.rooms = rooms;
-        if self.rooms.is_empty() {
-            self.selected_index = 0;
-        } else if self.selected_index >= self.rooms.len() {
-            self.selected_index = self.rooms.len() - 1;
+    /// Store the latest poller view; clamp selection; reconcile the outbox.
+    pub fn ingest_projection(&mut self, view: ProjectionView) {
+        self.latest = view;
+        if self.latest.channel_tree.is_empty() { self.selected_index = 0; }
+        else if self.selected_index >= self.latest.channel_tree.len() {
+            self.selected_index = self.latest.channel_tree.len() - 1;
+        }
+        self.reconcile_outbox();
+    }
+
+    fn reconcile_outbox(&mut self) {
+        let me = self.latest.my_pubkey.clone();
+        for item in self.outbox.iter_mut() {
+            if matches!(item.status, OutboxStatus::Pending) {
+                let confirmed = self.latest.selected_messages.iter().any(|m| {
+                    m.content.trim() == item.content.trim()
+                        && me.as_deref().map(|pk| m.pubkey == pk).unwrap_or(true)
+                });
+                if confirmed { item.status = OutboxStatus::Confirmed; }
+            }
         }
     }
 
-    /// Produce the per-tick view-model. Pure read: snapshots projections only.
-    pub fn snapshot(&mut self) -> AppState {
-        self.refresh_rooms();
-        let messages = self
-            .selected_room
-            .as_ref()
-            .and_then(|r| self.chats.get(&r.local_id))
-            .map(|c| c.snapshot().messages)
-            .unwrap_or_default();
-        AppState {
-            rooms: self.rooms.clone(),
+    pub fn snapshot(&self) -> TuiSnapshot {
+        TuiSnapshot {
+            channel_tree: self.latest.channel_tree.clone(),
+            selected_channel_id: self.selected_channel.clone(),
+            selected_messages: self.latest.selected_messages.clone(),
+            selected_members: self.latest.selected_members.clone(),
+            is_admin: self.latest.is_admin,
+            my_pubkey: self.latest.my_pubkey.clone(),
+            publish_outbox: self.outbox.clone(),
+            identity_state: self.latest.identity_state.clone(),
+            relay_state: if !self.app_ptr.is_null() && self.latest.relay_connected { RelayState::Connected }
+                else if !self.app_ptr.is_null() { RelayState::Connecting } else { RelayState::Disconnected },
+            errors: self.errors.clone(),
             selected_index: self.selected_index,
-            selected_room: self.selected_room.clone(),
-            messages,
-            status: self.status.clone(),
-            connected: !self.app_ptr.is_null(),
             focus: self.focus,
+            message_scroll: self.message_scroll,
+            palette_open: self.palette_open,
+            active_form: self.active_form.clone(),
+            login_error: self.login_error.clone(),
+            screen: self.screen,
         }
     }
 
-    /// Select a room: lazily build + register its chat projection and push the
-    /// room's history/live interests through the per-app entry point.
-    pub fn select_room(&mut self, group_id: GroupId) {
-        let key = group_id.local_id.clone();
+    pub fn select_channel(&mut self, group: GroupId) {
+        let key = group.local_id.clone();
         if !self.chats.contains_key(&key) {
-            let chat = Arc::new(GroupChatProjection::new(group_id.clone()));
+            let chat = Arc::new(GroupChatProjection::new(group.clone()));
             if !self.app_ptr.is_null() {
-                unsafe {
-                    let _ = (&*self.app_ptr).register_event_observer(
-                        Arc::clone(&chat) as Arc<dyn KernelEventObserver>
-                    );
-                }
-                if let Ok(json) = serde_json::to_string(&group_id) {
-                    if let Ok(c) = CString::new(json) {
-                        nmp_app_29er_register_group_chat(self.app_ptr, c.as_ptr());
-                    }
+                unsafe { let _ = (&*self.app_ptr).register_event_observer(Arc::clone(&chat) as Arc<dyn KernelEventObserver>); }
+                if let Ok(json) = serde_json::to_string(&group) {
+                    if let Ok(c) = CString::new(json) { nmp_app_29er_register_group_chat(self.app_ptr, c.as_ptr()); }
                 }
             }
-            self.chats.insert(key, chat);
+            self.chats.insert(key.clone(), chat);
         }
-        self.selected_room = Some(group_id);
-        self.focus = Focus::Input;
+        if let Some(chat) = self.chats.get(&key) {
+            if let Ok(mut slot) = self.shared.selected_chat.lock() { *slot = Some(Arc::clone(chat)); }
+        }
+        if let Ok(mut g) = self.shared.selected_group.lock() { *g = Some(group.clone()); }
+        self.shared.members.select_group(group.local_id.clone());
+        self.shared.group_tree.mark_read(&group.local_id);
+        self.selected_channel = Some(group);
+        self.message_scroll = 0;
+        self.focus = Focus::Chat;
     }
 
-    /// Dispatch a kind:9 chat message into the selected room via the typed
-    /// NIP-29 action namespace.
-    pub fn send_message(&self, body: String) {
-        let trimmed = body.trim();
-        if trimmed.is_empty() {
-            return;
-        }
-        let Some(room) = self.selected_room.clone() else {
-            return;
-        };
-        let input = PostChatMessageInput {
-            group: room,
-            content: trimmed.to_string(),
-            previous_event_id_prefixes: Vec::new(),
-            reply_to_event_id: None,
-            mention_pubkeys: Vec::new(),
-        };
-        if let Ok(json) = serde_json::to_string(&input) {
-            self.dispatch_json("nmp.nip29.post_chat_message", &json);
+    pub fn send_message(&mut self, body: String) {
+        let trimmed = body.trim().to_string();
+        if trimmed.is_empty() { return; }
+        let Some(group) = self.selected_channel.clone() else { self.errors.push("No channel selected".to_string()); return; };
+        let json = serde_json::json!({ "group": group, "content": trimmed }).to_string();
+        let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
+        let mut item = PublishOutboxItem { correlation_id: String::new(), group_local_id: group.local_id.clone(), content: trimmed, status: OutboxStatus::Pending, error: None };
+        Self::apply_dispatch_result(&mut item, result);
+        self.outbox.push(item);
+    }
+
+    pub fn retry_outbox(&mut self, correlation_id: String) {
+        let Some(idx) = self.outbox.iter().position(|i| i.correlation_id == correlation_id) else { return; };
+        let (content, local_id) = { let it = &self.outbox[idx]; (it.content.clone(), it.group_local_id.clone()) };
+        let Some(group) = self.selected_channel.clone().filter(|g| g.local_id == local_id) else { return; };
+        let json = serde_json::json!({ "group": group, "content": content }).to_string();
+        let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
+        let item = &mut self.outbox[idx];
+        item.status = OutboxStatus::Pending; item.error = None;
+        Self::apply_dispatch_result(item, result);
+    }
+
+    fn apply_dispatch_result(item: &mut PublishOutboxItem, result: Option<String>) {
+        match result {
+            Some(r) => match serde_json::from_str::<serde_json::Value>(&r) {
+                Ok(v) => {
+                    if let Some(cid) = v.get("correlation_id").and_then(|c| c.as_str()) { item.correlation_id = cid.to_string(); }
+                    else if let Some(err) = v.get("error").and_then(|c| c.as_str()) { item.status = OutboxStatus::Failed; item.error = Some(err.to_string()); }
+                }
+                Err(_) => { item.status = OutboxStatus::Failed; item.error = Some("bad dispatch reply".to_string()); }
+            },
+            None => { item.status = OutboxStatus::Failed; item.error = Some("dispatch failed".to_string()); }
         }
     }
 
-    fn dispatch_json(&self, namespace: &str, body: &str) {
-        if self.app_ptr.is_null() {
-            return;
-        }
-        let (Ok(ns), Ok(body)) = (CString::new(namespace), CString::new(body)) else {
-            return;
-        };
-        let res = nmp_app_29er_dispatch_action_bytes(self.app_ptr, ns.as_ptr(), body.as_ptr());
-        if !res.is_null() {
-            nmp_free_string(res);
-        }
+    pub fn join(&mut self, group: GroupId, invite_code: Option<String>) {
+        let body = serde_json::json!({ "group": group, "invite_code": invite_code }).to_string();
+        self.dispatch_json("nmp.nip29.join", &body); self.active_form = None;
+    }
+    pub fn leave(&mut self, group: GroupId) {
+        let body = serde_json::json!({ "group": group }).to_string();
+        self.dispatch_json("nmp.nip29.leave", &body);
+    }
+    pub fn create_invite(&mut self, group: GroupId, codes: Vec<String>) {
+        let body = serde_json::json!({ "group": group, "codes": codes }).to_string();
+        self.dispatch_json("nmp.nip29.create_invite", &body); self.active_form = None;
+    }
+    pub fn put_user(&mut self, group: GroupId, target_pubkey: String, role: Option<String>) {
+        let body = serde_json::json!({ "group": group, "target_pubkey": target_pubkey, "role": role }).to_string();
+        self.dispatch_json("nmp.nip29.put_user", &body); self.active_form = None;
+    }
+    pub fn create_child(&mut self, parent: GroupId, name: String) {
+        let local_id = generate_local_id();
+        let body = serde_json::json!({
+            "group": { "host_relay_url": parent.host_relay_url, "local_id": local_id },
+            "name": name, "visibility": "public", "access": "open", "parent": parent.local_id,
+        }).to_string();
+        self.dispatch_json("nmp.nip29.create_public_group", &body); self.active_form = None;
+    }
+    pub fn move_channel(&mut self, group: GroupId, parent: Option<String>) {
+        let body = serde_json::json!({ "group": group, "parent": parent }).to_string();
+        self.dispatch_json("nmp.nip29.set_parent", &body); self.active_form = None;
+    }
+    pub fn show_members(&mut self, group: GroupId) { self.shared.members.select_group(group.local_id); }
+
+    fn dispatch_json(&mut self, namespace: &str, body: &str) -> Option<String> {
+        if self.app_ptr.is_null() { return None; }
+        let (Ok(ns), Ok(b)) = (CString::new(namespace), CString::new(body)) else { return None; };
+        let res = nmp_app_29er_dispatch_action_bytes(self.app_ptr, ns.as_ptr(), b.as_ptr());
+        if res.is_null() { return None; }
+        let out = unsafe { CStr::from_ptr(res) }.to_string_lossy().into_owned();
+        nmp_free_string(res);
+        Some(out)
     }
 
     pub fn navigate(&mut self, delta: isize) {
-        if self.rooms.is_empty() {
-            return;
-        }
-        let len = self.rooms.len() as isize;
-        self.selected_index = (self.selected_index as isize + delta).rem_euclid(len) as usize;
+        let len = self.latest.channel_tree.len();
+        if len == 0 { return; }
+        self.selected_index = (self.selected_index as isize + delta).rem_euclid(len as isize) as usize;
     }
-
-    pub fn focus(&self) -> Focus {
-        self.focus
-    }
-
-    pub fn set_focus(&mut self, focus: Focus) {
-        self.focus = focus;
-    }
-
-    pub fn toggle_focus(&mut self) {
-        self.focus = match self.focus {
-            Focus::RoomList => Focus::Input,
-            Focus::Input => Focus::RoomList,
-        };
-    }
-
-    pub fn set_status(&mut self, status: impl Into<String>) {
-        self.status = status.into();
-    }
-
-    pub fn quit(&mut self) {
-        self.should_quit = true;
-    }
-
-    pub fn should_quit(&self) -> bool {
-        self.should_quit
-    }
+    pub fn channel_at_cursor(&self) -> Option<GroupId> { self.latest.channel_tree.get(self.selected_index).map(|c| c.group_id.clone()) }
+    pub fn scroll_messages(&mut self, delta: i32) { let n = self.message_scroll as i32 + delta; self.message_scroll = n.max(0) as u16; }
+    pub fn focus(&self) -> Focus { self.focus }
+    pub fn set_focus(&mut self, f: Focus) { self.focus = f; }
+    pub fn cycle_focus(&mut self) { self.focus = self.focus.next(); }
+    pub fn screen(&self) -> Screen { self.screen }
+    pub fn palette_open(&self) -> bool { self.palette_open }
+    pub fn set_palette(&mut self, open: bool) { self.palette_open = open; }
+    pub fn open_form(&mut self, f: FormKind) { self.active_form = Some(f); }
+    pub fn close_form(&mut self) { self.active_form = None; }
+    pub fn active_form(&self) -> Option<&FormKind> { self.active_form.as_ref() }
+    pub fn quit(&mut self) { self.should_quit = true; }
+    pub fn should_quit(&self) -> bool { self.should_quit }
 }
 
 impl Drop for App {
     fn drop(&mut self) {
-        if !self.handle.is_null() {
-            nmp_app_29er_unregister(self.handle);
+        if !self.handle.is_null() { nmp_app_29er_unregister(self.handle); }
+        if !self.app_ptr.is_null() { nmp_ffi::nmp_app_free(self.app_ptr); }
+    }
+}
+
+fn generate_local_id() -> String {
+    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("ch-{n:x}")
+}
+
+fn name_for(d: &DiscoveredGroupsSnapshot, id: &str) -> String {
+    d.groups.iter().find(|g| g.group_id == id).and_then(|g| g.name.clone())
+        .filter(|n| !n.is_empty()).unwrap_or_else(|| id.to_string())
+}
+
+fn make_item(g: &DiscoveredGroup, depth: usize, tree: &GroupTreeMessageState, is_branch: bool) -> ChannelListItem {
+    let last = tree.last_message_for(&g.group_id);
+    ChannelListItem {
+        group_id: GroupId::new(g.host_relay_url.clone(), g.group_id.clone()),
+        local_id: g.group_id.clone(),
+        name: g.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| g.group_id.clone()),
+        depth,
+        unread: tree.unread_for(&g.group_id),
+        member_count: g.member_count,
+        admin_count: g.admin_count,
+        is_branch,
+        last_preview: last.map(|m| m.preview.clone()),
+        last_timestamp: last.map(|m| m.created_at),
+    }
+}
+
+/// Map NMP discovery + group-tree projections into a flattened, depth-annotated
+/// channel list (issue #3). Roots and children are ordered alphabetically.
+#[must_use]
+pub fn derive_channel_tree(discovered: &DiscoveredGroupsSnapshot, tree_state: &GroupTreeMessageState) -> Vec<ChannelListItem> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let known: BTreeSet<&str> = discovered.groups.iter().map(|g| g.group_id.as_str()).collect();
+    let mut parent_of: BTreeMap<&str, &str> = BTreeMap::new();
+    let mut children_of: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for g in &discovered.groups {
+        if let Some(p) = g.parent.as_deref() {
+            if p != g.group_id && known.contains(p) {
+                parent_of.insert(&g.group_id, p);
+                children_of.entry(p).or_default().insert(&g.group_id as &str);
+            }
         }
-        if !self.app_ptr.is_null() {
-            nmp_ffi::nmp_app_free(self.app_ptr);
+        for c in &g.children {
+            let c = c.as_str();
+            if c != g.group_id && known.contains(c) {
+                children_of.entry(&g.group_id as &str).or_default().insert(c);
+                parent_of.entry(c).or_insert(&g.group_id as &str);
+            }
         }
+    }
+    let by_id: BTreeMap<&str, &DiscoveredGroup> = discovered.groups.iter().map(|g| (g.group_id.as_str(), g)).collect();
+    let mut roots: Vec<&str> = discovered.groups.iter().map(|g| g.group_id.as_str())
+        .filter(|id| !parent_of.contains_key(id)).collect();
+    roots.sort_by_key(|id| name_for(discovered, id).to_lowercase());
+    let mut out = Vec::new();
+    let mut stack: Vec<(&str, usize)> = roots.iter().rev().map(|id| (*id, 0usize)).collect();
+    let mut visited: BTreeSet<&str> = BTreeSet::new();
+    while let Some((id, depth)) = stack.pop() {
+        if !visited.insert(id) { continue; }
+        if let Some(g) = by_id.get(id) {
+            let branch = children_of.get(id).map(|c| !c.is_empty()).unwrap_or(false);
+            out.push(make_item(g, depth, tree_state, branch));
+            if let Some(children) = children_of.get(id) {
+                let mut kids: Vec<&str> = children.iter().copied().collect();
+                kids.sort_by_key(|cid| name_for(discovered, cid).to_lowercase());
+                for cid in kids.into_iter().rev() { stack.push((cid, depth + 1)); }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nmp_core::substrate::KernelEvent;
+    use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
+
+    fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
+        DiscoveredGroup {
+            group_id: id.to_string(), host_relay_url: "wss://h".to_string(),
+            name: Some(id.to_string()), picture: None, about: None,
+            member_count: 3, admin_count: 1, public: true, open: true,
+            parent: parent.map(str::to_string), children: children.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+    fn snap() -> DiscoveredGroupsSnapshot {
+        DiscoveredGroupsSnapshot { host_relay_url: "wss://h".to_string(),
+            groups: vec![group("root", None, &["child"]), group("child", Some("root"), &[]), group("alpha", None, &[])] }
+    }
+    fn evt(id: &str, g: &str, ts: u64, c: &str) -> KernelEvent {
+        KernelEvent { id: id.to_string(), author: "pk".to_string(), kind: KIND_CHAT_MESSAGE, created_at: ts,
+            tags: vec![vec!["h".to_string(), g.to_string()]], content: c.to_string(), relay_provenance: Vec::new() }
+    }
+
+    #[test]
+    fn tree_is_depth_annotated_and_alpha_ordered() {
+        let items = derive_channel_tree(&snap(), &GroupTreeProjection::new().snapshot());
+        let ids: Vec<_> = items.iter().map(|i| (i.local_id.as_str(), i.depth, i.is_branch)).collect();
+        assert_eq!(ids, vec![("alpha", 0, false), ("root", 0, true), ("child", 1, false)]);
+    }
+    #[test]
+    fn item_carries_unread_and_preview_from_group_tree() {
+        let proj = GroupTreeProjection::new();
+        proj.on_kernel_event(&evt("a", "child", 10, "hello"));
+        proj.on_kernel_event(&evt("b", "child", 20, "newest"));
+        let items = derive_channel_tree(&snap(), &proj.snapshot());
+        let child = items.iter().find(|i| i.local_id == "child").unwrap();
+        assert_eq!(child.unread, 2);
+        assert_eq!(child.last_preview.as_deref(), Some("newest"));
+        assert_eq!(child.member_count, 3);
     }
 }
