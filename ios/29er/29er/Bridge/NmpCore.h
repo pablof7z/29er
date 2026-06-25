@@ -79,6 +79,10 @@ uint32_t nmp_signer_broker_init(void *app);
 // secondary signer without activating it.
 void nmp_app_signin_nsec(void *app, const char *secret, uint8_t make_active);
 
+// Remove an identity. If it is the active account, the kernel clears or
+// retargets active_account and enqueues keyring forget work.
+void nmp_app_remove_account(void *app, const char *identity_id);
+
 // ── T151 — capability socket ──────────────────────────────────────────────
 //
 // `nmp_app_set_capability_callback` registers the native handler that the
@@ -188,6 +192,7 @@ void nmp_app_29er_register_group_chat(void *app, const char *group_id_json);
 void *nmp_app_29er_open_group_discovery(void *app, const char *host_relay_url);
 void nmp_app_29er_close_group_discovery(void *handle);
 void nmp_app_29er_mark_group_read(void *handle, const char *group_id);
+void nmp_app_29er_select_group_members(void *handle, const char *group_id);
 
 // ADR-0064 / S4 (#1782) — 29er's direct (namespace, body_json) BYTE doorway,
 // for the sites that already hold a Rust-shaped body string (NIP-29 group
@@ -197,6 +202,11 @@ void nmp_app_29er_mark_group_read(void *handle, const char *group_id);
 // contract as `nmp_app_dispatch_action_bytes`. Fail-closed (D6) on
 // null/unknown namespace.
 char *nmp_app_29er_dispatch_action_bytes(void *app, const char *namespace, const char *body_json);
+
+// Kernel-owned publish lifecycle control plane. `handle` is the opaque
+// `publish_outbox` row handle; Rust owns retry policy and no-ops invalid or
+// stale handles (D6).
+void nmp_app_retry_publish(void *app, const char *handle);
 
 // Release a Rust-heap C string returned by ANY NMP FFI function. Null-safe.
 // This is the ONLY correct freer — the host's free(3) must NOT be used.

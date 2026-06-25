@@ -49,6 +49,14 @@ final class KernelModel: ObservableObject {
     /// group's event filter and newest-first ordering; Swift renders it.
     @Published var typedGroupChat: GroupChatSnapshot?
 
+    /// Typed `nmp.nip29.group_members` sidecar (`NGMS`). Rust owns selected
+    /// group membership/admin derivation; Swift renders it.
+    @Published var typedGroupMembers: GroupMembersSnapshot?
+
+    /// Typed kernel-owned `publish_outbox` sidecar (`KPBO`). Rust owns publish
+    /// lifecycle, retry policy, and offline queue state; Swift renders rows.
+    @Published var typedPublishOutbox: [PublishOutboxItem]?
+
     /// Typed `active_account` sidecar (`KACT`). `nil` ⇒ no active account on
     /// the last tick (startup before sign-in). Read through the
     /// `activeAccountPubkey` accessor.
@@ -78,6 +86,7 @@ final class KernelModel: ObservableObject {
     func openGroupTimeline(_ groupId: String) {
         selectedGroupId = groupId
         discoveredGroups.markGroupRead(groupId: groupId)
+        discoveredGroups.selectGroupMembers(groupId: groupId)
         guard let node = groupTree.allNodes[groupId] else { return }
         kernel.registerGroupChat(groupId: GroupId(
             hostRelayUrl: node.hostRelayUrl,

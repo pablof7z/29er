@@ -228,6 +228,17 @@ final class KernelHandle {
     func signInNsec(_ nsec: String) {
         nsec.withCString { nmp_app_signin_nsec(raw, $0, 1) }
     }
+
+    /// Remove an identity. The Rust actor owns the resulting active-account
+    /// transition and keyring forget work; Swift only names the current
+    /// account to remove.
+    func removeAccount(_ pubkey: String) {
+        pubkey.withCString { nmp_app_remove_account(raw, $0) }
+    }
+
+    func retryPublish(handle: String) {
+        handle.withCString { nmp_app_retry_publish(raw, $0) }
+    }
 }
 
 final class KernelUpdateSink {
@@ -308,6 +319,8 @@ extension KernelHandle {
                 let typedDiscoveredGroups = TypedDiscoveredGroupsDecoder.decode(from: envelopes)
                 let typedGroupTree = TypedGroupTreeDecoder.decode(from: envelopes)
                 let typedGroupChat = TypedGroupChatDecoder.decode(from: envelopes)
+                let typedGroupMembers = TypedGroupMembersDecoder.decode(from: envelopes)
+                let typedPublishOutbox = TypedPublishOutboxDecoder.decode(from: envelopes)
                 let typedActiveAccount = TypedActiveAccountDecoder.decode(from: envelopes)
                 let duration = start.duration(to: .now)
                 kbLog.info("decoded ok rev=\(rev) activeAccount=\(typedActiveAccount ?? "nil")")
@@ -316,6 +329,8 @@ extension KernelHandle {
                         typedDiscoveredGroups: typedDiscoveredGroups,
                         typedGroupTree: typedGroupTree,
                         typedGroupChat: typedGroupChat,
+                        typedGroupMembers: typedGroupMembers,
+                        typedPublishOutbox: typedPublishOutbox,
                         typedActiveAccount: typedActiveAccount,
                         rev: rev,
                         running: running,

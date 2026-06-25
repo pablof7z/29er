@@ -16,9 +16,11 @@
 		2E3B9C62EDF8200593D23781 /* GroupTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99696704A85A57CC885F55AF /* GroupTree.swift */; };
 		42698E6B26592C89A9A89CDA /* KeychainCapability.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91C35535B6E84575DDC847F5 /* KeychainCapability.swift */; };
 		502091213898ECEAF798A254 /* DiscoveredGroups.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F0838D20014D25E25BFE6D7 /* DiscoveredGroups.generated.swift */; };
+		5DBE3A8F9F9E6E64F7A3C7DA /* group_members_generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0E7BC65C5939E4B9D8B5B5E /* group_members_generated.swift */; };
 		6294BB109EC52668BC0483DC /* GroupChat.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EDA103286E91B1A28E6FA71 /* GroupChat.generated.swift */; };
 		78A47E212755CAECACF88B67 /* KernelUpdateTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 398E1727FD663BB294EBBFC8 /* KernelUpdateTypes.swift */; };
 		86BF88172B8EBF6FEE37D0BB /* KernelModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44EFA1C646FBE80DAC3D74A /* KernelModel.swift */; };
+		875EFDC7FDDC2917D19FF2A6 /* publish_outbox_generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09FED775124E2D75B2F02B67 /* publish_outbox_generated.swift */; };
 		8CC741A425C070F2840643E6 /* KernelModel+Lifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FEB12768B0FD8100165158C /* KernelModel+Lifecycle.swift */; };
 		98E1E66EA87E5D5B6533C34B /* ActiveAccount.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E4D7ADA8368CFA74D520CB /* ActiveAccount.generated.swift */; };
 		A3C9A4EBF2FD6DD86860148A /* DataStates.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE6218BA6F39080D94199D8C /* DataStates.swift */; };
@@ -33,6 +35,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		09FED775124E2D75B2F02B67 /* publish_outbox_generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = publish_outbox_generated.swift; sourceTree = "<group>"; };
 		1DB0967B8681681998F8975C /* NmpCore.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = NmpCore.h; sourceTree = "<group>"; };
 		2F0838D20014D25E25BFE6D7 /* DiscoveredGroups.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveredGroups.generated.swift; sourceTree = "<group>"; };
 		3574649692B54614314DB3FB /* GroupTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupTreeView.swift; sourceTree = "<group>"; };
@@ -51,6 +54,7 @@
 		B145FF42AA446276AEFA3B3D /* TwentyNinerCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TwentyNinerCapabilities.swift; sourceTree = "<group>"; };
 		BAE20A89BDA40FFA8C355E18 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C93BB1F3B7983052316B136A /* group_tree_generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = group_tree_generated.swift; sourceTree = "<group>"; };
+		D0E7BC65C5939E4B9D8B5B5E /* group_members_generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = group_members_generated.swift; sourceTree = "<group>"; };
 		D0A8194E83F64EFB225496D9 /* KernelBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KernelBridge.swift; sourceTree = "<group>"; };
 		E517E4888FC04BDFBA36B1C3 /* NmpUpdate.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NmpUpdate.generated.swift; sourceTree = "<group>"; };
 		E8E4D7ADA8368CFA74D520CB /* ActiveAccount.generated.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveAccount.generated.swift; sourceTree = "<group>"; };
@@ -146,9 +150,11 @@
 			children = (
 				E8E4D7ADA8368CFA74D520CB /* ActiveAccount.generated.swift */,
 				2F0838D20014D25E25BFE6D7 /* DiscoveredGroups.generated.swift */,
+				D0E7BC65C5939E4B9D8B5B5E /* group_members_generated.swift */,
 				C93BB1F3B7983052316B136A /* group_tree_generated.swift */,
 				6EDA103286E91B1A28E6FA71 /* GroupChat.generated.swift */,
 				E517E4888FC04BDFBA36B1C3 /* NmpUpdate.generated.swift */,
+				09FED775124E2D75B2F02B67 /* publish_outbox_generated.swift */,
 			);
 			path = Generated;
 			sourceTree = "<group>";
@@ -220,6 +226,7 @@
 				105B3B5416BFBE5FCCBFB4AE /* App.swift in Sources */,
 				A3C9A4EBF2FD6DD86860148A /* DataStates.swift in Sources */,
 				502091213898ECEAF798A254 /* DiscoveredGroups.generated.swift in Sources */,
+				5DBE3A8F9F9E6E64F7A3C7DA /* group_members_generated.swift in Sources */,
 				6294BB109EC52668BC0483DC /* GroupChat.generated.swift in Sources */,
 				F022F5F5AD1D3FEB8A3C95F1 /* GroupDiscoveryBridge.swift in Sources */,
 				2E3B9C62EDF8200593D23781 /* GroupTree.swift in Sources */,
@@ -238,6 +245,7 @@
 				CB6817C74046035284BDFB8C /* TypedProjectionDecoders.swift in Sources */,
 				299322783E4F97821BCDEA75 /* TypedProjectionGlue.swift in Sources */,
 				DC9DF228B6B708C8A180DF5D /* group_tree_generated.swift in Sources */,
+				875EFDC7FDDC2917D19FF2A6 /* publish_outbox_generated.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -252,6 +260,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = 29er/29er.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 456SHKPP26;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]" = "/tmp/LocalFrameworks $(inherited)";
@@ -347,6 +356,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = 29er/29er.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = 456SHKPP26;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				"FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]" = "/tmp/LocalFrameworks $(inherited)";

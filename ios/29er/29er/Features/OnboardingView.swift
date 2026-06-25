@@ -6,9 +6,8 @@ import UIKit
 /// an nsec and taps Sign In; `submitNsec` dispatches it to NMP (D004 — the
 /// nsec is handed to Rust once and never re-read by Swift).
 ///
-/// Deliberately plain — no Liquid Glass polish until S06. The error + loading
-/// states are driven by `model.identityState` so the view is a pure function
-/// of the model.
+/// The error + loading states are driven by `model.identityState` so the view
+/// is a pure function of the model.
 struct OnboardingView: View {
     @EnvironmentObject private var model: KernelModel
     @State private var nsecInput: String = ""
@@ -25,7 +24,7 @@ struct OnboardingView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
+            VStack(spacing: 26) {
                 Spacer()
 
                 VStack(spacing: 8) {
@@ -41,38 +40,52 @@ struct OnboardingView: View {
                         .padding(.horizontal)
                 }
 
-                VStack(spacing: 12) {
-                    SecureField("nsec1…", text: $nsecInput)
-                        .textContentType(.password)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .focused($fieldIsFocused)
-                        .submitLabel(.go)
-                        .onSubmit(submit)
+                GlassEffectContainer(spacing: 14) {
+                    VStack(spacing: 14) {
+                        SecureField("nsec1…", text: $nsecInput)
+                            .textContentType(.password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .focused($fieldIsFocused)
+                            .submitLabel(.go)
+                            .onSubmit(submit)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                            .glassPanel(cornerRadius: 16, interactive: true)
 
-                    HStack(spacing: 12) {
-                        Button("Paste nsec", action: paste)
-                            .buttonStyle(.bordered)
-                        Button("Sign In", action: submit)
-                            .buttonStyle(.borderedProminent)
+                        HStack(spacing: 12) {
+                            Button(action: paste) {
+                                Label("Paste nsec", systemImage: "doc.on.clipboard")
+                            }
+                            .buttonStyle(.glass)
+
+                            Button(action: submit) {
+                                Label("Sign In", systemImage: "arrow.right")
+                            }
+                            .buttonStyle(.glassProminent)
                             .disabled(nsecInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading)
-                    }
+                        }
 
-                    if isLoading {
-                        ProgressView("Signing in…")
-                            .padding(.top, 4)
-                    } else if isError {
-                        Text(errorText)
-                            .font(.callout)
-                            .foregroundStyle(.red)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
+                        if isLoading {
+                            ProgressView("Signing in…")
+                                .padding(.top, 2)
+                        } else if isError {
+                            Text(errorText)
+                                .font(.callout)
+                                .foregroundStyle(.red)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
                     }
+                    .padding(18)
+                    .glassPanel(cornerRadius: 24)
                 }
                 .padding(.horizontal)
 
                 Spacer()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Welcome")
             .navigationBarTitleDisplayMode(.inline)
             .onAppear { fieldIsFocused = false }

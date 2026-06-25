@@ -5,13 +5,13 @@ import os.log
 private let gtLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupTreeView")
 
 /// S03 main group-tree navigation screen. Renders the Rust-owned
-/// `GroupTreeSnapshot` as an expandable forest per D009:
+/// `GroupTreeSnapshot` as a push-navigation group list per D009:
 ///
 ///   - `NavigationStack` + push navigation (no `.sidebar` split column —
 ///     iPhone-only).
 ///   - Branch rows keep the branch's own `NavigationLink` (D003 — branch nodes
-///     are real groups; tapping the label navigates to the group's timeline,
-///     tapping the chevron expands/collapses children).
+///     are real groups; tapping the row navigates to the group's timeline,
+///     tapping the trailing chevron pushes the child groups).
 ///   - Leaf rows are plain chat-list rows.
 ///   - Pushed destination is a placeholder timeline view (`TimelinePlaceholder`)
 ///     — S04 replaces it with the real kind:9 timeline.
@@ -20,10 +20,9 @@ private let gtLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupT
 ///   - `isSearching && tree.roots.isEmpty` → `LoadingView`
 ///   - `kernelIsDead` → `ErrorStateView`
 ///   - otherwise empty → `EmptyStateView`
-///   - otherwise → the chat-style forest.
+///   - otherwise → the chat-style list.
 struct GroupTreeView: View {
     @EnvironmentObject private var model: KernelModel
-    @State private var expandedGroups = Set<String>()
 
     var body: some View {
         let tree = model.groupTree
@@ -42,19 +41,11 @@ struct GroupTreeView: View {
                 )
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(tree.roots) { node in
-                            GroupTreeRow(
-                                node: node,
-                                tree: tree,
-                                depth: 0,
-                                expandedGroups: $expandedGroups
-                            )
-                        }
-                    }
-                    .padding(.top, 8)
+                    GroupTreeList(nodes: tree.roots, tree: tree)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
                 }
-                .background(Color(.systemBackground))
+                .background(Color(.systemGroupedBackground))
             }
         }
         .navigationTitle(navigationTitle(tree: tree))
@@ -62,9 +53,12 @@ struct GroupTreeView: View {
         .navigationDestination(for: String.self) { groupId in
             GroupTimelineView(groupId: groupId)
         }
+        .navigationDestination(for: GroupChildrenRoute.self) { route in
+            GroupChildrenView(parentGroupId: route.groupId)
+        }
         .task {
             if model.discoveredGroups.hostRelayUrl.isEmpty {
-                model.openGroupDiscovery(hostRelayUrl: "wss://nip29.f7z.io")
+                model.openGroupDiscovery(hostRelayUrl: defaultNip29RelayUrl)
             }
         }
         .onChange(of: tree.totalCount) { _, count in
@@ -81,69 +75,96 @@ struct GroupTreeView: View {
     }
 }
 
-/// Recursive row view. Branches render an explicit expand control next to the
-/// branch's own `NavigationLink` (D003 — branch nodes are real groups with
-/// their own timeline, not just expand/collapse folders). Leaves render a
-/// plain `NavigationLink`.
+private struct GroupChildrenRoute: Hashable {
+    let groupId: String
+}
+
+private struct GroupTreeList: View {
+    let nodes: [GroupTreeNode]
+    let tree: GroupTreeSnapshot
+
+    var body: some View {
+        GlassEffectContainer(spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(nodes) { node in
+                    GroupTreeRow(node: node, tree: tree)
+                }
+            }
+        }
+    }
+}
+
+/// Branch rows expose two targets: the row opens the group's own timeline,
+/// while the trailing chevron pushes a list of that group's children.
 struct GroupTreeRow: View {
     let node: GroupTreeNode
     let tree: GroupTreeSnapshot
-    let depth: Int
-    @Binding var expandedGroups: Set<String>
-
-    private var isExpanded: Bool { expandedGroups.contains(node.groupId) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                if node.isBranch {
-                    Button(action: toggle) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 24, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Color.clear.frame(width: 24, height: 44)
-                }
-
+            HStack(spacing: 8) {
                 NavigationLink(value: node.groupId) {
                     GroupRowLabel(node: node)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .buttonStyle(.plain)
-            }
-            .padding(.leading, CGFloat(12 + depth * 18))
-            .padding(.trailing, 12)
-            .padding(.vertical, 8)
 
-            Divider()
-                .padding(.leading, CGFloat(82 + depth * 18))
-
-            if node.isBranch && isExpanded {
-                ForEach(children) { child in
-                    GroupTreeRow(
-                        node: child,
-                        tree: tree,
-                        depth: depth + 1,
-                        expandedGroups: $expandedGroups
-                    )
+                if !children.isEmpty {
+                    NavigationLink(value: GroupChildrenRoute(groupId: node.groupId)) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Show child groups for \(node.displayName)")
                 }
             }
+            .padding(.leading, 12)
+            .padding(.trailing, 12)
+            .padding(.vertical, 8)
+            .glassPanel(cornerRadius: 18, interactive: true)
         }
     }
 
     private var children: [GroupTreeNode] {
         node.childIds.compactMap { tree.allNodes[$0] }
     }
+}
 
-    private func toggle() {
-        if isExpanded {
-            expandedGroups.remove(node.groupId)
-        } else {
-            expandedGroups.insert(node.groupId)
+private struct GroupChildrenView: View {
+    @EnvironmentObject private var model: KernelModel
+    let parentGroupId: String
+
+    private var parent: GroupTreeNode? {
+        model.groupTree.allNodes[parentGroupId]
+    }
+
+    private var children: [GroupTreeNode] {
+        guard let parent else { return [] }
+        return parent.childIds.compactMap { model.groupTree.allNodes[$0] }
+    }
+
+    var body: some View {
+        Group {
+            if children.isEmpty {
+                ContentUnavailableView(
+                    "No Child Groups",
+                    systemImage: "folder",
+                    description: Text("This group does not have any child groups.")
+                )
+            } else {
+                ScrollView {
+                    GroupTreeList(nodes: children, tree: model.groupTree)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                }
+                .background(Color(.systemGroupedBackground))
+            }
         }
+        .navigationTitle(parent?.displayName ?? "Groups")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -226,7 +247,8 @@ struct GroupTimelineView: View {
     let groupId: String
 
     @State private var draft = ""
-    @State private var pendingMessages: [PendingGroupMessage] = []
+    @State private var selectedMentionPubkeys: Set<String> = []
+    @State private var showingMembers = false
     @FocusState private var composerFocused: Bool
 
     private var node: GroupTreeNode? {
@@ -243,6 +265,18 @@ struct GroupTimelineView: View {
         Array(model.groupChat.messages.reversed())
     }
 
+    private var outboxMessages: [PublishOutboxItem] {
+        let deliveredIds = Set(model.groupChat.messages.map(\.id))
+        let filtered = model.publishOutbox.filter { item in
+            item.kind == 9 &&
+                !deliveredIds.contains(item.eventId) &&
+                item.tags.contains { tag in
+                    tag.count >= 2 && tag[0] == "h" && tag[1] == groupId
+                }
+        }
+        return Array(filtered.reversed())
+    }
+
     private var trimmedDraft: String {
         draft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -251,19 +285,22 @@ struct GroupTimelineView: View {
         !trimmedDraft.isEmpty && node != nil && !model.kernelIsDead
     }
 
-    private var mentionSuggestions: [String] {
+    private var currentMembers: [GroupMember] {
+        guard model.groupMembers.groupId == groupId else { return [] }
+        return model.groupMembers.members
+    }
+
+    private var mentionSuggestions: [GroupMember] {
         let token = currentMentionToken(in: draft)
-        let authors = model.groupChat.messages
-            .map(\.pubkey)
-            .reduce(into: [String]()) { result, pubkey in
-                if !result.contains(pubkey) {
-                    result.append(pubkey)
-                }
-            }
         guard let token else { return [] }
         let needle = token.lowercased()
-        return authors
-            .filter { needle.isEmpty || $0.shortHex.lowercased().contains(needle) || $0.lowercased().contains(needle) }
+        return currentMembers
+            .filter { member in
+                needle.isEmpty ||
+                    member.title.lowercased().contains(needle) ||
+                    member.pubkey.shortHex.lowercased().contains(needle) ||
+                    member.pubkey.lowercased().contains(needle)
+            }
             .prefix(4)
             .map { $0 }
     }
@@ -275,7 +312,7 @@ struct GroupTimelineView: View {
                     ErrorStateView(
                         message: "The background service stopped. Relaunch the app to recover."
                     )
-                } else if visibleMessages.isEmpty && pendingMessages.isEmpty {
+                } else if visibleMessages.isEmpty && outboxMessages.isEmpty {
                     emptyChat
                 } else {
                     messageStream(proxy: proxy)
@@ -283,7 +320,7 @@ struct GroupTimelineView: View {
 
                 composer
             }
-            .background(Color(.systemBackground))
+            .background(Color(.systemGroupedBackground))
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -312,24 +349,30 @@ struct GroupTimelineView: View {
 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     if let node {
-                        Label(
-                            node.memberCount == 1 ? "1 member" : "\(node.memberCount) members",
-                            systemImage: "person.2"
-                        )
+                        Button {
+                            showingMembers = true
+                        } label: {
+                            Label(
+                                node.memberCount == 1 ? "1 member" : "\(node.memberCount) members",
+                                systemImage: "person.2"
+                            )
+                        }
                         .labelStyle(.iconOnly)
-                        .foregroundStyle(.secondary)
                         .accessibilityLabel(node.memberCount == 1 ? "1 member" : "\(node.memberCount) members")
                     }
                 }
+            }
+            .sheet(isPresented: $showingMembers) {
+                MemberListSheet(title: title, members: currentMembers)
+                    .presentationDetents([.medium, .large])
             }
             .task(id: groupId) {
                 model.openGroupTimeline(groupId)
             }
             .onChange(of: model.groupChat.messages) { _, _ in
-                reconcilePending()
                 scrollToBottom(proxy)
             }
-            .onChange(of: pendingMessages.count) { _, _ in
+            .onChange(of: outboxMessages.count) { _, _ in
                 scrollToBottom(proxy)
             }
         }
@@ -341,108 +384,117 @@ struct GroupTimelineView: View {
             systemImage: "bubble.left.and.bubble.right",
             description: Text("Start the conversation in this NIP-29 group.")
         )
+        .padding(24)
+        .frame(maxWidth: 360)
+        .glassPanel(cornerRadius: 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func messageStream(proxy: ScrollViewProxy) -> some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
-                ForEach(visibleMessages) { message in
-                    GroupMessageRow(
-                        message: message,
-                        isOwnMessage: message.pubkey == model.activeAccountPubkey,
-                        onReact: {
-                            model.reactToGroupMessage(
-                                groupId: groupId,
-                                eventId: message.id,
-                                eventAuthorPubkey: message.pubkey
-                            )
-                        }
-                    )
-                    .id(message.id)
-                }
-
-                ForEach(pendingMessages) { message in
-                    PendingMessageRow(message: message)
+            GlassEffectContainer(spacing: 12) {
+                LazyVStack(spacing: 10) {
+                    ForEach(visibleMessages) { message in
+                        let pending = outboxItem(for: message.id)
+                        GroupMessageRow(
+                            message: message,
+                            isOwnMessage: message.pubkey == model.activeAccountPubkey,
+                            pendingStatus: pending?.status,
+                            canRetry: pending?.canRetry ?? false,
+                            onRetry: {
+                                if let pending {
+                                    model.retryPublish(pending)
+                                }
+                            },
+                            onReact: {
+                                model.reactToGroupMessage(
+                                    groupId: groupId,
+                                    eventId: message.id,
+                                    eventAuthorPubkey: message.pubkey
+                                )
+                            }
+                        )
                         .id(message.id)
-                }
+                    }
 
-                Color.clear
-                    .frame(height: 1)
-                    .id("chat-bottom")
+                    ForEach(outboxMessages) { message in
+                        PendingMessageRow(
+                            message: message,
+                            onRetry: { model.retryPublish(message) }
+                        )
+                        .id(message.id)
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("chat-bottom")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
         }
         .onAppear { scrollToBottom(proxy, animated: false) }
     }
 
     private var composer: some View {
-        VStack(spacing: 0) {
-            if !mentionSuggestions.isEmpty {
-                mentionSuggestionBar
-            }
-
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("Message \(title)", text: $draft, axis: .vertical)
-                    .focused($composerFocused)
-                    .font(.body)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...4)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .stroke(Color(.separator), lineWidth: 0.5)
-                    )
-                    .accessibilityIdentifier("group-chat-message-editor")
-
-                Button(action: sendDraft) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 29, weight: .semibold))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
-                        .frame(width: 32, height: 32)
+        GlassEffectContainer(spacing: 10) {
+            VStack(spacing: 0) {
+                if !mentionSuggestions.isEmpty {
+                    mentionSuggestionBar
                 }
-                .buttonStyle(.plain)
-                .disabled(!canSend)
-                .accessibilityLabel("Send message")
-                .accessibilityIdentifier("group-chat-send-button")
+
+                HStack(alignment: .bottom, spacing: 8) {
+                    TextField("Message \(title)", text: $draft, axis: .vertical)
+                        .focused($composerFocused)
+                        .font(.body)
+                        .textFieldStyle(.plain)
+                        .lineLimit(1...4)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .glassPanel(cornerRadius: 16, interactive: true)
+                        .accessibilityIdentifier("group-chat-message-editor")
+
+                    Button(action: sendDraft) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
+                            .frame(width: 36, height: 36)
+                            .glassPanel(cornerRadius: 18, interactive: canSend)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSend)
+                    .accessibilityLabel("Send message")
+                    .accessibilityIdentifier("group-chat-send-button")
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
         }
-        .background(.regularMaterial)
+        .background(.ultraThinMaterial)
         .overlay(alignment: .top) { Divider() }
     }
 
     private var mentionSuggestionBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(mentionSuggestions, id: \.self) { pubkey in
+                ForEach(mentionSuggestions) { member in
                     Button {
-                        acceptMention(pubkey)
+                        acceptMention(member)
                     } label: {
-                        Label(pubkey.shortHex, systemImage: "at")
+                        Label(member.title, systemImage: "at")
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .background(
-                                Capsule().fill(Color(.tertiarySystemBackground))
-                            )
+                            .glassEffect(.regular.interactive(), in: .capsule)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Mention \(pubkey.shortHex)")
+                    .accessibilityLabel("Mention \(member.title)")
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
         }
-        .background(Color(.secondarySystemBackground))
+        .background(.thinMaterial)
         .overlay(alignment: .bottom) { Divider() }
     }
 
@@ -450,25 +502,20 @@ struct GroupTimelineView: View {
         let text = trimmedDraft
         guard canSend else { return }
 
-        let pending = PendingGroupMessage(content: text)
-        pendingMessages.append(pending)
-        let accepted = model.sendGroupMessage(groupId: groupId, content: text)
-        if !accepted, let index = pendingMessages.firstIndex(where: { $0.id == pending.id }) {
-            pendingMessages[index].state = .failed
+        let accepted = model.sendGroupMessage(
+            groupId: groupId,
+            content: text,
+            mentionPubkeys: activeMentionPubkeys(in: text)
+        )
+        guard accepted else {
+            composerFocused = true
+            return
         }
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         draft = ""
+        selectedMentionPubkeys.removeAll()
         composerFocused = true
-
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(12))
-            if let index = pendingMessages.firstIndex(where: { $0.id == pending.id }),
-               pendingMessages[index].state == .sending
-            {
-                pendingMessages[index].state = .queued
-            }
-        }
     }
 
     private func roomChromeSubtitle(_ node: GroupTreeNode) -> String {
@@ -478,16 +525,6 @@ struct GroupTimelineView: View {
         }
         pieces.append(node.isOpen ? "open" : "closed")
         return pieces.joined(separator: " • ")
-    }
-
-    private func reconcilePending() {
-        guard let activePubkey = model.activeAccountPubkey else { return }
-        let delivered = model.groupChat.messages.filter { $0.pubkey == activePubkey }
-        pendingMessages.removeAll { pending in
-            delivered.contains { delivered in
-                delivered.content == pending.content && delivered.createdAt >= pending.createdAtSeconds - 10
-            }
-        }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
@@ -508,8 +545,9 @@ struct GroupTimelineView: View {
         return String(last.dropFirst())
     }
 
-    private func acceptMention(_ pubkey: String) {
-        let mention = "@\(pubkey.shortHex)"
+    private func acceptMention(_ member: GroupMember) {
+        selectedMentionPubkeys.insert(member.pubkey)
+        let mention = "@\(member.title)"
         var parts = draft.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
         if parts.isEmpty {
             draft = mention + " "
@@ -519,11 +557,100 @@ struct GroupTimelineView: View {
         }
         composerFocused = true
     }
+
+    private func activeMentionPubkeys(in text: String) -> [String] {
+        let selectedMembers = currentMembers
+            .filter { member in
+                selectedMentionPubkeys.contains(member.pubkey) &&
+                    (text.contains("@\(member.title)") || text.contains("@\(member.pubkey.shortHex)"))
+            }
+            .map(\.pubkey)
+        return Array(Set(selectedMembers + rawMentionIdentifiers(in: text))).sorted()
+    }
+
+    private func rawMentionIdentifiers(in text: String) -> [String] {
+        text.split(whereSeparator: \.isWhitespace)
+            .compactMap { raw -> String? in
+                guard raw.hasPrefix("@") else { return nil }
+                let token = raw
+                    .dropFirst()
+                    .trimmingCharacters(in: CharacterSet(charactersIn: ".,:;!?)]}"))
+                guard looksLikeRawMentionIdentifier(token) else { return nil }
+                return String(token)
+            }
+    }
+
+    private func looksLikeRawMentionIdentifier(_ token: String) -> Bool {
+        token.hasPrefix("npub1") ||
+            (token.count == 64 && token.allSatisfy(\.isHexDigit))
+    }
+
+    private func outboxItem(for eventId: String) -> PublishOutboxItem? {
+        model.publishOutbox.first { $0.eventId == eventId }
+    }
+}
+
+private struct MemberListSheet: View {
+    let title: String
+    let members: [GroupMember]
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if members.isEmpty {
+                    ContentUnavailableView(
+                        "No members",
+                        systemImage: "person.2.slash",
+                        description: Text("This group has not published a member list yet.")
+                    )
+                    .padding(24)
+                    .frame(maxWidth: 360)
+                    .glassPanel(cornerRadius: 22)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.systemGroupedBackground))
+                } else {
+                    List(members) { member in
+                        HStack(spacing: 10) {
+                            ChatAvatar(seed: member.pubkey)
+                                .frame(width: 30, height: 30)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(member.title)
+                                        .font(.body.weight(.medium))
+                                        .lineLimit(1)
+                                    if member.admin {
+                                        Image(systemName: "shield.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .accessibilityLabel("Admin")
+                                    }
+                                }
+                                Text(member.pubkey.shortHex)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                        .listRowBackground(Color.clear)
+                    }
+                    .listStyle(.insetGrouped)
+                    .scrollContentBackground(.hidden)
+                    .background(Color(.systemGroupedBackground))
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
 }
 
 private struct GroupMessageRow: View {
     let message: GroupChatMessage
     let isOwnMessage: Bool
+    let pendingStatus: String?
+    let canRetry: Bool
+    let onRetry: () -> Void
     let onReact: () -> Void
 
     var body: some View {
@@ -546,6 +673,22 @@ private struct GroupMessageRow: View {
                     Text(message.createdAt.relativeTimeFromUnixSeconds)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
+
+                    if let pendingStatus {
+                        if canRetry {
+                            Button(action: onRetry) {
+                                Image(systemName: "arrow.clockwise.circle.fill")
+                                    .font(.caption.weight(.semibold))
+                                    .symbolRenderingMode(.hierarchical)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Retry message")
+                        }
+
+                        Text(pendingStatus.pendingDisplayLabel)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
 
                 Text(message.content)
@@ -555,9 +698,9 @@ private struct GroupMessageRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(isOwnMessage ? Color.accentColor : Color(.secondarySystemBackground))
+                    .glassEffect(
+                        isOwnMessage ? .regular.tint(Color.accentColor).interactive() : .regular.interactive(),
+                        in: .rect(cornerRadius: 16)
                     )
             }
 
@@ -586,16 +729,29 @@ private struct GroupMessageRow: View {
 }
 
 private struct PendingMessageRow: View {
-    let message: PendingGroupMessage
+    let message: PublishOutboxItem
+    let onRetry: () -> Void
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Spacer(minLength: 42)
 
             VStack(alignment: .trailing, spacing: 4) {
-                Text(message.state.label)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 6) {
+                    if message.canRetry {
+                        Button(action: onRetry) {
+                            Image(systemName: "arrow.clockwise.circle.fill")
+                                .font(.caption.weight(.semibold))
+                                .symbolRenderingMode(.hierarchical)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Retry message")
+                    }
+
+                    Text(message.status.pendingDisplayLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
 
                 Text(message.content)
                     .font(.body)
@@ -603,13 +759,10 @@ private struct PendingMessageRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.accentColor.opacity(0.72))
-                    )
+                    .glassEffect(.regular.tint(Color.accentColor.opacity(0.72)).interactive(), in: .rect(cornerRadius: 16))
             }
         }
-        .accessibilityIdentifier("group-chat-pending-message-\(message.id.uuidString)")
+        .accessibilityIdentifier("group-chat-pending-message-\(message.id)")
     }
 }
 
@@ -629,38 +782,20 @@ private struct ChatAvatar: View {
     }
 }
 
-private struct PendingGroupMessage: Identifiable, Equatable {
-    let id = UUID()
-    let content: String
-    let createdAt = Date()
-    var state: PendingState = .sending
-
-    var createdAtSeconds: UInt64 {
-        UInt64(createdAt.timeIntervalSince1970)
-    }
-}
-
-private enum PendingState: Equatable {
-    case sending
-    case queued
-    case failed
-
-    var label: String {
-        switch self {
-        case .sending:
-            return "Sending"
-        case .queued:
-            return "Queued"
-        case .failed:
-            return "Not sent"
-        }
-    }
-}
-
 private extension String {
-    var shortHex: String {
-        guard count > 16 else { return self }
-        return "\(prefix(8))…\(suffix(8))"
+    var pendingDisplayLabel: String {
+        switch self {
+        case "sending":
+            return "Sending"
+        case "retrying":
+            return "Retrying"
+        case "pending", "queued":
+            return "Queued"
+        case "failed":
+            return "Not sent"
+        default:
+            return isEmpty ? "Queued" : self
+        }
     }
 
     var displayInitials: String {

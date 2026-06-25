@@ -38,6 +38,52 @@ enum TypedProjectionGlue {
         )
     }
 
+    // MARK: nmp.nip29.group_members → GroupMembersSnapshot
+
+    static func groupMembers(_ reader: nmp_nip29_GroupMembersSnapshot) -> GroupMembersSnapshot {
+        GroupMembersSnapshot(
+            hostRelayUrl: reader.hostRelayUrl ?? "",
+            groupId: reader.groupId,
+            members: reader.members.map { row in
+                GroupMember(
+                    pubkey: row.pubkey ?? "",
+                    displayName: row.displayName,
+                    admin: row.admin,
+                    role: row.role
+                )
+            }
+        )
+    }
+
+    // MARK: publish_outbox → [PublishOutboxItem]
+
+    static func publishOutbox(_ reader: nmp_kernel_PublishOutboxSnapshot) -> [PublishOutboxItem] {
+        reader.items.map { item in
+            PublishOutboxItem(
+                handle: item.handle ?? "",
+                eventId: item.eventId ?? "",
+                kind: item.kind,
+                content: item.content ?? "",
+                tags: item.tags.map { tag in
+                    tag.values.map { $0 ?? "" }
+                },
+                createdAt: item.createdAt,
+                status: item.status ?? "",
+                canRetry: item.canRetry,
+                targetRelays: Int(item.targetRelays),
+                relays: item.relays.map { relay in
+                    PublishOutboxRelay(
+                        relayUrl: relay.relayUrl ?? "",
+                        status: relay.status ?? "",
+                        attempt: relay.attempt,
+                        message: relay.message ?? "",
+                        relayReason: relay.relayReason ?? ""
+                    )
+                }
+            )
+        }
+    }
+
     // MARK: nmp.nip29.discovered_groups → DiscoveredGroupsSnapshot
 
     /// Map the typed `nmp.nip29.discovered_groups` sidecar (`NDGS` /

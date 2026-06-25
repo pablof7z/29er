@@ -25,6 +25,8 @@ extension KernelModel {
         typedDiscoveredGroups = result.typedDiscoveredGroups
         typedGroupTree = result.typedGroupTree
         typedGroupChat = result.typedGroupChat
+        typedGroupMembers = result.typedGroupMembers
+        typedPublishOutbox = result.typedPublishOutbox
         typedActiveAccount = result.typedActiveAccount
 
         // S02 — derive `identityState` from the `active_account` typed
@@ -52,7 +54,7 @@ extension KernelModel {
             // non-empty after the first call prevents re-entry. GroupTreeView's
             // .task guard also deduplicates when the view appears later.
             if !wasSignedIn, case .signedIn = identityState, discoveredGroups.hostRelayUrl.isEmpty {
-                openGroupDiscovery(hostRelayUrl: "wss://nip29.f7z.io")
+                openGroupDiscovery(hostRelayUrl: defaultNip29RelayUrl)
             }
         }
 
@@ -92,6 +94,8 @@ extension KernelModel {
         typedDiscoveredGroups = nil
         typedGroupTree = nil
         typedGroupChat = nil
+        typedGroupMembers = nil
+        typedPublishOutbox = nil
         typedActiveAccount = nil
     }
 
@@ -114,5 +118,13 @@ extension KernelModel {
 
     var groupChat: GroupChatSnapshot {
         typedGroupChat ?? .empty
+    }
+
+    var groupMembers: GroupMembersSnapshot {
+        typedGroupMembers ?? .empty
+    }
+
+    var publishOutbox: [PublishOutboxItem] {
+        typedPublishOutbox ?? []
     }
 }

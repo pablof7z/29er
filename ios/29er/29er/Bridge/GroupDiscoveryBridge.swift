@@ -75,6 +75,15 @@ extension KernelHandle {
         }
     }
 
+    /// Select the group whose member rows should be emitted by the Rust
+    /// `nmp.nip29.group_members` projection.
+    func selectGroupMembers(_ handle: OpaquePointer?, groupId: String) {
+        guard let handle, !groupId.isEmpty else { return }
+        groupId.withCString {
+            nmp_app_29er_select_group_members(UnsafeMutableRawPointer(handle), $0)
+        }
+    }
+
     /// Dispatch a `nmp.nip29.discover` action — push the relay-pinned
     /// `LogicalInterest` for kinds 39000/39001/39002 so the kernel opens a
     /// REQ for that relay's group catalog. Fire-and-forget; the catalog
@@ -102,11 +111,14 @@ extension KernelHandle {
     /// Dispatch a `nmp.nip29.post_chat_message` action — publish a kind:9
     /// message to `group`. Rust owns the event shape, tags, signing, and
     /// relay pinning; Swift only marshals the draft text.
-    func postChatMessage(group: GroupId, content: String) -> Bool {
-        let payload: [String: Any] = [
+    func postChatMessage(group: GroupId, content: String, mentionPubkeys: [String] = []) -> Bool {
+        var payload: [String: Any] = [
             "group": group.jsonObject,
             "content": content,
         ]
+        if !mentionPubkeys.isEmpty {
+            payload["mention_pubkeys"] = mentionPubkeys
+        }
         return dispatchNip29(
             "nmp.nip29.post_chat_message",
             payload: payload,
@@ -190,10 +202,14 @@ private struct Nip29DispatchResult: Decodable {
 
 @MainActor
 extension KernelModel {
-    func sendGroupMessage(groupId: String, content: String) -> Bool {
+    func sendGroupMessage(groupId: String, content: String, mentionPubkeys: [String] = []) -> Bool {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let group = nip29GroupId(for: groupId) else { return false }
-        return kernel.postChatMessage(group: group, content: trimmed)
+        return kernel.postChatMessage(
+            group: group,
+            content: trimmed,
+            mentionPubkeys: mentionPubkeys
+        )
     }
 
     func reactToGroupMessage(groupId: String, eventId: String, eventAuthorPubkey: String) {
@@ -310,6 +326,10 @@ final class DiscoveredGroupsStore: ObservableObject {
 
     func markGroupRead(groupId: String) {
         kernel.markGroupRead(discoveryHandle, groupId: groupId)
+    }
+
+    func selectGroupMembers(groupId: String) {
+        kernel.selectGroupMembers(discoveryHandle, groupId: groupId)
     }
 
     /// Mirror the latest kernel snapshot. Called from `KernelModel.apply`

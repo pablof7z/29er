@@ -20,6 +20,12 @@ struct KernelUpdateResult {
     /// Typed `nmp.nip29.group_chat` projection decode (`NGCS`). `nil` ⇒ no
     /// group timeline has been registered or the sidecar was absent/malformed.
     let typedGroupChat: GroupChatSnapshot?
+    /// Typed `nmp.nip29.group_members` projection decode (`NGMS`). `nil` ⇒ no
+    /// selected-group members sidecar was emitted or the sidecar was malformed.
+    let typedGroupMembers: GroupMembersSnapshot?
+    /// Typed kernel-owned `publish_outbox` projection decode (`KPBO`). `nil` ⇒
+    /// no publish outbox sidecar was emitted or the sidecar was malformed.
+    let typedPublishOutbox: [PublishOutboxItem]?
     /// Typed `active_account` projection decode (`KACT`). `nil` ⇒ no active
     /// account on this tick.
     let typedActiveAccount: String?

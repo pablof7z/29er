@@ -89,6 +89,50 @@ enum TypedGroupChatDecoder {
     }
 }
 
+enum TypedGroupMembersDecoder {
+    static let key = "nmp.nip29.group_members"
+    static let schemaId = "nmp.nip29.group_members"
+    static let fileIdentifier = "NGMS"
+
+    static func decode(from projections: [TypedProjectionEnvelope]) -> GroupMembersSnapshot? {
+        guard let projection = projections.first(where: {
+            $0.key == key && $0.schemaId == schemaId
+        }), !projection.payload.isEmpty else {
+            return nil
+        }
+        return decode(bytes: projection.payload)
+    }
+
+    static func decode(bytes: Data) -> GroupMembersSnapshot? {
+        guard !bytes.isEmpty else { return nil }
+        var buffer = ByteBuffer(data: bytes)
+        let reader: nmp_nip29_GroupMembersSnapshot = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.groupMembers(reader)
+    }
+}
+
+enum TypedPublishOutboxDecoder {
+    static let key = "publish_outbox"
+    static let schemaId = "publish_outbox"
+    static let fileIdentifier = "KPBO"
+
+    static func decode(from projections: [TypedProjectionEnvelope]) -> [PublishOutboxItem]? {
+        guard let projection = projections.first(where: {
+            $0.key == key && $0.schemaId == schemaId
+        }), !projection.payload.isEmpty else {
+            return nil
+        }
+        return decode(bytes: projection.payload)
+    }
+
+    static func decode(bytes: Data) -> [PublishOutboxItem]? {
+        guard !bytes.isEmpty else { return nil }
+        var buffer = ByteBuffer(data: bytes)
+        let reader: nmp_kernel_PublishOutboxSnapshot = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.publishOutbox(reader)
+    }
+}
+
 enum TypedGroupTreeDecoder {
     static let key = "nmp.29er.group_tree"
     static let schemaId = "nmp.29er.group_tree"

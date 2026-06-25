@@ -52,7 +52,7 @@ struct App29er: App {
 /// S02 root router. Switches on `model.identityState`:
 ///   • `.signedIn`  → `MainScaffold` (authenticated app shell)
 ///   • `.signedOut` / `.invalidKey` / `.storageError` → `OnboardingView`
-///   • `.unknown`   → loading screen with a 3s fallback to `.signedOut`
+///   • `.unknown`   → loading screen until the kernel snapshot resolves it
 struct RootView: View {
     @EnvironmentObject private var model: KernelModel
 
@@ -64,18 +64,6 @@ struct RootView: View {
             OnboardingView()
         case .unknown:
             ProgressView("Starting…")
-                .onAppear {
-                    // Boot timeout — if the kernel has not produced a snapshot
-                    // with an `active_account` verdict within ~3s, collapse to
-                    // `.signedOut` so the user is never stuck on a spinner.
-                    // A slow first tick (cold relay connect, Keychain read)
-                    // can hold `unknown` past user patience.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                        if model.identityState == .unknown {
-                            model.identityState = .signedOut
-                        }
-                    }
-                }
         }
     }
 }
@@ -92,6 +80,14 @@ struct MainScaffold: View {
     var body: some View {
         NavigationStack {
             GroupTreeView()
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button(role: .destructive, action: model.logout) {
+                            Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                        .accessibilityLabel("Log Out")
+                    }
+                }
         }
     }
 }

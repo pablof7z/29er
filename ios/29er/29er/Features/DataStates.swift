@@ -18,7 +18,11 @@ struct LoadingView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
+        .padding(24)
+        .frame(maxWidth: 340)
+        .glassPanel(cornerRadius: 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
     }
 }
 
@@ -36,6 +40,11 @@ struct EmptyStateView: View {
             systemImage: systemImage,
             description: Text(message)
         )
+        .padding(24)
+        .frame(maxWidth: 360)
+        .glassPanel(cornerRadius: 22)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
     }
 }
 
@@ -53,5 +62,17 @@ struct ErrorStateView: View {
             systemImage: systemImage,
             description: Text(message)
         )
+        .padding(24)
+        .frame(maxWidth: 360)
+        .glassPanel(cornerRadius: 22)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(.systemGroupedBackground))
+    }
+}
+
+extension View {
+    func glassPanel(cornerRadius: CGFloat = 18, interactive: Bool = false) -> some View {
+        let effect = interactive ? Glass.regular.interactive() : Glass.regular
+        return self.glassEffect(effect, in: .rect(cornerRadius: cornerRadius))
     }
 }

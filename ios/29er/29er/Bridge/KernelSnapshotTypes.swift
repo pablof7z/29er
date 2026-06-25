@@ -39,6 +39,73 @@ struct GroupChatSnapshot: Decodable, Equatable {
     static let empty = GroupChatSnapshot(messages: [])
 }
 
+// ─── NIP-29 selected-group members read model ─────────────────────────────
+
+/// One member row for the currently open NIP-29 group. Raw protocol values
+/// only; Rust owns membership/admin derivation and Swift renders fallbacks.
+struct GroupMember: Decodable, Identifiable, Equatable {
+    let pubkey: String
+    let displayName: String?
+    let admin: Bool
+    let role: String?
+
+    var id: String { pubkey }
+
+    var title: String {
+        if let displayName, !displayName.isEmpty {
+            return displayName
+        }
+        return pubkey.shortHex
+    }
+}
+
+/// Members for the selected group only. `groupId == nil` means no group has
+/// been selected on the Rust projection yet.
+struct GroupMembersSnapshot: Decodable, Equatable {
+    let hostRelayUrl: String
+    let groupId: String?
+    let members: [GroupMember]
+
+    static let empty = GroupMembersSnapshot(hostRelayUrl: "", groupId: nil, members: [])
+}
+
+extension String {
+    var shortHex: String {
+        guard count > 16 else { return self }
+        return "\(prefix(8))…\(suffix(8))"
+    }
+}
+
+// ─── Kernel publish-outbox read model ─────────────────────────────────────
+
+/// One target relay of an in-flight publish. Raw kernel tokens only; Swift
+/// renders labels but does not decide retry or delivery state.
+struct PublishOutboxRelay: Decodable, Identifiable, Equatable {
+    let relayUrl: String
+    let status: String
+    let attempt: UInt32
+    let message: String
+    let relayReason: String
+
+    var id: String { relayUrl }
+}
+
+/// One in-flight publish row from the kernel-owned publish engine.
+struct PublishOutboxItem: Decodable, Identifiable, Equatable {
+    let handle: String
+    let eventId: String
+    let kind: UInt32
+    let content: String
+    let tags: [[String]]
+    let createdAt: UInt64
+    let status: String
+    let canRetry: Bool
+    let targetRelays: Int
+    let relays: [PublishOutboxRelay]
+
+    var id: String { handle.isEmpty ? eventId : handle }
+}
+
 /// One discovered NIP-29 group, ready for the discover/join screen to render.
 ///
 /// Raw protocol data only (ADR-0032). Presentation-layer fields such as

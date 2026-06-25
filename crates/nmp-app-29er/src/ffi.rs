@@ -16,7 +16,7 @@ use nmp_nip29::group_id::GroupId;
 use nmp_nip29::interest::host_pinned_interest;
 use nmp_nip29::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use nmp_nip29::projection::DiscoveredGroupsProjection;
-use nmp_nip29::register::wire_group_chat;
+use nmp_nip29::register::{wire_group_chat, wire_group_members};
 use nmp_planner::stable_hash::stable_hash64;
 use nmp_planner::{InterestId, InterestLifecycle, InterestScope};
 
@@ -24,6 +24,8 @@ use crate::group_tree::{
     encode_group_tree_snapshot, GroupTreeProjection, GROUP_TREE_FILE_IDENTIFIER,
     GROUP_TREE_SCHEMA_ID, GROUP_TREE_SCHEMA_VERSION,
 };
+
+const GROUP_CHAT_HISTORY_LIMIT: u32 = 200;
 
 /// Opaque handle returned by [`nmp_app_29er_register`] and consumed by
 /// [`nmp_app_29er_unregister`]. Boxed on the heap; the pointer is opaque to C.
@@ -34,6 +36,7 @@ pub struct TwentyNinerHandle {
 pub struct TwentyNinerGroupDiscoveryHandle {
     observer_ids: Vec<KernelEventObserverId>,
     tree_projection: Arc<GroupTreeProjection>,
+    members_projection: Arc<nmp_nip29::projection::GroupMembersProjection>,
     teardown_fn: Box<dyn FnOnce(Vec<KernelEventObserverId>) + Send>,
 }
 
@@ -222,13 +225,15 @@ fn group_chat_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
         group_id.host_relay_url.as_str(),
         group_id.local_id.as_str(),
     ));
-    host_pinned_interest(
+    let mut interest = host_pinned_interest(
         id,
         group_id,
         [KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
         BTreeMap::new(),
         InterestLifecycle::Tailing,
-    )
+    );
+    interest.shape.limit = Some(GROUP_CHAT_HISTORY_LIMIT);
+    interest
 }
 
 fn group_tree_chat_summary_interest(host_relay_url: &str) -> nmp_planner::LogicalInterest {
@@ -261,6 +266,7 @@ mod tests {
         assert!(interest.shape.kinds.contains(&KIND_CHAT_MESSAGE));
         assert!(interest.shape.kinds.contains(&KIND_DISCUSSION_OR_ARTIFACT));
         assert!(interest.shape.tags.get("h").unwrap().contains("rust-nostr"));
+        assert_eq!(interest.shape.limit, Some(GROUP_CHAT_HISTORY_LIMIT));
         assert_eq!(interest.lifecycle, InterestLifecycle::Tailing);
     }
 
@@ -333,6 +339,13 @@ fn open_group_discovery_with_tree(
         app.unregister_event_observer(observer_id);
         return None;
     }
+    let Some((members_projection, members_observer_id)) =
+        wire_group_members(app, relay_url.clone())
+    else {
+        app.unregister_event_observer(observer_id);
+        app.unregister_event_observer(tree_observer_id);
+        return None;
+    };
 
     let discovered_projection = Arc::clone(&projection);
     app.register_typed_snapshot_projection("nmp.nip29.discovered_groups", move || {
@@ -372,8 +385,9 @@ fn open_group_discovery_with_tree(
 
     let app_addr = (app as *const NmpApp) as usize;
     Some(TwentyNinerGroupDiscoveryHandle {
-        observer_ids: vec![observer_id, tree_observer_id],
+        observer_ids: vec![observer_id, tree_observer_id, members_observer_id],
         tree_projection: tree_messages,
+        members_projection,
         teardown_fn: Box::new(move |ids| {
             let app = unsafe { &*(app_addr as *const NmpApp) };
             for id in ids {
@@ -381,6 +395,7 @@ fn open_group_discovery_with_tree(
             }
             app.remove_snapshot_projection("nmp.nip29.discovered_groups");
             app.remove_snapshot_projection("nmp.29er.group_tree");
+            app.remove_snapshot_projection("nmp.nip29.group_members");
         }),
     })
 }
@@ -430,6 +445,24 @@ pub extern "C" fn nmp_app_29er_mark_group_read(
     };
     let handle = unsafe { &*handle };
     handle.tree_projection.mark_read(&group_id);
+}
+
+/// Select the group whose 39002 members should be emitted in the
+/// `"nmp.nip29.group_members"` typed projection.
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn nmp_app_29er_select_group_members(
+    handle: *mut TwentyNinerGroupDiscoveryHandle,
+    group_id: *const c_char,
+) {
+    if handle.is_null() {
+        return;
+    }
+    let Some(group_id) = c_string_opt(group_id).filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let handle = unsafe { &*handle };
+    handle.members_projection.select_group(group_id);
 }
 
 /// Process-local correlation-id source for 29er's byte-doorway dispatches.

@@ -4,6 +4,8 @@ import Combine
 import os.log
 
 private let kmLifecycleLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "KernelModel")
+let defaultNip29RelayUrl = ProcessInfo.processInfo.environment["M001_DEFAULT_RELAY_URL"]
+    .flatMap { $0.isEmpty ? nil : $0 } ?? "wss://nip29.f7z.io"
 
 // ── Lifecycle, liveness, open/close ──────────────────────────────────────────
 
@@ -39,7 +41,7 @@ extension KernelModel {
         // `nmp_app_29er_register`), but the bootstrap relay is a 29er product
         // decision — surfaced here so the shell keeps a single explicit
         // default (mirroring Chirp's `RelaySeeding.swift` posture).
-        kernel.addRelay(url: "wss://nip29.f7z.io", role: "both")
+        kernel.addRelay(url: defaultNip29RelayUrl, role: "both")
         kernel.start(visibleLimit: visibleLimit, emitHz: emitHz)
         // S03 verification hook: auto-submit an nsec from the environment so
         // simulator runs can exercise the post-onboarding group tree without
@@ -113,5 +115,15 @@ extension KernelModel {
         // model; `trimmed` is a local that is released when this frame
         // returns, so Swift does not hold the nsec beyond the dispatch.
         kernel.signInNsec(trimmed)
+    }
+
+    func logout() {
+        guard let pubkey = activeAccountPubkey else { return }
+        kernel.removeAccount(pubkey)
+    }
+
+    func retryPublish(_ item: PublishOutboxItem) {
+        guard item.canRetry else { return }
+        kernel.retryPublish(handle: item.handle)
     }
 }
