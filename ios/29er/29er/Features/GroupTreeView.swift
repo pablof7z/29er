@@ -345,6 +345,33 @@ struct GroupTimelineView: View {
         .sorted { $0.createdAt > $1.createdAt }
     }
 
+    private var descendantGroupIds: Set<String> {
+        func collect(from id: String, into result: inout Set<String>) {
+            guard let node = model.groupTree.allNodes[id] else { return }
+            for childId in node.childIds where result.insert(childId).inserted {
+                collect(from: childId, into: &result)
+            }
+        }
+
+        var result = Set<String>()
+        collect(from: groupId, into: &result)
+        return result
+    }
+
+    private var parentCandidates: [GroupParentCandidate] {
+        let descendants = descendantGroupIds
+        return model.groupTree.allNodes.values
+            .filter { node in
+                node.groupId != groupId && !descendants.contains(node.groupId)
+            }
+            .sorted { lhs, rhs in
+                lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
+            .map { node in
+                GroupParentCandidate(id: node.groupId, title: node.displayName)
+            }
+    }
+
     private var membershipStatusLabel: String {
         if let item = latestMembershipOutboxItem {
             switch item.kind {
@@ -515,6 +542,11 @@ struct GroupTimelineView: View {
                             access: access,
                             parent: groupId
                         )
+                    },
+                    parentCandidates: parentCandidates,
+                    currentParentId: node?.parentId,
+                    onSetParent: { parent in
+                        model.setParent(groupId: groupId, parent: parent)
                     },
                     onRetry: { item in
                         model.retryPublish(item)
@@ -810,6 +842,11 @@ struct GroupTimelineView: View {
     }
 }
 
+private struct GroupParentCandidate: Identifiable, Hashable {
+    let id: String
+    let title: String
+}
+
 private struct JoinGroupSheet: View {
     let title: String
     let requiresInviteCode: Bool
@@ -927,7 +964,12 @@ private struct AdminActionsSheet: View {
     let onCreateInvite: ([String]) -> Bool
     let onPutUser: (String, String?, String?) -> Bool
     let onCreateChild: (String, String, String?, String, String) -> Bool
+    let parentCandidates: [GroupParentCandidate]
+    let currentParentId: String?
+    let onSetParent: (String?) -> Bool
     let onRetry: (PublishOutboxItem) -> Void
+
+    private let rootParentSelection = "__root__"
 
     @Environment(\.dismiss) private var dismiss
     @State private var inviteCodes = ""
@@ -939,6 +981,7 @@ private struct AdminActionsSheet: View {
     @State private var childAbout = ""
     @State private var childVisibility = "public"
     @State private var childAccess = "open"
+    @State private var parentSelection = ""
     @State private var error: String?
 
     private var parsedInviteCodes: [String] {
@@ -1047,6 +1090,22 @@ private struct AdminActionsSheet: View {
                     .disabled(trimmedChildLocalId.isEmpty || trimmedChildName.isEmpty)
                 }
 
+                Section("Hierarchy") {
+                    Picker("Parent", selection: $parentSelection) {
+                        Text("Root").tag(rootParentSelection)
+                        ForEach(parentCandidates) { candidate in
+                            Text(candidate.title).tag(candidate.id)
+                        }
+                    }
+
+                    Button {
+                        submitSetParent()
+                    } label: {
+                        Label(parentSelection == rootParentSelection ? "Detach to Root" : "Move Channel", systemImage: "arrow.triangle.branch")
+                    }
+                    .disabled(!canSubmitSetParent)
+                }
+
                 if !pendingItems.isEmpty {
                     Section("Pending") {
                         ForEach(pendingItems) { item in
@@ -1087,6 +1146,11 @@ private struct AdminActionsSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                }
+            }
+            .onAppear {
+                if parentSelection.isEmpty {
+                    parentSelection = currentParentId ?? rootParentSelection
                 }
             }
         }
@@ -1135,6 +1199,21 @@ private struct AdminActionsSheet: View {
             error = nil
         } else {
             error = "Could not create child channel."
+        }
+    }
+
+    private var canSubmitSetParent: Bool {
+        let normalizedCurrent = currentParentId ?? rootParentSelection
+        return !parentSelection.isEmpty && parentSelection != normalizedCurrent
+    }
+
+    private func submitSetParent() {
+        let parent = parentSelection == rootParentSelection ? nil : parentSelection
+        let accepted = onSetParent(parent)
+        if accepted {
+            error = nil
+        } else {
+            error = "Could not update hierarchy."
         }
     }
 
