@@ -251,6 +251,7 @@ struct GroupTimelineView: View {
     @State private var showingMembers = false
     @State private var showingJoinSheet = false
     @State private var showingLeaveSheet = false
+    @State private var showingAdminSheet = false
     @FocusState private var composerFocused: Bool
 
     private var node: GroupTreeNode? {
@@ -320,6 +321,16 @@ struct GroupTimelineView: View {
 
     private var latestMembershipOutboxItem: PublishOutboxItem? {
         membershipOutboxItems.sorted { $0.createdAt > $1.createdAt }.first
+    }
+
+    private var adminOutboxItems: [PublishOutboxItem] {
+        model.publishOutbox.filter { item in
+            (item.kind == 9000 || item.kind == 9009) &&
+                item.tags.contains { tag in
+                    tag.count >= 2 && tag[0] == "h" && tag[1] == groupId
+                }
+        }
+        .sorted { $0.createdAt > $1.createdAt }
     }
 
     private var membershipStatusLabel: String {
@@ -468,6 +479,27 @@ struct GroupTimelineView: View {
                 )
                 .presentationDetents([.medium])
             }
+            .sheet(isPresented: $showingAdminSheet) {
+                AdminActionsSheet(
+                    title: title,
+                    pendingItems: adminOutboxItems,
+                    onCreateInvite: { codes in
+                        model.createInvite(groupId: groupId, codes: codes)
+                    },
+                    onPutUser: { pubkey, role, reason in
+                        model.putUser(
+                            groupId: groupId,
+                            targetPubkey: pubkey,
+                            role: role,
+                            reason: reason
+                        )
+                    },
+                    onRetry: { item in
+                        model.retryPublish(item)
+                    }
+                )
+                .presentationDetents([.large])
+            }
             .task(id: groupId) {
                 model.openGroupTimeline(groupId)
             }
@@ -517,6 +549,15 @@ struct GroupTimelineView: View {
             }
 
             Spacer(minLength: 8)
+
+            if isCurrentAdmin {
+                Button {
+                    showingAdminSheet = true
+                } label: {
+                    Label("Admin", systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(.glass)
+            }
 
             if isCurrentMember {
                 Button {
@@ -855,6 +896,162 @@ private struct LeaveGroupSheet: View {
                 }
             }
         }
+    }
+}
+
+private struct AdminActionsSheet: View {
+    let title: String
+    let pendingItems: [PublishOutboxItem]
+    let onCreateInvite: ([String]) -> Bool
+    let onPutUser: (String, String?, String?) -> Bool
+    let onRetry: (PublishOutboxItem) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var inviteCodes = ""
+    @State private var targetPubkey = ""
+    @State private var role = ""
+    @State private var reason = ""
+    @State private var error: String?
+
+    private var parsedInviteCodes: [String] {
+        inviteCodes
+            .split { character in
+                character.isWhitespace || character == ","
+            }
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    private var trimmedTargetPubkey: String {
+        targetPubkey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedRole: String {
+        role.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedReason: String {
+        reason.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Invites") {
+                    TextField("Codes", text: $inviteCodes, axis: .vertical)
+                        .lineLimit(1...3)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+
+                    HStack {
+                        Button {
+                            inviteCodes = generatedInviteCode()
+                        } label: {
+                            Label("Generate", systemImage: "wand.and.sparkles")
+                        }
+
+                        Spacer()
+
+                        Button {
+                            submitInvite()
+                        } label: {
+                            Label("Create Invite", systemImage: "ticket")
+                        }
+                        .disabled(parsedInviteCodes.isEmpty)
+                    }
+                }
+
+                Section("Add User") {
+                    TextField("Pubkey", text: $targetPubkey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Role", text: $role)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Reason", text: $reason, axis: .vertical)
+                        .lineLimit(2...4)
+
+                    Button {
+                        submitPutUser()
+                    } label: {
+                        Label("Add User", systemImage: "person.badge.plus")
+                    }
+                    .disabled(trimmedTargetPubkey.isEmpty)
+                }
+
+                if !pendingItems.isEmpty {
+                    Section("Pending") {
+                        ForEach(pendingItems) { item in
+                            HStack(spacing: 8) {
+                                Image(systemName: item.kind == 9009 ? "ticket" : "person.badge.plus")
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.kind == 9009 ? "Invite" : "Put User")
+                                        .font(.subheadline.weight(.medium))
+                                    Text(item.status.pendingDisplayLabel)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if item.canRetry {
+                                    Button {
+                                        onRetry(item)
+                                    } label: {
+                                        Image(systemName: "arrow.clockwise.circle.fill")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Retry admin action")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if let error {
+                    Section {
+                        Text(error)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func submitInvite() {
+        let accepted = onCreateInvite(parsedInviteCodes)
+        if accepted {
+            inviteCodes = ""
+            error = nil
+        } else {
+            error = "Could not create invite."
+        }
+    }
+
+    private func submitPutUser() {
+        let accepted = onPutUser(
+            trimmedTargetPubkey,
+            trimmedRole.isEmpty ? nil : trimmedRole,
+            trimmedReason.isEmpty ? nil : trimmedReason
+        )
+        if accepted {
+            targetPubkey = ""
+            role = ""
+            reason = ""
+            error = nil
+        } else {
+            error = "Could not add user."
+        }
+    }
+
+    private func generatedInviteCode() -> String {
+        UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12).description
     }
 }
 
