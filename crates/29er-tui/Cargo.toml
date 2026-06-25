@@ -1,0 +1,32 @@
+[package]
+name = "tui-29er"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Ratatui terminal client for 29er — a native Rust NMP shell over nmp-app-29er."
+
+[lib]
+name = "twentyniner_tui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "29er-tui"
+path = "src/main.rs"
+
+[dependencies]
+nmp-app-29er = { workspace = true }
+nmp-nip29 = { workspace = true }
+nmp-content = { workspace = true }
+nmp-core = { workspace = true }
+nmp-ffi = { workspace = true }
+serde_json = { workspace = true }
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+tui-textarea = "0.7"
+tui-scrollview = "0.5"
+tui-widget-list = "0.13"
+ratatui-themes = "0.1"
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+anyhow = "1"
