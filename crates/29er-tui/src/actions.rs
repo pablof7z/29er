@@ -1,15 +1,37 @@
-//! The single intent vocabulary the runtime loop understands. Components emit
-//! these; `main::apply` is the only place that mutates [`crate::app::App`].
-
+//! The single intent vocabulary the runtime understands. Components emit these;
+//! `main::apply` is the only place that mutates `App`.
 use nmp_nip29::GroupId;
+use crate::app::{Focus, FormKind};
 
 #[derive(Clone, Debug)]
 pub enum Action {
     Quit,
+    // identity
+    LoginSubmit(String),
+    // navigation
     NavigateUp,
     NavigateDown,
-    ToggleFocus,
-    SelectRoom(GroupId),
+    SelectChannel(GroupId),
+    CycleFocus,
+    SetFocus(Focus),
+    ScrollUp,
+    ScrollDown,
+    // chat / outbox
     SendMessage(String),
-    Tick,
+    RetryOutbox(String),
+    // palette
+    OpenPalette,
+    ClosePalette,
+    // membership / admin (typed dispatch happens in App)
+    Join { group: GroupId, invite_code: Option<String> },
+    Leave { group: GroupId },
+    ShowMembers(GroupId),
+    CreateInvite { group: GroupId, codes: Vec<String> },
+    PutUser { group: GroupId, target_pubkey: String, role: Option<String> },
+    CreateChild { parent: GroupId, name: String },
+    MoveChannel { group: GroupId, parent: Option<String> },
+    // forms
+    OpenForm(FormKind),
+    CloseForm,
+    Noop,
 }
