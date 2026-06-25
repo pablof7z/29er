@@ -1536,16 +1536,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nucleo-matcher"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf33f538733d1a5a3494b836ba913207f14d9d4a1d3cd67030c5061bdd2cac85"
-dependencies = [
- "memchr",
- "unicode-segmentation",
-]
-
-[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2311,12 +2301,10 @@ dependencies = [
  "nmp-core",
  "nmp-ffi",
  "nmp-nip29",
- "nucleo-matcher",
  "ratatui",
  "serde_json",
  "tokio",
  "tui-textarea",
- "tui-widget-list",
 ]
 
 [[package]]
@@ -2328,15 +2316,6 @@ dependencies = [
  "crossterm",
  "ratatui",
  "unicode-width 0.2.0",
-]
-
-[[package]]
-name = "tui-widget-list"
-version = "0.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80da7b26879a0c8f183d263808dff987a764c01333e46ba16a8c85c6a90a6769"
-dependencies = [
- "ratatui",
 ]
 
 [[package]]
