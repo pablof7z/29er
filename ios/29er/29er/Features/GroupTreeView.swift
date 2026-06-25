@@ -249,6 +249,8 @@ struct GroupTimelineView: View {
     @State private var draft = ""
     @State private var selectedMentionPubkeys: Set<String> = []
     @State private var showingMembers = false
+    @State private var showingJoinSheet = false
+    @State private var showingLeaveSheet = false
     @FocusState private var composerFocused: Bool
 
     private var node: GroupTreeNode? {
@@ -290,6 +292,82 @@ struct GroupTimelineView: View {
         return model.groupMembers.members
     }
 
+    private var membersProjectionMatchesGroup: Bool {
+        model.groupMembers.groupId == groupId
+    }
+
+    private var activeMember: GroupMember? {
+        guard let activePubkey = model.activeAccountPubkey else { return nil }
+        return currentMembers.first { $0.pubkey == activePubkey }
+    }
+
+    private var isCurrentMember: Bool {
+        activeMember != nil
+    }
+
+    private var isCurrentAdmin: Bool {
+        activeMember?.admin == true
+    }
+
+    private var membershipOutboxItems: [PublishOutboxItem] {
+        model.publishOutbox.filter { item in
+            (item.kind == 9021 || item.kind == 9022) &&
+                item.tags.contains { tag in
+                    tag.count >= 2 && tag[0] == "h" && tag[1] == groupId
+                }
+        }
+    }
+
+    private var latestMembershipOutboxItem: PublishOutboxItem? {
+        membershipOutboxItems.sorted { $0.createdAt > $1.createdAt }.first
+    }
+
+    private var membershipStatusLabel: String {
+        if let item = latestMembershipOutboxItem {
+            switch item.kind {
+            case 9021:
+                return item.status == "failed" ? "Join failed" : "Joining"
+            case 9022:
+                return item.status == "failed" ? "Leave failed" : "Leaving"
+            default:
+                break
+            }
+        }
+        if !membersProjectionMatchesGroup {
+            return "Checking"
+        }
+        if isCurrentAdmin {
+            return "Admin"
+        }
+        if isCurrentMember {
+            return "Member"
+        }
+        if node?.isOpen == true {
+            return "Not joined"
+        }
+        return "Invite required"
+    }
+
+    private var membershipStatusIcon: String {
+        if let item = latestMembershipOutboxItem {
+            return item.kind == 9022 ? "person.badge.minus" : "person.badge.plus"
+        }
+        if !membersProjectionMatchesGroup {
+            return "clock"
+        }
+        if isCurrentAdmin {
+            return "shield.fill"
+        }
+        if isCurrentMember {
+            return "checkmark.circle.fill"
+        }
+        return node?.isOpen == true ? "person.crop.circle.badge.plus" : "lock.fill"
+    }
+
+    private var hasPendingMembershipAction: Bool {
+        latestMembershipOutboxItem != nil
+    }
+
     private var mentionSuggestions: [GroupMember] {
         let token = currentMentionToken(in: draft)
         guard let token else { return [] }
@@ -318,6 +396,7 @@ struct GroupTimelineView: View {
                     messageStream(proxy: proxy)
                 }
 
+                membershipBar
                 composer
             }
             .background(Color(.systemGroupedBackground))
@@ -366,6 +445,29 @@ struct GroupTimelineView: View {
                 MemberListSheet(title: title, members: currentMembers)
                     .presentationDetents([.medium, .large])
             }
+            .sheet(isPresented: $showingJoinSheet) {
+                JoinGroupSheet(
+                    title: title,
+                    requiresInviteCode: node?.isOpen == false,
+                    onJoin: { inviteCode, reason in
+                        model.joinGroup(
+                            groupId: groupId,
+                            inviteCode: inviteCode,
+                            reason: reason
+                        )
+                    }
+                )
+                .presentationDetents([.medium])
+            }
+            .sheet(isPresented: $showingLeaveSheet) {
+                LeaveGroupSheet(
+                    title: title,
+                    onLeave: { reason in
+                        model.leaveGroup(groupId: groupId, reason: reason)
+                    }
+                )
+                .presentationDetents([.medium])
+            }
             .task(id: groupId) {
                 model.openGroupTimeline(groupId)
             }
@@ -388,6 +490,61 @@ struct GroupTimelineView: View {
         .frame(maxWidth: 360)
         .glassPanel(cornerRadius: 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var membershipBar: some View {
+        HStack(spacing: 10) {
+            Label(membershipStatusLabel, systemImage: membershipStatusIcon)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            if let item = latestMembershipOutboxItem {
+                if item.canRetry {
+                    Button {
+                        model.retryPublish(item)
+                    } label: {
+                        Image(systemName: "arrow.clockwise.circle.fill")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Retry membership action")
+                }
+
+                Text(item.status.pendingDisplayLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer(minLength: 8)
+
+            if isCurrentMember {
+                Button {
+                    showingLeaveSheet = true
+                } label: {
+                    Label("Leave", systemImage: "person.badge.minus")
+                }
+                .buttonStyle(.glass)
+                .disabled(hasPendingMembershipAction)
+            } else {
+                Button {
+                    showingJoinSheet = true
+                } label: {
+                    Label("Join", systemImage: "person.badge.plus")
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(
+                    hasPendingMembershipAction ||
+                        !membersProjectionMatchesGroup ||
+                        node == nil ||
+                        model.kernelIsDead
+                )
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.thinMaterial)
+        .overlay(alignment: .top) { Divider() }
     }
 
     private func messageStream(proxy: ScrollViewProxy) -> some View {
@@ -587,6 +744,117 @@ struct GroupTimelineView: View {
 
     private func outboxItem(for eventId: String) -> PublishOutboxItem? {
         model.publishOutbox.first { $0.eventId == eventId }
+    }
+}
+
+private struct JoinGroupSheet: View {
+    let title: String
+    let requiresInviteCode: Bool
+    let onJoin: (String?, String?) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var inviteCode = ""
+    @State private var reason = ""
+    @State private var error: String?
+
+    private var trimmedInviteCode: String {
+        inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedReason: String {
+        reason.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Invite code", text: $inviteCode)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Reason", text: $reason, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+
+                if let error {
+                    Section {
+                        Text(error)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Join") {
+                        let accepted = onJoin(
+                            trimmedInviteCode.isEmpty ? nil : trimmedInviteCode,
+                            trimmedReason.isEmpty ? nil : trimmedReason
+                        )
+                        if accepted {
+                            dismiss()
+                        } else {
+                            error = "Could not send join request."
+                        }
+                    }
+                    .disabled(requiresInviteCode && trimmedInviteCode.isEmpty)
+                }
+            }
+        }
+    }
+}
+
+private struct LeaveGroupSheet: View {
+    let title: String
+    let onLeave: (String?) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var reason = ""
+    @State private var error: String?
+
+    private var trimmedReason: String {
+        reason.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Reason", text: $reason, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+
+                if let error {
+                    Section {
+                        Text(error)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(role: .destructive) {
+                        let accepted = onLeave(trimmedReason.isEmpty ? nil : trimmedReason)
+                        if accepted {
+                            dismiss()
+                        } else {
+                            error = "Could not send leave request."
+                        }
+                    } label: {
+                        Text("Leave")
+                    }
+                }
+            }
+        }
     }
 }
 
