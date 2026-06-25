@@ -40,12 +40,7 @@ struct GroupTreeView: View {
                     message: "Discovery has not returned any groups yet."
                 )
             } else {
-                ScrollView {
-                    GroupTreeList(nodes: tree.roots, tree: tree)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                }
-                .background(Color(.systemGroupedBackground))
+                GroupTreeList(nodes: tree.roots, tree: tree)
             }
         }
         .navigationTitle(navigationTitle(tree: tree))
@@ -84,13 +79,14 @@ private struct GroupTreeList: View {
     let tree: GroupTreeSnapshot
 
     var body: some View {
-        GlassEffectContainer(spacing: 10) {
-            LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(nodes) { node in
-                    GroupTreeRow(node: node, tree: tree)
-                }
+        List {
+            ForEach(nodes) { node in
+                GroupTreeRow(node: node, tree: tree)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 8))
+                    .listRowSeparator(.visible)
             }
         }
+        .listStyle(.plain)
     }
 }
 
@@ -101,33 +97,27 @@ struct GroupTreeRow: View {
     let tree: GroupTreeSnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                NavigationLink(value: node.groupId) {
-                    GroupRowLabel(node: node)
-                }
-                .accessibilityIdentifier("group-row-\(node.groupId)")
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .buttonStyle(.plain)
-
-                if !children.isEmpty {
-                    NavigationLink(value: GroupChildrenRoute(groupId: node.groupId)) {
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("group-children-\(node.groupId)")
-                    .accessibilityLabel("Show child groups for \(node.displayName)")
-                }
+        HStack(spacing: 8) {
+            NavigationLink(value: node.groupId) {
+                GroupRowLabel(node: node)
             }
-            .padding(.leading, 12)
-            .padding(.trailing, 12)
-            .padding(.vertical, 8)
-            .glassPanel(cornerRadius: 18, interactive: true)
+            .accessibilityIdentifier("group-row-\(node.groupId)")
+            .buttonStyle(.plain)
+
+            if !children.isEmpty {
+                NavigationLink(value: GroupChildrenRoute(groupId: node.groupId)) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 40, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("group-children-\(node.groupId)")
+                .accessibilityLabel("Show child groups for \(node.displayName)")
+            }
         }
+        .frame(minHeight: 68)
     }
 
     private var children: [GroupTreeNode] {
@@ -157,12 +147,7 @@ private struct GroupChildrenView: View {
                     description: Text("This group does not have any child groups.")
                 )
             } else {
-                ScrollView {
-                    GroupTreeList(nodes: children, tree: model.groupTree)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                }
-                .background(Color(.systemGroupedBackground))
+                GroupTreeList(nodes: children, tree: model.groupTree)
             }
         }
         .navigationTitle(parent?.displayName ?? "Groups")
@@ -451,7 +436,7 @@ struct GroupTimelineView: View {
                 membershipBar
                 composer
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Color(.systemBackground))
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -574,9 +559,6 @@ struct GroupTimelineView: View {
             systemImage: "bubble.left.and.bubble.right",
             description: Text("Start the conversation in this NIP-29 group.")
         )
-        .padding(24)
-        .frame(maxWidth: 360)
-        .glassPanel(cornerRadius: 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -613,7 +595,8 @@ struct GroupTimelineView: View {
                 } label: {
                     Label("Admin", systemImage: "slider.horizontal.3")
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 .accessibilityIdentifier("admin-button-\(groupId)")
             }
 
@@ -623,7 +606,8 @@ struct GroupTimelineView: View {
                 } label: {
                     Label("Leave", systemImage: "person.badge.minus")
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
                 .accessibilityIdentifier("leave-button-\(groupId)")
                 .disabled(hasPendingMembershipAction)
             } else {
@@ -632,7 +616,8 @@ struct GroupTimelineView: View {
                 } label: {
                     Label("Join", systemImage: "person.badge.plus")
                 }
-                .buttonStyle(.glassProminent)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
                 .accessibilityIdentifier("join-button-\(groupId)")
                 .disabled(
                     hasPendingMembershipAction ||
@@ -644,91 +629,97 @@ struct GroupTimelineView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.thinMaterial)
+        .background(Color(.systemBackground))
         .overlay(alignment: .top) { Divider() }
     }
 
     private func messageStream(proxy: ScrollViewProxy) -> some View {
         ScrollView {
-            GlassEffectContainer(spacing: 12) {
-                LazyVStack(spacing: 10) {
-                    ForEach(visibleMessages) { message in
-                        let pending = outboxItem(for: message.id)
-                        GroupMessageRow(
-                            message: message,
-                            isOwnMessage: message.pubkey == model.activeAccountPubkey,
-                            pendingStatus: pending?.status,
-                            canRetry: pending?.canRetry ?? false,
-                            onRetry: {
-                                if let pending {
-                                    model.retryPublish(pending)
-                                }
-                            },
-                            onReact: {
-                                model.reactToGroupMessage(
-                                    groupId: groupId,
-                                    eventId: message.id,
-                                    eventAuthorPubkey: message.pubkey
-                                )
+            LazyVStack(spacing: 8) {
+                ForEach(visibleMessages) { message in
+                    let pending = outboxItem(for: message.id)
+                    GroupMessageRow(
+                        message: message,
+                        isOwnMessage: message.pubkey == model.activeAccountPubkey,
+                        pendingStatus: pending?.status,
+                        canRetry: pending?.canRetry ?? false,
+                        onRetry: {
+                            if let pending {
+                                model.retryPublish(pending)
                             }
-                        )
-                        .id(message.id)
-                    }
-
-                    ForEach(outboxMessages) { message in
-                        PendingMessageRow(
-                            message: message,
-                            onRetry: { model.retryPublish(message) }
-                        )
-                        .id(message.id)
-                    }
-
-                    Color.clear
-                        .frame(height: 1)
-                        .id("chat-bottom")
+                        },
+                        onReact: {
+                            model.reactToGroupMessage(
+                                groupId: groupId,
+                                eventId: message.id,
+                                eventAuthorPubkey: message.pubkey
+                            )
+                        }
+                    )
+                    .id(message.id)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+
+                ForEach(outboxMessages) { message in
+                    PendingMessageRow(
+                        message: message,
+                        onRetry: { model.retryPublish(message) }
+                    )
+                    .id(message.id)
+                }
+
+                Color.clear
+                    .frame(height: 1)
+                    .id("chat-bottom")
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
         }
         .onAppear { scrollToBottom(proxy, animated: false) }
     }
 
     private var composer: some View {
-        GlassEffectContainer(spacing: 10) {
-            VStack(spacing: 0) {
-                if !mentionSuggestions.isEmpty {
-                    mentionSuggestionBar
-                }
-
-                HStack(alignment: .bottom, spacing: 8) {
-                    TextField("Message \(title)", text: $draft, axis: .vertical)
-                        .focused($composerFocused)
-                        .font(.body)
-                        .textFieldStyle(.plain)
-                        .lineLimit(1...4)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .glassPanel(cornerRadius: 16, interactive: true)
-                        .accessibilityIdentifier("group-chat-message-editor")
-
-                    Button(action: sendDraft) {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(canSend ? Color.accentColor : Color.secondary)
-                            .frame(width: 36, height: 36)
-                            .glassPanel(cornerRadius: 18, interactive: canSend)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!canSend)
-                    .accessibilityLabel("Send message")
-                    .accessibilityIdentifier("group-chat-send-button")
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+        VStack(spacing: 0) {
+            if !mentionSuggestions.isEmpty {
+                mentionSuggestionBar
             }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Message \(title)", text: $draft, axis: .vertical)
+                    .focused($composerFocused)
+                    .font(.body)
+                    .textFieldStyle(.plain)
+                    .lineLimit(1...4)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(Color(.secondarySystemBackground))
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Color(.separator).opacity(0.35), lineWidth: 0.5)
+                    }
+                    .accessibilityIdentifier("group-chat-message-editor")
+
+                Button(action: sendDraft) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(canSend ? .white : Color(.tertiaryLabel))
+                        .frame(width: 34, height: 34)
+                        .background(
+                            Circle()
+                                .fill(canSend ? Color.accentColor : Color(.tertiarySystemFill))
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSend)
+                .accessibilityLabel("Send message")
+                .accessibilityIdentifier("group-chat-send-button")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
         }
-        .background(.ultraThinMaterial)
+        .background(Color(.systemBackground))
         .overlay(alignment: .top) { Divider() }
     }
 
@@ -743,7 +734,7 @@ struct GroupTimelineView: View {
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
-                            .glassEffect(.regular.interactive(), in: .capsule)
+                            .background(Capsule().fill(Color(.tertiarySystemFill)))
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Mention \(member.title)")
@@ -1417,9 +1408,9 @@ private struct GroupMessageRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
-                    .glassEffect(
-                        isOwnMessage ? .regular.tint(Color.accentColor).interactive() : .regular.interactive(),
-                        in: .rect(cornerRadius: 16)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(isOwnMessage ? Color.accentColor : Color(.secondarySystemBackground))
                     )
             }
 
@@ -1478,7 +1469,10 @@ private struct PendingMessageRow: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
-                    .glassEffect(.regular.tint(Color.accentColor.opacity(0.72)).interactive(), in: .rect(cornerRadius: 16))
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color.accentColor.opacity(0.72))
+                    )
             }
         }
         .accessibilityIdentifier("group-chat-pending-message-\(message.id)")

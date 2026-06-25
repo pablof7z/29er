@@ -19,10 +19,8 @@ struct LoadingView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(24)
-        .frame(maxWidth: 340)
-        .glassPanel(cornerRadius: 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
+        .background(Color(.systemBackground))
     }
 }
 
@@ -40,11 +38,8 @@ struct EmptyStateView: View {
             systemImage: systemImage,
             description: Text(message)
         )
-        .padding(24)
-        .frame(maxWidth: 360)
-        .glassPanel(cornerRadius: 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
+        .background(Color(.systemBackground))
     }
 }
 
@@ -62,11 +57,8 @@ struct ErrorStateView: View {
             systemImage: systemImage,
             description: Text(message)
         )
-        .padding(24)
-        .frame(maxWidth: 360)
-        .glassPanel(cornerRadius: 22)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemGroupedBackground))
+        .background(Color(.systemBackground))
     }
 }
 
