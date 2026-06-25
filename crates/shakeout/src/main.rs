@@ -122,7 +122,7 @@ fn main() {
                 );
                 for g in &snapshot.groups {
                     println!(
-                        "shakeout:   id={:<24} name={:?} members={} admins={} public={} open={} parent={:?} children={} roles={}",
+                        "shakeout:   id={:<24} name={:?} members={} admins={} public={} open={} parent={:?} children={}",
                         g.group_id,
                         g.name,
                         g.member_count,
@@ -131,15 +131,7 @@ fn main() {
                         g.open,
                         g.parent,
                         g.children.len(),
-                        g.roles.len()
                     );
-                    for r in &g.roles {
-                        println!(
-                            "shakeout:     role {} ({})",
-                            r.name,
-                            r.description.as_deref().unwrap_or("")
-                        );
-                    }
                     logged += 1;
                 }
             }
