@@ -164,7 +164,7 @@ impl App {
                 RoomEntry { group_id, name, unread, last_preview }
             })
             .collect();
-        rooms.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        rooms.sort_by_key(|r| r.name.to_lowercase());
         self.rooms = rooms;
         if self.rooms.is_empty() {
             self.selected_index = 0;
@@ -207,9 +207,7 @@ impl App {
                 }
                 if let Ok(json) = serde_json::to_string(&group_id) {
                     if let Ok(c) = CString::new(json) {
-                        unsafe {
-                            nmp_app_29er_register_group_chat(self.app_ptr, c.as_ptr());
-                        }
+                        nmp_app_29er_register_group_chat(self.app_ptr, c.as_ptr());
                     }
                 }
             }
@@ -248,11 +246,9 @@ impl App {
         let (Ok(ns), Ok(body)) = (CString::new(namespace), CString::new(body)) else {
             return;
         };
-        unsafe {
-            let res = nmp_app_29er_dispatch_action_bytes(self.app_ptr, ns.as_ptr(), body.as_ptr());
-            if !res.is_null() {
-                nmp_free_string(res);
-            }
+        let res = nmp_app_29er_dispatch_action_bytes(self.app_ptr, ns.as_ptr(), body.as_ptr());
+        if !res.is_null() {
+            nmp_free_string(res);
         }
     }
 
@@ -294,13 +290,11 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
-        unsafe {
-            if !self.handle.is_null() {
-                nmp_app_29er_unregister(self.handle);
-            }
-            if !self.app_ptr.is_null() {
-                nmp_ffi::nmp_app_free(self.app_ptr);
-            }
+        if !self.handle.is_null() {
+            nmp_app_29er_unregister(self.handle);
+        }
+        if !self.app_ptr.is_null() {
+            nmp_ffi::nmp_app_free(self.app_ptr);
         }
     }
 }

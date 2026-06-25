@@ -24,9 +24,6 @@ serde_json = { workspace = true }
 ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 tui-textarea = "0.7"
-tui-scrollview = "0.5"
-tui-widget-list = "0.13"
-ratatui-themes = "0.1"
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 anyhow = "1"

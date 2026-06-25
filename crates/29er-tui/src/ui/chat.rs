@@ -27,6 +27,12 @@ pub struct ChatComponent {
     textarea: TextArea<'static>,
 }
 
+impl Default for ChatComponent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ChatComponent {
     pub fn new() -> Self {
         Self {
@@ -78,9 +84,9 @@ impl ChatComponent {
 
     fn draw_history(&self, f: &mut Frame, area: Rect) {
         let border_style = if self.focused {
-            Style::default().fg(ui::OVERLAY)
-        } else {
             Style::default().fg(ui::MAUVE)
+        } else {
+            Style::default().fg(ui::OVERLAY)
         };
         let block = Block::default()
             .title(self.room_title.clone())
