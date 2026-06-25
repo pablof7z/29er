@@ -325,10 +325,22 @@ struct GroupTimelineView: View {
 
     private var adminOutboxItems: [PublishOutboxItem] {
         model.publishOutbox.filter { item in
-            (item.kind == 9000 || item.kind == 9009) &&
-                item.tags.contains { tag in
-                    tag.count >= 2 && tag[0] == "h" && tag[1] == groupId
-                }
+            let hasCurrentGroupH = item.tags.contains { tag in
+                tag.count >= 2 && tag[0] == "h" && tag[1] == groupId
+            }
+            let hasCurrentGroupParent = item.tags.contains { tag in
+                tag.count >= 2 && tag[0] == "parent" && tag[1] == groupId
+            }
+            switch item.kind {
+            case 9000, 9009:
+                return hasCurrentGroupH
+            case 9002:
+                return hasCurrentGroupH || hasCurrentGroupParent
+            case 9007:
+                return true
+            default:
+                return false
+            }
         }
         .sorted { $0.createdAt > $1.createdAt }
     }
@@ -492,6 +504,16 @@ struct GroupTimelineView: View {
                             targetPubkey: pubkey,
                             role: role,
                             reason: reason
+                        )
+                    },
+                    onCreateChild: { localId, name, about, visibility, access in
+                        model.createGroup(
+                            localId: localId,
+                            name: name,
+                            about: about,
+                            visibility: visibility,
+                            access: access,
+                            parent: groupId
                         )
                     },
                     onRetry: { item in
@@ -904,6 +926,7 @@ private struct AdminActionsSheet: View {
     let pendingItems: [PublishOutboxItem]
     let onCreateInvite: ([String]) -> Bool
     let onPutUser: (String, String?, String?) -> Bool
+    let onCreateChild: (String, String, String?, String, String) -> Bool
     let onRetry: (PublishOutboxItem) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -911,6 +934,11 @@ private struct AdminActionsSheet: View {
     @State private var targetPubkey = ""
     @State private var role = ""
     @State private var reason = ""
+    @State private var childLocalId = ""
+    @State private var childName = ""
+    @State private var childAbout = ""
+    @State private var childVisibility = "public"
+    @State private var childAccess = "open"
     @State private var error: String?
 
     private var parsedInviteCodes: [String] {
@@ -932,6 +960,18 @@ private struct AdminActionsSheet: View {
 
     private var trimmedReason: String {
         reason.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedChildLocalId: String {
+        childLocalId.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedChildName: String {
+        childName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedChildAbout: String {
+        childAbout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
@@ -979,14 +1019,42 @@ private struct AdminActionsSheet: View {
                     .disabled(trimmedTargetPubkey.isEmpty)
                 }
 
+                Section("Child Channel") {
+                    TextField("Local ID", text: $childLocalId)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("Name", text: $childName)
+                    TextField("About", text: $childAbout, axis: .vertical)
+                        .lineLimit(2...4)
+
+                    Picker("Visibility", selection: $childVisibility) {
+                        Text("Public").tag("public")
+                        Text("Private").tag("private")
+                    }
+                    .pickerStyle(.segmented)
+
+                    Picker("Access", selection: $childAccess) {
+                        Text("Open").tag("open")
+                        Text("Closed").tag("closed")
+                    }
+                    .pickerStyle(.segmented)
+
+                    Button {
+                        submitCreateChild()
+                    } label: {
+                        Label("Create Child", systemImage: "folder.badge.plus")
+                    }
+                    .disabled(trimmedChildLocalId.isEmpty || trimmedChildName.isEmpty)
+                }
+
                 if !pendingItems.isEmpty {
                     Section("Pending") {
                         ForEach(pendingItems) { item in
                             HStack(spacing: 8) {
-                                Image(systemName: item.kind == 9009 ? "ticket" : "person.badge.plus")
+                                Image(systemName: pendingIcon(for: item.kind))
                                     .foregroundStyle(.secondary)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.kind == 9009 ? "Invite" : "Put User")
+                                    Text(pendingTitle(for: item.kind))
                                         .font(.subheadline.weight(.medium))
                                     Text(item.status.pendingDisplayLabel)
                                         .font(.caption)
@@ -1050,8 +1118,58 @@ private struct AdminActionsSheet: View {
         }
     }
 
+    private func submitCreateChild() {
+        let accepted = onCreateChild(
+            trimmedChildLocalId,
+            trimmedChildName,
+            trimmedChildAbout.isEmpty ? nil : trimmedChildAbout,
+            childVisibility,
+            childAccess
+        )
+        if accepted {
+            childLocalId = ""
+            childName = ""
+            childAbout = ""
+            childVisibility = "public"
+            childAccess = "open"
+            error = nil
+        } else {
+            error = "Could not create child channel."
+        }
+    }
+
     private func generatedInviteCode() -> String {
         UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12).description
+    }
+
+    private func pendingTitle(for kind: UInt32) -> String {
+        switch kind {
+        case 9000:
+            return "Put User"
+        case 9002:
+            return "Metadata"
+        case 9007:
+            return "Create Group"
+        case 9009:
+            return "Invite"
+        default:
+            return "Admin Action"
+        }
+    }
+
+    private func pendingIcon(for kind: UInt32) -> String {
+        switch kind {
+        case 9000:
+            return "person.badge.plus"
+        case 9002:
+            return "tag"
+        case 9007:
+            return "folder.badge.plus"
+        case 9009:
+            return "ticket"
+        default:
+            return "clock"
+        }
     }
 }
 
