@@ -279,6 +279,69 @@ mod tests {
         assert_eq!(a1.id, a2.id);
         assert_ne!(a1.id, b.id);
     }
+
+    #[test]
+    fn m002_membership_and_admin_namespaces_encode_typed_payloads() {
+        let leave = encode_payload_for_namespace(
+            "nmp.nip29.leave",
+            r#"{"group":{"host_relay_url":"wss://groups.example.com","local_id":"room"},"reason":"done"}"#,
+        )
+        .expect("leave payload encodes");
+        let leave =
+            <nmp_nip29::action::LeaveGroupInput as ActionPayload>::decode(&leave).expect("decodes");
+        assert_eq!(leave.group.local_id, "room");
+        assert_eq!(leave.reason.as_deref(), Some("done"));
+
+        let create = encode_payload_for_namespace(
+            "nmp.nip29.create_public_group",
+            r#"{"group":{"host_relay_url":"wss://groups.example.com","local_id":"child-room"},"name":"Child Room","about":"Admin work","visibility":"private","access":"closed","parent":"root"}"#,
+        )
+        .expect("create payload encodes");
+        let create = <nmp_nip29::action::CreatePublicGroupInput as ActionPayload>::decode(&create)
+            .expect("decodes");
+        assert_eq!(create.group.local_id, "child-room");
+        assert_eq!(create.name, "Child Room");
+        assert_eq!(create.parent.as_deref(), Some("root"));
+        assert_eq!(create.about.as_deref(), Some("Admin work"));
+
+        let put_user = encode_payload_for_namespace(
+            "nmp.nip29.put_user",
+            r#"{"group":{"host_relay_url":"wss://groups.example.com","local_id":"room"},"target_pubkey":"0000000000000000000000000000000000000000000000000000000000000001","role":"admin","reason":"trusted"}"#,
+        )
+        .expect("put-user payload encodes");
+        let put_user =
+            <nmp_nip29::action::PutUserInput as ActionPayload>::decode(&put_user).expect("decodes");
+        assert_eq!(
+            put_user.target_pubkey,
+            "0000000000000000000000000000000000000000000000000000000000000001"
+        );
+        assert_eq!(put_user.role.as_deref(), Some("admin"));
+
+        let invite = encode_payload_for_namespace(
+            "nmp.nip29.create_invite",
+            r#"{"group":{"host_relay_url":"wss://groups.example.com","local_id":"room"},"codes":["alpha","beta"]}"#,
+        )
+        .expect("invite payload encodes");
+        let invite = <nmp_nip29::action::CreateInviteInput as ActionPayload>::decode(&invite)
+            .expect("decodes");
+        assert_eq!(invite.codes, vec!["alpha".to_string(), "beta".to_string()]);
+
+        let set_parent = encode_payload_for_namespace(
+            "nmp.nip29.set_parent",
+            r#"{"group":{"host_relay_url":"wss://groups.example.com","local_id":"child-room"},"parent":"root"}"#,
+        )
+        .expect("set-parent payload encodes");
+        let set_parent = <nmp_nip29::action::SetParentInput as ActionPayload>::decode(&set_parent)
+            .expect("decodes");
+        assert_eq!(set_parent.group.local_id, "child-room");
+        assert_eq!(set_parent.parent.as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn action_encoder_fails_closed_for_unknown_or_malformed_payloads() {
+        assert!(encode_payload_for_namespace("nmp.nip29.remove_everyone", "{}").is_none());
+        assert!(encode_payload_for_namespace("nmp.nip29.leave", r#"{"group":42}"#).is_none());
+    }
 }
 
 /// Open a NIP-29 group-discovery session for one host relay.
@@ -577,6 +640,15 @@ fn encode_payload_for_namespace(namespace: &str, json: &str) -> Option<Vec<u8>> 
         "nmp.publish" => encode::<nmp_core::publish::PublishAction>(namespace, json),
         "nmp.nip29.discover" => encode::<nmp_nip29::action::DiscoverGroupsInput>(namespace, json),
         "nmp.nip29.join" => encode::<nmp_nip29::action::JoinGroupInput>(namespace, json),
+        "nmp.nip29.leave" => encode::<nmp_nip29::action::LeaveGroupInput>(namespace, json),
+        "nmp.nip29.create_public_group" => {
+            encode::<nmp_nip29::action::CreatePublicGroupInput>(namespace, json)
+        }
+        "nmp.nip29.put_user" => encode::<nmp_nip29::action::PutUserInput>(namespace, json),
+        "nmp.nip29.create_invite" => {
+            encode::<nmp_nip29::action::CreateInviteInput>(namespace, json)
+        }
+        "nmp.nip29.set_parent" => encode::<nmp_nip29::action::SetParentInput>(namespace, json),
         "nmp.nip29.post_chat_message" => {
             encode::<nmp_nip29::action::PostChatMessageInput>(namespace, json)
         }

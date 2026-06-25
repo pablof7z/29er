@@ -94,10 +94,9 @@ extension KernelHandle {
     }
 
     /// Dispatch a `nmp.nip29.join` action — publish a kind:9021 join request
-    /// to `group`'s host relay. Fire-and-forget; the relay's response (a new
-    /// kind:39002 listing the user) surfaces through the next discovery
-    /// snapshot tick.
-    func joinGroup(group: GroupId, inviteCode: String? = nil, reason: String? = nil) {
+    /// to `group`'s host relay. The relay response surfaces later as a new
+    /// kind:39002 member-list snapshot.
+    func joinGroup(group: GroupId, inviteCode: String? = nil, reason: String? = nil) -> Bool {
         var payload: [String: Any] = ["group": group.jsonObject]
         if let inviteCode, !inviteCode.isEmpty {
             payload["invite_code"] = inviteCode
@@ -105,7 +104,89 @@ extension KernelHandle {
         if let reason, !reason.isEmpty {
             payload["reason"] = reason
         }
-        _ = dispatchNip29("nmp.nip29.join", payload: payload, label: "joinGroup")
+        return dispatchNip29("nmp.nip29.join", payload: payload, label: "joinGroup")
+    }
+
+    /// Dispatch a `nmp.nip29.leave` action — publish a kind:9022 leave request
+    /// to `group`'s host relay. Rust owns event shape, tags, and host pinning.
+    func leaveGroup(group: GroupId, reason: String? = nil) -> Bool {
+        var payload: [String: Any] = ["group": group.jsonObject]
+        if let reason, !reason.isEmpty {
+            payload["reason"] = reason
+        }
+        return dispatchNip29("nmp.nip29.leave", payload: payload, label: "leaveGroup")
+    }
+
+    /// Dispatch a `nmp.nip29.create_public_group` action. The Rust action
+    /// publishes kind:9007 followed by kind:9002 metadata.
+    func createPublicGroup(
+        group: GroupId,
+        name: String,
+        about: String? = nil,
+        picture: String? = nil,
+        visibility: String = "public",
+        access: String = "open",
+        parent: String? = nil
+    ) -> Bool {
+        var payload: [String: Any] = [
+            "group": group.jsonObject,
+            "name": name,
+            "visibility": visibility,
+            "access": access,
+        ]
+        if let about, !about.isEmpty {
+            payload["about"] = about
+        }
+        if let picture, !picture.isEmpty {
+            payload["picture"] = picture
+        }
+        if let parent, !parent.isEmpty {
+            payload["parent"] = parent
+        }
+        return dispatchNip29(
+            "nmp.nip29.create_public_group",
+            payload: payload,
+            label: "createPublicGroup"
+        )
+    }
+
+    /// Dispatch a `nmp.nip29.put_user` action — add/promote a user by pubkey.
+    func putUser(
+        group: GroupId,
+        targetPubkey: String,
+        role: String? = nil,
+        reason: String? = nil
+    ) -> Bool {
+        var payload: [String: Any] = [
+            "group": group.jsonObject,
+            "target_pubkey": targetPubkey,
+        ]
+        if let role, !role.isEmpty {
+            payload["role"] = role
+        }
+        if let reason, !reason.isEmpty {
+            payload["reason"] = reason
+        }
+        return dispatchNip29("nmp.nip29.put_user", payload: payload, label: "putUser")
+    }
+
+    /// Dispatch a `nmp.nip29.create_invite` action — mint invite codes.
+    func createInvite(group: GroupId, codes: [String]) -> Bool {
+        let payload: [String: Any] = [
+            "group": group.jsonObject,
+            "codes": codes,
+        ]
+        return dispatchNip29("nmp.nip29.create_invite", payload: payload, label: "createInvite")
+    }
+
+    /// Dispatch a `nmp.nip29.set_parent` action. Omit `parent` to detach to
+    /// root; provide a group local id to adopt under that parent.
+    func setParent(group: GroupId, parent: String?) -> Bool {
+        var payload: [String: Any] = ["group": group.jsonObject]
+        if let parent, !parent.isEmpty {
+            payload["parent"] = parent
+        }
+        return dispatchNip29("nmp.nip29.set_parent", payload: payload, label: "setParent")
     }
 
     /// Dispatch a `nmp.nip29.post_chat_message` action — publish a kind:9
@@ -219,6 +300,62 @@ extension KernelModel {
             eventId: eventId,
             eventAuthorPubkey: eventAuthorPubkey
         )
+    }
+
+    func joinGroup(groupId: String, inviteCode: String? = nil, reason: String? = nil) -> Bool {
+        guard let group = nip29GroupId(for: groupId) else { return false }
+        return kernel.joinGroup(group: group, inviteCode: inviteCode, reason: reason)
+    }
+
+    func leaveGroup(groupId: String, reason: String? = nil) -> Bool {
+        guard let group = nip29GroupId(for: groupId) else { return false }
+        return kernel.leaveGroup(group: group, reason: reason)
+    }
+
+    func createGroup(
+        localId: String,
+        name: String,
+        about: String? = nil,
+        picture: String? = nil,
+        visibility: String = "public",
+        access: String = "open",
+        parent: String? = nil
+    ) -> Bool {
+        let group = GroupId(hostRelayUrl: defaultNip29RelayUrl, localId: localId)
+        return kernel.createPublicGroup(
+            group: group,
+            name: name,
+            about: about,
+            picture: picture,
+            visibility: visibility,
+            access: access,
+            parent: parent
+        )
+    }
+
+    func putUser(
+        groupId: String,
+        targetPubkey: String,
+        role: String? = nil,
+        reason: String? = nil
+    ) -> Bool {
+        guard let group = nip29GroupId(for: groupId) else { return false }
+        return kernel.putUser(
+            group: group,
+            targetPubkey: targetPubkey,
+            role: role,
+            reason: reason
+        )
+    }
+
+    func createInvite(groupId: String, codes: [String]) -> Bool {
+        guard let group = nip29GroupId(for: groupId) else { return false }
+        return kernel.createInvite(group: group, codes: codes)
+    }
+
+    func setParent(groupId: String, parent: String?) -> Bool {
+        guard let group = nip29GroupId(for: groupId) else { return false }
+        return kernel.setParent(group: group, parent: parent)
     }
 
     func nip29GroupId(for groupId: String) -> GroupId? {
