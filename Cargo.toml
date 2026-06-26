@@ -9,17 +9,16 @@ repository = "https://github.com/pablof7z/29er"
 version = "0.1.0"
 
 # NMP is consumed as an external git dependency — never vendored.
-# Pinned to the head of PR #2131 (generic nmp.nip29.publish_group_event surface).
-# When #2131 merges, bump `rev` to the resulting master commit.
+# Pinned to master after #2131 merged (generic nmp.nip29.publish_group_event surface).
 [workspace.dependencies]
-nmp-core = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
-nmp-ffi = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
-nmp-defaults = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
-nmp-nip29 = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
-nmp-planner = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
-nmp-network = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
-nmp-signer-iface = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
-nmp-content = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
+nmp-core = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "1f798ef7250be9012426901a9b6d0c135b2faacc" }
+nmp-ffi = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "1f798ef7250be9012426901a9b6d0c135b2faacc" }
+nmp-defaults = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "1f798ef7250be9012426901a9b6d0c135b2faacc" }
+nmp-nip29 = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "1f798ef7250be9012426901a9b6d0c135b2faacc" }
+nmp-planner = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "1f798ef7250be9012426901a9b6d0c135b2faacc" }
+nmp-network = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "1f798ef7250be9012426901a9b6d0c135b2faacc" }
+nmp-signer-iface = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "1f798ef7250be9012426901a9b6d0c135b2faacc" }
+nmp-content = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "1f798ef7250be9012426901a9b6d0c135b2faacc" }
 nmp-app-29er = { path = "crates/nmp-app-29er" }
 flatbuffers = "25.12.19"
 nostr = "0.44"
