@@ -1,4 +1,10 @@
 //! Command palette (issue #6): fuzzy filter over channels + typed actions.
+//!
+//! Improvements:
+//! * nucleo Matcher and scratch buffer hoisted out of the hot path.
+//! * Contextual empty-state: recent → channels-by-recency → actions.
+//! * Inline badge ([n], [Admin], …) on action entries.
+use std::collections::{HashSet, VecDeque};
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
@@ -12,59 +18,94 @@ use crate::app::{Focus, FormKind, TuiSnapshot};
 use crate::ui;
 use crate::Component;
 
+/// Maximum number of recently-confirmed entries to remember across openings.
+const RECENT_CAP: usize = 5;
+
 #[derive(Clone)]
 struct Entry {
     label: String,
     subtitle: String,
+    /// Optional inline badge shown before the label: "[n]", "[Admin]", etc.
+    badge: Option<String>,
     action: Action,
 }
 
-#[derive(Default)]
 pub struct Palette {
     query: String,
     entries: Vec<Entry>,
     filtered: Vec<usize>,
     selected: usize,
     state: ListState,
+    // ── hoisted nucleo resources ─────────────────────────────────────────────
+    /// Reused across every filter() call — avoids reallocating the Matcher.
+    matcher: Matcher,
+    /// Scratch buffer for Utf32Str::new; reused to avoid per-entry allocations.
+    scratch: Vec<char>,
+    // ── contextual empty-state bookkeeping ───────────────────────────────────
+    /// Labels of the last RECENT_CAP confirmed entries, most recent first.
+    recent: VecDeque<String>,
+    /// How many of entries[] are channel entries (always the leading slice).
+    channel_count: usize,
+    /// last_timestamp for entries[0..channel_count] (parallel array).
+    channel_timestamps: Vec<Option<u64>>,
 }
 
 impl Palette {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            query: String::new(),
+            entries: Vec::new(),
+            filtered: Vec::new(),
+            selected: 0,
+            state: ListState::default(),
+            matcher: Matcher::new(Config::DEFAULT),
+            scratch: Vec::<char>::new(),
+            recent: VecDeque::new(),
+            channel_count: 0,
+            channel_timestamps: Vec::new(),
+        }
     }
 
     pub fn update(&mut self, s: &TuiSnapshot) {
         let mut entries: Vec<Entry> = Vec::new();
+        let mut timestamps: Vec<Option<u64>> = Vec::new();
 
         // Channel entries from the channel tree
         for it in &s.channel_tree {
             entries.push(Entry {
                 label: it.name.clone(),
                 subtitle: format!("channel \u{2022} {}", it.last_preview.clone().unwrap_or_default()),
+                badge: None,
                 action: Action::SelectChannel(it.group_id.clone()),
             });
+            timestamps.push(it.last_timestamp);
         }
+        let channel_count = entries.len();
 
         // Action entries for the selected channel
         if let Some(g) = s.selected_channel_id.clone() {
             entries.push(Entry {
                 label: "Compose message".into(),
                 subtitle: "action".into(),
+                badge: Some("[n]".into()),
                 action: Action::SetFocus(Focus::Composer),
             });
             entries.push(Entry {
                 label: "Show members".into(),
                 subtitle: "action".into(),
+                badge: None,
                 action: Action::ShowMembers(g.clone()),
             });
             entries.push(Entry {
                 label: "Join channel".into(),
                 subtitle: "action".into(),
+                badge: None,
                 action: Action::OpenForm(FormKind::JoinWithCode(g.clone())),
             });
             entries.push(Entry {
                 label: "Leave channel".into(),
                 subtitle: "action".into(),
+                badge: None,
                 action: Action::Leave { group: g.clone() },
             });
 
@@ -73,27 +114,33 @@ impl Palette {
                 entries.push(Entry {
                     label: "Create invite".into(),
                     subtitle: "admin".into(),
+                    badge: Some("[Admin]".into()),
                     action: Action::OpenForm(FormKind::CreateInvite(g.clone())),
                 });
                 entries.push(Entry {
                     label: "Create child channel".into(),
                     subtitle: "admin".into(),
+                    badge: Some("[Admin]".into()),
                     action: Action::OpenForm(FormKind::CreateChild(g.clone())),
                 });
                 entries.push(Entry {
                     label: "Move channel".into(),
                     subtitle: "admin".into(),
+                    badge: Some("[Admin]".into()),
                     action: Action::OpenForm(FormKind::MoveChannel(g.clone())),
                 });
                 entries.push(Entry {
                     label: "Add role / put user".into(),
                     subtitle: "admin".into(),
+                    badge: Some("[Admin]".into()),
                     action: Action::OpenForm(FormKind::PutUser(g.clone())),
                 });
             }
         }
 
         self.entries = entries;
+        self.channel_count = channel_count;
+        self.channel_timestamps = timestamps;
         self.recompute();
     }
 
@@ -108,26 +155,73 @@ impl Palette {
             .select(if self.filtered.is_empty() { None } else { Some(self.selected) });
     }
 
-    /// Pure fuzzy filter (issue #6 AC). Empty query keeps original order.
-    fn filter(&self) -> Vec<usize> {
+    /// Fuzzy filter. Empty query uses contextual ordering (see `filter_empty`).
+    /// Non-empty query runs nucleo fuzzy-match over label+subtitle combined.
+    fn filter(&mut self) -> Vec<usize> {
         if self.query.trim().is_empty() {
-            return (0..self.entries.len()).collect();
+            return self.filter_empty();
         }
-        let mut matcher = Matcher::new(Config::DEFAULT);
         let pattern = Pattern::parse(self.query.trim(), CaseMatching::Ignore, Normalization::Smart);
-        let mut scored: Vec<(u32, usize)> = self
+
+        // Collect haystack strings first so we hold no borrow over `self.matcher`.
+        let hays: Vec<String> = self
             .entries
             .iter()
-            .enumerate()
-            .filter_map(|(i, e)| {
-                let hay = format!("{} {}", e.label, e.subtitle);
-                let mut buf = Vec::new();
-                let utf32 = Utf32Str::new(&hay, &mut buf);
-                pattern.score(utf32, &mut matcher).map(|score| (score, i))
-            })
+            .map(|e| format!("{} {}", e.label, e.subtitle))
             .collect();
+
+        let mut scored = Vec::with_capacity(hays.len());
+        for (i, hay) in hays.iter().enumerate() {
+            self.scratch.clear();
+            let utf32 = Utf32Str::new(hay.as_str(), &mut self.scratch);
+            if let Some(score) = pattern.score(utf32, &mut self.matcher) {
+                scored.push((score, i));
+            }
+        }
         scored.sort_by(|a, b| b.0.cmp(&a.0));
         scored.into_iter().map(|(_, i)| i).collect()
+    }
+
+    /// Contextual ordering when the query is blank:
+    ///
+    /// 1. Up to `RECENT_CAP` recently confirmed entries (most recent first).
+    /// 2. All channel entries sorted by `last_timestamp` descending.
+    /// 3. All action entries in their natural order.
+    fn filter_empty(&self) -> Vec<usize> {
+        let mut seen: HashSet<usize> = HashSet::new();
+        let mut result = Vec::with_capacity(self.entries.len());
+
+        // 1. Recent
+        for label in &self.recent {
+            if let Some(idx) = self.entries.iter().position(|e| &e.label == label) {
+                if seen.insert(idx) {
+                    result.push(idx);
+                }
+            }
+        }
+
+        // 2. Channels — sorted by timestamp descending (most-active first)
+        let mut channel_indices: Vec<usize> = (0..self.channel_count)
+            .filter(|i| !seen.contains(i))
+            .collect();
+        channel_indices.sort_by(|&a, &b| {
+            let ta = self.channel_timestamps.get(a).copied().flatten().unwrap_or(0);
+            let tb = self.channel_timestamps.get(b).copied().flatten().unwrap_or(0);
+            tb.cmp(&ta)
+        });
+        for idx in channel_indices {
+            seen.insert(idx);
+            result.push(idx);
+        }
+
+        // 3. Actions (everything after the channel slice)
+        for idx in self.channel_count..self.entries.len() {
+            if !seen.contains(&idx) {
+                result.push(idx);
+            }
+        }
+
+        result
     }
 
     fn selected_action(&self) -> Option<Action> {
@@ -136,6 +230,24 @@ impl Palette {
             .and_then(|&i| self.entries.get(i))
             .map(|e| e.action.clone())
     }
+
+    /// Push the currently-selected entry into the recent list (FIFO, capped at RECENT_CAP).
+    fn record_recent(&mut self) {
+        if let Some(&i) = self.filtered.get(self.selected) {
+            if let Some(e) = self.entries.get(i) {
+                let label = e.label.clone();
+                self.recent.retain(|l| l != &label); // remove duplicate
+                self.recent.push_front(label);
+                if self.recent.len() > RECENT_CAP {
+                    self.recent.pop_back();
+                }
+            }
+        }
+    }
+}
+
+impl Default for Palette {
+    fn default() -> Self { Self::new() }
 }
 
 impl Component for Palette {
@@ -183,20 +295,31 @@ impl Component for Palette {
             inner[0],
         );
 
-        // Results list
+        // Results list — each item may carry an inline badge before the label.
         let items: Vec<ListItem> = self
             .filtered
             .iter()
             .filter_map(|&i| self.entries.get(i))
             .map(|e| {
-                ListItem::new(Line::from(vec![
-                    Span::styled(
-                        e.label.clone(),
-                        Style::default().fg(ui::TEXT).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(e.subtitle.clone(), Style::default().fg(ui::OVERLAY0)),
-                ]))
+                let mut spans: Vec<Span> = Vec::new();
+                if let Some(badge) = &e.badge {
+                    let badge_style = if badge == "[Admin]" {
+                        // Dim for privilege-gated items
+                        Style::default().fg(ui::OVERLAY0).add_modifier(Modifier::DIM)
+                    } else {
+                        // Accent color for keyboard shortcuts
+                        Style::default().fg(ui::LAVENDER)
+                    };
+                    spans.push(Span::styled(badge.clone(), badge_style));
+                    spans.push(Span::raw(" "));
+                }
+                spans.push(Span::styled(
+                    e.label.clone(),
+                    Style::default().fg(ui::TEXT).add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::raw("  "));
+                spans.push(Span::styled(e.subtitle.clone(), Style::default().fg(ui::OVERLAY0)));
+                ListItem::new(Line::from(spans))
             })
             .collect();
 
@@ -238,7 +361,10 @@ impl Component for Palette {
                 self.state.select(Some(self.selected));
                 None
             }
-            KeyCode::Enter => self.selected_action(),
+            KeyCode::Enter => {
+                self.record_recent();
+                self.selected_action()
+            }
             KeyCode::Backspace => {
                 self.query.pop();
                 self.recompute();
@@ -262,6 +388,7 @@ mod tests {
         Entry {
             label: label.to_string(),
             subtitle: "channel".to_string(),
+            badge: None,
             action: Action::Noop,
         }
     }
@@ -301,6 +428,7 @@ mod tests {
         p.entries = vec![Entry {
             label: "general".into(),
             subtitle: "channel".into(),
+            badge: None,
             action: Action::SelectChannel(gid.clone()),
         }];
         p.recompute();
@@ -351,5 +479,103 @@ mod tests {
             p.entries.iter().any(|e| e.subtitle == "admin"),
             "admin should see admin-only entries"
         );
+    }
+
+    /// Contextual empty-state: channels are sorted by timestamp descending.
+    #[test]
+    fn test_empty_state_channels_sorted_by_recency() {
+        let mut p = Palette::new();
+        // Three channel entries with different timestamps.
+        p.entries = vec![
+            Entry { label: "alpha".into(), subtitle: "channel".into(), badge: None, action: Action::Noop },
+            Entry { label: "beta".into(),  subtitle: "channel".into(), badge: None, action: Action::Noop },
+            Entry { label: "gamma".into(), subtitle: "channel".into(), badge: None, action: Action::Noop },
+        ];
+        p.channel_count = 3;
+        p.channel_timestamps = vec![Some(100), Some(300), Some(200)];
+
+        let out = p.filter(); // empty query → contextual order
+        // beta (ts=300) > gamma (ts=200) > alpha (ts=100)
+        assert_eq!(p.entries[out[0]].label, "beta");
+        assert_eq!(p.entries[out[1]].label, "gamma");
+        assert_eq!(p.entries[out[2]].label, "alpha");
+    }
+
+    /// Contextual empty-state: recently confirmed entries surface at the top.
+    #[test]
+    fn test_empty_state_recent_entries_first() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        use nmp_nip29::GroupId;
+
+        let mut p = Palette::new();
+        let gid = GroupId::new("wss://h", "chan");
+        // One channel, one action.
+        p.entries = vec![
+            Entry { label: "general".into(), subtitle: "channel".into(), badge: None,
+                    action: Action::SelectChannel(gid.clone()) },
+            Entry { label: "Compose message".into(), subtitle: "action".into(),
+                    badge: Some("[n]".into()), action: Action::SetFocus(Focus::Composer) },
+        ];
+        p.channel_count = 1;
+        p.channel_timestamps = vec![Some(1000)];
+        p.recompute();
+
+        // Confirm "Compose message" (index 1) via Enter.
+        p.selected = 1;
+        let ev = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        let _ = p.handle_event(&ev);
+
+        // Re-run filter with empty query — "Compose message" should now be first.
+        let out = p.filter();
+        assert_eq!(p.entries[out[0]].label, "Compose message",
+            "recently confirmed entry must appear first in empty-state");
+    }
+
+    /// Admin entries carry the [Admin] badge; hotkey entries carry their shortcut badge.
+    #[test]
+    fn test_inline_badges() {
+        use nmp_nip29::GroupId;
+        use crate::app::{IdentityState, RelayState, Screen};
+
+        let gid = GroupId::new("wss://h", "room");
+        let snap = TuiSnapshot {
+            channel_tree: vec![],
+            selected_channel_id: Some(gid.clone()),
+            selected_messages: vec![],
+            selected_members: vec![],
+            is_admin: true,
+            my_pubkey: None,
+            publish_outbox: vec![],
+            identity_state: IdentityState::LoggedOut,
+            relay_state: RelayState::Connected,
+            errors: vec![],
+            selected_index: 0,
+            focus: Focus::RoomList,
+            message_scroll: 0,
+            palette_open: false,
+            active_form: None,
+            login_error: None,
+            screen: Screen::App,
+            help_open: false,
+        };
+        let mut p = Palette::new();
+        p.update(&snap);
+
+        // "Compose message" must have badge "[n]"
+        let compose = p.entries.iter().find(|e| e.label == "Compose message").unwrap();
+        assert_eq!(compose.badge.as_deref(), Some("[n]"));
+
+        // Admin-only entries must carry the "[Admin]" badge.
+        let admin_entries: Vec<_> = p.entries.iter().filter(|e| e.subtitle == "admin").collect();
+        assert!(!admin_entries.is_empty(), "admin entries must exist");
+        for e in &admin_entries {
+            assert_eq!(e.badge.as_deref(), Some("[Admin]"),
+                "admin entry '{}' must have [Admin] badge", e.label);
+        }
+
+        // Channel entries must have no badge.
+        for e in p.entries.iter().take(p.channel_count) {
+            assert!(e.badge.is_none(), "channel entry must not have a badge");
+        }
     }
 }
