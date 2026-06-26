@@ -36,6 +36,8 @@ pub struct ChatComponent {
     last_inner_height: u16,
     /// Total content height from the last draw call.
     last_total_height: u16,
+    /// Id of the last message the user had read in this channel (the separator anchor).
+    last_read_message_id: Option<String>,
 }
 
 impl Default for ChatComponent {
@@ -61,6 +63,7 @@ impl ChatComponent {
             new_since_scroll: 0,
             last_inner_height: 0,
             last_total_height: 0,
+            last_read_message_id: None,
         }
     }
 
@@ -88,6 +91,7 @@ impl ChatComponent {
 
         self.messages = s.selected_messages.clone();
         self.my_pubkey = s.my_pubkey.clone();
+        self.last_read_message_id = s.last_read_message_id.clone();
         self.focused = matches!(s.focus, Focus::Chat | Focus::Composer);
         self.has_room = s.selected_channel_id.is_some();
         self.connected = matches!(s.relay_state, RelayState::Connected);
@@ -245,13 +249,23 @@ impl Component for ChatComponent {
         // Reserve 1 column for the vertical scrollbar (auto-shown by ScrollView).
         let content_width = inner.width.saturating_sub(1).max(1);
 
+        // Messages stored newest-first; render oldest→newest (top→bottom).
+        let msgs_in_order: Vec<&GroupChatMessage> = self.messages.iter().rev().collect();
+
+        // Locate the read-marker message in render order (oldest first).
+        // The separator is drawn immediately AFTER this message.
+        let sep_after_idx: Option<usize> = self.last_read_message_id.as_ref().and_then(|marker| {
+            msgs_in_order.iter().position(|m| &m.id == marker)
+        });
+
         // Calculate total content height (oldest message at top, newest at bottom).
-        let total_height: u16 = self
-            .messages
+        // Add 1 row for the separator when applicable.
+        let total_height: u16 = (msgs_in_order
             .iter()
             .map(|m| Self::message_height(m, content_width))
             .sum::<u16>()
-            .max(1);
+            + if sep_after_idx.is_some() { 1 } else { 0 })
+        .max(1);
 
         self.last_inner_height = inner.height;
         self.last_total_height = total_height;
@@ -262,11 +276,20 @@ impl Component for ChatComponent {
         // Build the scroll-view and populate it.
         let mut scroll_view = ScrollView::new(Size::new(content_width, total_height));
         let mut y: u16 = 0;
-        // messages are stored newest-first; iterate rev for oldest→newest (top→bottom).
-        for m in self.messages.iter().rev() {
+        for (idx, m) in msgs_in_order.iter().enumerate() {
             let h = Self::message_height(m, content_width);
             self.render_message_into(&mut scroll_view, m, y, content_width);
             y += h;
+            // Insert the "You've read to here" separator after the marked message.
+            if sep_after_idx == Some(idx) {
+                let sep = Paragraph::new(Line::from(Span::styled(
+                    "\u{2500}\u{2500} You've read to here \u{2500}\u{2500}",
+                    Style::default().fg(ui::OVERLAY0),
+                )))
+                .alignment(Alignment::Center);
+                scroll_view.render_widget(sep, Rect::new(0, y, content_width, 1));
+                y += 1;
+            }
         }
 
         // Render the scroll-view into the inner area.
@@ -428,6 +451,7 @@ mod tests {
             screen: Screen::App,
             help_open: false,
             status_message: None,
+            last_read_message_id: None,
         }
     }
 }

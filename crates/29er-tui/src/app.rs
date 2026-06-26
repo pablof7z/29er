@@ -71,6 +71,20 @@ pub enum FormKind {
     MoveChannel(GroupId),
 }
 
+/// Priority tier for a channel in the hotlist / room-list sidebar.
+/// Determines badge style and sort weight.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ChannelTier {
+    /// Unread message that contains `@<my_pubkey>`.
+    Mention,
+    /// At least one unread message (no mention).
+    Unread,
+    /// No unread, but last message within the past hour.
+    Activity,
+    /// No recent activity.
+    Normal,
+}
+
 #[derive(Clone, Debug)]
 pub struct ChannelListItem {
     pub group_id: GroupId,
@@ -83,6 +97,8 @@ pub struct ChannelListItem {
     pub is_branch: bool,
     pub last_preview: Option<String>,
     pub last_timestamp: Option<u64>,
+    /// Computed hotlist tier: drives badge rendering and Alt+A cycling.
+    pub tier: ChannelTier,
 }
 
 #[derive(Clone, Debug)]
@@ -118,6 +134,9 @@ pub struct TuiSnapshot {
     /// Transient command-acknowledgment line (e.g. "Joining room…" → "Joined ✓").
     /// `None` when nothing to show; cleared after 2 seconds.
     pub status_message: Option<String>,
+    /// The id of the last message the user read in the selected channel.
+    /// Used to render the "── You've read to here ──" separator in chat.
+    pub last_read_message_id: Option<String>,
 }
 
 /// Projection-derived fields produced on the poller thread and sent over mpsc.
@@ -148,11 +167,12 @@ impl SharedProjections {
     pub fn project(&self) -> ProjectionView {
         let discovered = self.discovered.snapshot();
         let tree_state = self.group_tree.snapshot();
-        let channel_tree = derive_channel_tree(&discovered, &tree_state);
+        // Resolve my_pubkey first so it can be passed to tier computation.
+        let me = self.active_account.lock().ok().and_then(|s| s.lock().ok().and_then(|v| v.clone()));
+        let channel_tree = derive_channel_tree(&discovered, &tree_state, me.as_deref());
         let selected_messages = self.selected_chat.lock().ok()
             .and_then(|c| c.as_ref().map(|c| c.snapshot().messages)).unwrap_or_default();
         let members = self.members.snapshot().members;
-        let me = self.active_account.lock().ok().and_then(|s| s.lock().ok().and_then(|v| v.clone()));
         let is_admin = me.as_ref().map(|pk| members.iter().any(|m| &m.pubkey == pk && m.admin)).unwrap_or(false);
         let identity_state = match &me {
             Some(pk) => IdentityState::LoggedIn { npub: nmp_core::display::to_npub(pk) },
@@ -202,6 +222,10 @@ pub struct App {
     should_quit: bool,
     /// Transient status line: (message, when_set). Cleared by `tick()` after 2s.
     status_message: Option<(String, Instant)>,
+    /// Per-channel read marker: local_id → last-seen message id.
+    /// Frozen when the user switches away from a channel so the separator
+    /// shows on next visit for messages that arrived in the interim.
+    read_markers: HashMap<String, String>,
 }
 
 impl App {
@@ -224,6 +248,7 @@ impl App {
             palette_open: false, active_form: None, message_scroll: 0,
             login_error: None, help_open: false, should_quit: false,
             status_message: None,
+            read_markers: HashMap::new(),
         }
     }
 
@@ -320,10 +345,19 @@ impl App {
             screen: self.screen,
             help_open: self.help_open,
             status_message: self.status_message.as_ref().map(|(msg, _)| msg.clone()),
+            last_read_message_id: self.selected_channel.as_ref()
+                .and_then(|ch| self.read_markers.get(&ch.local_id).cloned()),
         }
     }
 
     pub fn select_channel(&mut self, group: GroupId) {
+        // Freeze the read marker for the channel we are leaving so that messages
+        // arriving while the user is away will appear after the separator on return.
+        if let Some(old_ch) = &self.selected_channel {
+            if let Some(last_msg) = self.latest.selected_messages.first() {
+                self.read_markers.insert(old_ch.local_id.clone(), last_msg.id.clone());
+            }
+        }
         let key = group.local_id.clone();
         if !self.chats.contains_key(&key) {
             let chat = Arc::new(GroupChatProjection::new(group.clone()));
@@ -447,6 +481,22 @@ impl App {
         Some(out)
     }
 
+    /// Alt+A: cycle to the next channel that has a Mention-tier unread notification.
+    /// If a mention channel is found it is immediately selected.
+    pub fn jump_to_next_mention(&mut self) {
+        let len = self.latest.channel_tree.len();
+        if len == 0 { return; }
+        for i in 1..=len {
+            let idx = (self.selected_index + i) % len;
+            if self.latest.channel_tree[idx].tier == ChannelTier::Mention {
+                self.selected_index = idx;
+                let group = self.latest.channel_tree[idx].group_id.clone();
+                self.select_channel(group);
+                return;
+            }
+        }
+    }
+
     pub fn navigate(&mut self, delta: isize) {
         let len = self.latest.channel_tree.len();
         if len == 0 { return; }
@@ -566,26 +616,45 @@ fn name_for(d: &DiscoveredGroupsSnapshot, id: &str) -> String {
         .filter(|n| !n.is_empty()).unwrap_or_else(|| id.to_string())
 }
 
-fn make_item(g: &DiscoveredGroup, depth: usize, tree: &GroupTreeMessageState, is_branch: bool) -> ChannelListItem {
+fn make_item(g: &DiscoveredGroup, depth: usize, tree: &GroupTreeMessageState, is_branch: bool, my_pubkey: Option<&str>) -> ChannelListItem {
     let last = tree.last_message_for(&g.group_id);
+    let unread = tree.unread_for(&g.group_id);
+    let tier = if unread > 0 {
+        // Mention detection: check whether the latest message preview contains @<pubkey>.
+        let is_mention = my_pubkey.map(|pk| {
+            last.map(|m| m.preview.contains(&format!("@{pk}"))).unwrap_or(false)
+        }).unwrap_or(false);
+        if is_mention { ChannelTier::Mention } else { ChannelTier::Unread }
+    } else {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let recently_active = last
+            .map(|m| m.created_at >= now.saturating_sub(3600))
+            .unwrap_or(false);
+        if recently_active { ChannelTier::Activity } else { ChannelTier::Normal }
+    };
     ChannelListItem {
         group_id: GroupId::new(g.host_relay_url.clone(), g.group_id.clone()),
         local_id: g.group_id.clone(),
         name: g.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| g.group_id.clone()),
         depth,
-        unread: tree.unread_for(&g.group_id),
+        unread,
         member_count: g.member_count,
         admin_count: g.admin_count,
         is_branch,
         last_preview: last.map(|m| m.preview.clone()),
         last_timestamp: last.map(|m| m.created_at),
+        tier,
     }
 }
 
 /// Map NMP discovery + group-tree projections into a flattened, depth-annotated
 /// channel list (issue #3). Roots and children are ordered alphabetically.
+/// `my_pubkey` is forwarded to `make_item` for mention-tier detection.
 #[must_use]
-pub fn derive_channel_tree(discovered: &DiscoveredGroupsSnapshot, tree_state: &GroupTreeMessageState) -> Vec<ChannelListItem> {
+pub fn derive_channel_tree(discovered: &DiscoveredGroupsSnapshot, tree_state: &GroupTreeMessageState, my_pubkey: Option<&str>) -> Vec<ChannelListItem> {
     use std::collections::{BTreeMap, BTreeSet};
     let known: BTreeSet<&str> = discovered.groups.iter().map(|g| g.group_id.as_str()).collect();
     let mut parent_of: BTreeMap<&str, &str> = BTreeMap::new();
@@ -616,7 +685,7 @@ pub fn derive_channel_tree(discovered: &DiscoveredGroupsSnapshot, tree_state: &G
         if !visited.insert(id) { continue; }
         if let Some(g) = by_id.get(id) {
             let branch = children_of.get(id).map(|c| !c.is_empty()).unwrap_or(false);
-            out.push(make_item(g, depth, tree_state, branch));
+            out.push(make_item(g, depth, tree_state, branch, my_pubkey));
             if let Some(children) = children_of.get(id) {
                 let mut kids: Vec<&str> = children.iter().copied().collect();
                 kids.sort_by_key(|cid| name_for(discovered, cid).to_lowercase());
@@ -659,7 +728,7 @@ mod tests {
 
     #[test]
     fn tree_is_depth_annotated_and_alpha_ordered() {
-        let items = derive_channel_tree(&snap(), &GroupTreeProjection::new().snapshot());
+        let items = derive_channel_tree(&snap(), &GroupTreeProjection::new().snapshot(), None);
         let ids: Vec<_> = items.iter().map(|i| (i.local_id.as_str(), i.depth, i.is_branch)).collect();
         assert_eq!(ids, vec![("alpha", 0, false), ("root", 0, true), ("child", 1, false)]);
     }
@@ -669,7 +738,7 @@ mod tests {
         let proj = GroupTreeProjection::new();
         proj.on_kernel_event(&evt("a", "child", 10, "hello"));
         proj.on_kernel_event(&evt("b", "child", 20, "newest"));
-        let items = derive_channel_tree(&snap(), &proj.snapshot());
+        let items = derive_channel_tree(&snap(), &proj.snapshot(), None);
         let child = items.iter().find(|i| i.local_id == "child").unwrap();
         assert_eq!(child.unread, 2);
         assert_eq!(child.last_preview.as_deref(), Some("newest"));
@@ -684,7 +753,7 @@ mod tests {
     fn test_derive_channel_tree_depth_ordering() {
         // Three-node tree: root -> child; plus an independent alpha root.
         // Expected order: alpha(d=0) < root(d=0) < child(d=1)
-        let items = derive_channel_tree(&snap(), &GroupTreeProjection::new().snapshot());
+        let items = derive_channel_tree(&snap(), &GroupTreeProjection::new().snapshot(), None);
         let result: Vec<_> = items.iter().map(|i| (i.local_id.as_str(), i.depth, i.is_branch)).collect();
         assert_eq!(result, vec![
             ("alpha", 0, false),
@@ -701,7 +770,7 @@ mod tests {
         // Two messages on "child"; second is newer.
         proj.on_kernel_event(&evt("e1", "child", 100, "first message that is kind of long text here"));
         proj.on_kernel_event(&evt("e2", "child", 200, "short"));
-        let items = derive_channel_tree(&snap(), &proj.snapshot());
+        let items = derive_channel_tree(&snap(), &proj.snapshot(), None);
         let child = items.iter().find(|i| i.local_id == "child").unwrap();
         // unread count covers both messages
         assert_eq!(child.unread, 2);
@@ -755,6 +824,7 @@ mod tests {
             screen: Screen::App,
             help_open: false,
             status_message: Some("Joining room\u{2026}".to_string()),
+            last_read_message_id: Some("e1".to_string()),
         };
 
         assert_eq!(snap.selected_index, 3);
@@ -935,6 +1005,7 @@ mod tests {
             name: id.to_string(),
             depth: 0, unread: 0, member_count: 0, admin_count: 0,
             is_branch: false, last_preview: None, last_timestamp: None,
+            tier: ChannelTier::Normal,
         };
         let mut view = ProjectionView::default();
         view.channel_tree = vec![make_channel("a"), make_channel("b"), make_channel("c")];

@@ -11,7 +11,7 @@ use ratatui::Frame;
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use nmp_nip29::GroupId;
 use crate::actions::Action;
-use crate::app::{ChannelListItem, Focus, TuiSnapshot};
+use crate::app::{ChannelListItem, ChannelTier, Focus, TuiSnapshot};
 use crate::ui;
 use crate::Component;
 
@@ -87,23 +87,50 @@ impl RoomListComponent {
     }
 
     /// Format a channel item into a single-line styled Text.
-    /// Layout: `[(unread)] name — preview (timestamp)`
+    /// Badge and name style are driven by the channel's `ChannelTier`.
+    ///
+    /// Tier → rendering:
+    /// - Mention : red ⚡[N] badge, bold name
+    /// - Unread  : mauve [N] badge, bold name
+    /// - Activity: no badge, italic dimmed name
+    /// - Normal  : no badge, normal name
     fn item_text(it: &ChannelListItem) -> Text<'static> {
         let mut spans = Vec::new();
 
-        // Unread badge: bold red
-        if it.unread > 0 {
-            spans.push(Span::styled(
-                format!("({}) ", it.unread),
-                Style::default().fg(ui::RED).add_modifier(Modifier::BOLD),
-            ));
+        match it.tier {
+            ChannelTier::Mention => {
+                spans.push(Span::styled(
+                    format!("\u{26a1}[{}] ", it.unread),
+                    Style::default().fg(ui::RED).add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(
+                    it.name.clone(),
+                    Style::default().fg(ui::TEXT).add_modifier(Modifier::BOLD),
+                ));
+            }
+            ChannelTier::Unread => {
+                spans.push(Span::styled(
+                    format!("[{}] ", it.unread),
+                    Style::default().fg(ui::MAUVE).add_modifier(Modifier::BOLD),
+                ));
+                spans.push(Span::styled(
+                    it.name.clone(),
+                    Style::default().fg(ui::TEXT).add_modifier(Modifier::BOLD),
+                ));
+            }
+            ChannelTier::Activity => {
+                spans.push(Span::styled(
+                    it.name.clone(),
+                    Style::default().fg(ui::SUBTEXT0).add_modifier(Modifier::ITALIC),
+                ));
+            }
+            ChannelTier::Normal => {
+                spans.push(Span::styled(
+                    it.name.clone(),
+                    Style::default().fg(ui::TEXT),
+                ));
+            }
         }
-
-        // Channel name: bold
-        spans.push(Span::styled(
-            it.name.clone(),
-            Style::default().fg(ui::TEXT).add_modifier(Modifier::BOLD),
-        ));
 
         // Optional preview + timestamp, separated by em-dash
         let has_extra = it.last_preview.is_some() || it.last_timestamp.is_some();
@@ -274,6 +301,7 @@ mod tests {
             is_branch: false,
             last_preview: None,
             last_timestamp: None,
+            tier: crate::app::ChannelTier::Normal,
         }
     }
 
@@ -332,9 +360,10 @@ mod tests {
 
     #[test]
     fn path_to_id_finds_nested_item() {
+        use crate::app::ChannelTier;
         let items = vec![
-            ChannelListItem { group_id: GroupId::new("wss://h", "root"), local_id: "root".into(), name: "Root".into(), depth: 0, unread: 0, member_count: 1, admin_count: 0, is_branch: true, last_preview: None, last_timestamp: None },
-            ChannelListItem { group_id: GroupId::new("wss://h", "child"), local_id: "child".into(), name: "Child".into(), depth: 1, unread: 0, member_count: 1, admin_count: 0, is_branch: false, last_preview: None, last_timestamp: None },
+            ChannelListItem { group_id: GroupId::new("wss://h", "root"), local_id: "root".into(), name: "Root".into(), depth: 0, unread: 0, member_count: 1, admin_count: 0, is_branch: true, last_preview: None, last_timestamp: None, tier: ChannelTier::Normal },
+            ChannelListItem { group_id: GroupId::new("wss://h", "child"), local_id: "child".into(), name: "Child".into(), depth: 1, unread: 0, member_count: 1, admin_count: 0, is_branch: false, last_preview: None, last_timestamp: None, tier: ChannelTier::Normal },
         ];
         let path = RoomListComponent::path_to_id(&items, "child");
         assert_eq!(path, vec!["root".to_string(), "child".to_string()]);
@@ -342,9 +371,10 @@ mod tests {
 
     #[test]
     fn build_tree_items_nests_children() {
+        use crate::app::ChannelTier;
         let items = vec![
-            ChannelListItem { group_id: GroupId::new("wss://h", "root"), local_id: "root".into(), name: "Root".into(), depth: 0, unread: 0, member_count: 1, admin_count: 0, is_branch: true, last_preview: None, last_timestamp: None },
-            ChannelListItem { group_id: GroupId::new("wss://h", "child"), local_id: "child".into(), name: "Child".into(), depth: 1, unread: 0, member_count: 1, admin_count: 0, is_branch: false, last_preview: None, last_timestamp: None },
+            ChannelListItem { group_id: GroupId::new("wss://h", "root"), local_id: "root".into(), name: "Root".into(), depth: 0, unread: 0, member_count: 1, admin_count: 0, is_branch: true, last_preview: None, last_timestamp: None, tier: ChannelTier::Normal },
+            ChannelListItem { group_id: GroupId::new("wss://h", "child"), local_id: "child".into(), name: "Child".into(), depth: 1, unread: 0, member_count: 1, admin_count: 0, is_branch: false, last_preview: None, last_timestamp: None, tier: ChannelTier::Normal },
         ];
         let tree = RoomListComponent::build_tree_items(&items);
         // Should produce one root with one child
