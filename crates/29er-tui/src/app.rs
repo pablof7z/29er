@@ -116,6 +116,8 @@ pub struct SharedProjections {
     pub active_account: Mutex<ActiveAccountSlot>,
     pub selected_chat: Mutex<Option<Arc<GroupChatProjection>>>,
     pub selected_group: Mutex<Option<GroupId>>,
+    /// Set on each snapshot poll that returns non-empty data; drives relay-state indicator.
+    pub last_update_at: Mutex<Option<std::time::Instant>>,
 }
 impl SharedProjections {
     pub fn project(&self) -> ProjectionView {
@@ -131,7 +133,12 @@ impl SharedProjections {
             Some(pk) => IdentityState::LoggedIn { npub: nmp_core::display::to_npub(pk) },
             None => IdentityState::LoggingIn,
         };
-        ProjectionView { channel_tree, selected_messages, selected_members: members, is_admin, my_pubkey: me, identity_state, relay_connected: true }
+        let has_data = !channel_tree.is_empty() || !selected_messages.is_empty();
+        if has_data {
+            if let Ok(mut ts) = self.last_update_at.lock() { *ts = Some(std::time::Instant::now()); }
+        }
+        let relay_connected = self.last_update_at.lock().ok().and_then(|ts| *ts).is_some();
+        ProjectionView { channel_tree, selected_messages, selected_members: members, is_admin, my_pubkey: me, identity_state, relay_connected }
     }
 }
 
@@ -177,6 +184,7 @@ impl App {
             active_account: Mutex::new(Arc::new(Mutex::new(None))),
             selected_chat: Mutex::new(None),
             selected_group: Mutex::new(None),
+            last_update_at: Mutex::new(None),
         });
         Self {
             app_ptr: std::ptr::null_mut(), handle: std::ptr::null_mut(), relay_url,
