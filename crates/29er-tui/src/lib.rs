@@ -15,3 +15,6 @@ pub trait Component {
     fn draw(&mut self, f: &mut Frame, area: Rect);
     fn handle_event(&mut self, _event: &Event) -> Option<Action> { None }
 }
+
+#[cfg(test)]
+mod tests;

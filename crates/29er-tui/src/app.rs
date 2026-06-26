@@ -116,6 +116,8 @@ pub struct SharedProjections {
     pub active_account: Mutex<ActiveAccountSlot>,
     pub selected_chat: Mutex<Option<Arc<GroupChatProjection>>>,
     pub selected_group: Mutex<Option<GroupId>>,
+    /// Set on each snapshot poll that returns non-empty data; drives relay-state indicator.
+    pub last_update_at: Mutex<Option<std::time::Instant>>,
 }
 impl SharedProjections {
     pub fn project(&self) -> ProjectionView {
@@ -131,7 +133,12 @@ impl SharedProjections {
             Some(pk) => IdentityState::LoggedIn { npub: nmp_core::display::to_npub(pk) },
             None => IdentityState::LoggingIn,
         };
-        ProjectionView { channel_tree, selected_messages, selected_members: members, is_admin, my_pubkey: me, identity_state, relay_connected: true }
+        let has_data = !channel_tree.is_empty() || !selected_messages.is_empty();
+        if has_data {
+            if let Ok(mut ts) = self.last_update_at.lock() { *ts = Some(std::time::Instant::now()); }
+        }
+        let relay_connected = self.last_update_at.lock().ok().and_then(|ts| *ts).is_some();
+        ProjectionView { channel_tree, selected_messages, selected_members: members, is_admin, my_pubkey: me, identity_state, relay_connected }
     }
 }
 
@@ -177,6 +184,7 @@ impl App {
             active_account: Mutex::new(Arc::new(Mutex::new(None))),
             selected_chat: Mutex::new(None),
             selected_group: Mutex::new(None),
+            last_update_at: Mutex::new(None),
         });
         Self {
             app_ptr: std::ptr::null_mut(), handle: std::ptr::null_mut(), relay_url,
@@ -483,6 +491,7 @@ mod tests {
     use super::*;
     use nmp_core::substrate::KernelEvent;
     use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
+    use nmp_nip29::projection::{GroupChatMessage, GroupMemberRow};
 
     fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
         DiscoveredGroup {
@@ -500,6 +509,12 @@ mod tests {
         KernelEvent { id: id.to_string(), author: "pk".to_string(), kind: KIND_CHAT_MESSAGE, created_at: ts,
             tags: vec![vec!["h".to_string(), g.to_string()]], content: c.to_string(), relay_provenance: Vec::new() }
     }
+    fn make_app() -> (App, tokio::sync::mpsc::UnboundedReceiver<ProjectionView>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ProjectionView>();
+        (App::new("wss://relay.example.com", tx), rx)
+    }
+
+    // --- existing tests (issue #11 baseline) ---
 
     #[test]
     fn tree_is_depth_annotated_and_alpha_ordered() {
@@ -507,6 +522,7 @@ mod tests {
         let ids: Vec<_> = items.iter().map(|i| (i.local_id.as_str(), i.depth, i.is_branch)).collect();
         assert_eq!(ids, vec![("alpha", 0, false), ("root", 0, true), ("child", 1, false)]);
     }
+
     #[test]
     fn item_carries_unread_and_preview_from_group_tree() {
         let proj = GroupTreeProjection::new();
@@ -517,5 +533,276 @@ mod tests {
         assert_eq!(child.unread, 2);
         assert_eq!(child.last_preview.as_deref(), Some("newest"));
         assert_eq!(child.member_count, 3);
+    }
+
+    // --- new comprehensive tests ---
+
+    /// T1: derive_channel_tree with multi-level parent/child nesting produces
+    /// correct depth values and alphabetical ordering at each level.
+    #[test]
+    fn test_derive_channel_tree_depth_ordering() {
+        // Three-node tree: root -> child; plus an independent alpha root.
+        // Expected order: alpha(d=0) < root(d=0) < child(d=1)
+        let items = derive_channel_tree(&snap(), &GroupTreeProjection::new().snapshot());
+        let result: Vec<_> = items.iter().map(|i| (i.local_id.as_str(), i.depth, i.is_branch)).collect();
+        assert_eq!(result, vec![
+            ("alpha", 0, false),
+            ("root",  0, true),
+            ("child", 1, false),
+        ]);
+    }
+
+    /// T2: derive_channel_tree surfaces unread count and last-preview text
+    /// from the GroupTreeProjection; preview is the verbatim event content.
+    #[test]
+    fn test_derive_channel_tree_unread_preview() {
+        let proj = GroupTreeProjection::new();
+        // Two messages on "child"; second is newer.
+        proj.on_kernel_event(&evt("e1", "child", 100, "first message that is kind of long text here"));
+        proj.on_kernel_event(&evt("e2", "child", 200, "short"));
+        let items = derive_channel_tree(&snap(), &proj.snapshot());
+        let child = items.iter().find(|i| i.local_id == "child").unwrap();
+        // unread count covers both messages
+        assert_eq!(child.unread, 2);
+        // last_preview is the content of the most recent event (latest timestamp)
+        assert_eq!(child.last_preview.as_deref(), Some("short"));
+        assert_eq!(child.last_timestamp, Some(200));
+        // member_count flows from DiscoveredGroup, not GroupTreeProjection
+        assert_eq!(child.member_count, 3);
+    }
+
+    /// T3: TuiSnapshot carries every field without loss — this is a compile-time
+    /// regression guard that construction with all fields present succeeds and
+    /// read-back matches what was written.
+    #[test]
+    fn test_tui_snapshot_fields() {
+        let gid = GroupId::new("wss://h", "grp1");
+        let snap = TuiSnapshot {
+            channel_tree: vec![],
+            selected_channel_id: Some(gid.clone()),
+            selected_messages: vec![GroupChatMessage {
+                id: "e1".to_string(),
+                pubkey: "pk1".to_string(),
+                content: "hello".to_string(),
+                created_at: 1000,
+                kind: 9,
+            }],
+            selected_members: vec![GroupMemberRow {
+                pubkey: "pk1".to_string(),
+                display_name: Some("Alice".to_string()),
+                admin: true,
+                role: None,
+            }],
+            is_admin: true,
+            my_pubkey: Some("pk1".to_string()),
+            publish_outbox: vec![PublishOutboxItem {
+                correlation_id: "cid".to_string(),
+                group_local_id: "grp1".to_string(),
+                content: "hi".to_string(),
+                status: OutboxStatus::Pending,
+                error: None,
+            }],
+            identity_state: IdentityState::LoggedIn { npub: "npub1test".to_string() },
+            relay_state: RelayState::Connected,
+            errors: vec!["oops".to_string()],
+            selected_index: 3,
+            focus: Focus::Composer,
+            message_scroll: 7,
+            palette_open: true,
+            active_form: Some(FormKind::JoinWithCode(gid)),
+            login_error: None,
+            screen: Screen::App,
+        };
+
+        assert_eq!(snap.selected_index, 3);
+        assert!(snap.is_admin);
+        assert_eq!(snap.focus, Focus::Composer);
+        assert_eq!(snap.message_scroll, 7);
+        assert!(snap.palette_open);
+        assert_eq!(snap.screen, Screen::App);
+        assert_eq!(snap.relay_state, RelayState::Connected);
+        assert_eq!(snap.my_pubkey.as_deref(), Some("pk1"));
+        assert_eq!(snap.errors, vec!["oops"]);
+        assert_eq!(snap.selected_messages.len(), 1);
+        assert_eq!(snap.selected_members.len(), 1);
+        assert_eq!(snap.publish_outbox.len(), 1);
+        assert_eq!(snap.publish_outbox[0].status, OutboxStatus::Pending);
+        assert!(matches!(snap.identity_state, IdentityState::LoggedIn { ref npub } if npub == "npub1test"));
+        assert!(matches!(snap.active_form, Some(FormKind::JoinWithCode(_))));
+        assert!(snap.login_error.is_none());
+    }
+
+    /// T4: IdentityState state-machine — Default is LoggedOut; transitions
+    /// between variants are correctly distinguishable.
+    #[test]
+    fn test_identity_state_transitions() {
+        // Default is LoggedOut
+        assert_eq!(IdentityState::default(), IdentityState::LoggedOut);
+        // ProjectionView also defaults to LoggedOut
+        assert_eq!(ProjectionView::default().identity_state, IdentityState::LoggedOut);
+
+        // LoggedOut != LoggingIn != LoggedIn
+        let logged_out = IdentityState::LoggedOut;
+        let logging_in = IdentityState::LoggingIn;
+        let logged_in = IdentityState::LoggedIn { npub: "npub1abc".to_string() };
+        assert_ne!(logged_out, logging_in);
+        assert_ne!(logging_in, logged_in);
+        assert_ne!(logged_out, logged_in);
+
+        // LoggedIn exposes the npub
+        if let IdentityState::LoggedIn { ref npub } = logged_in {
+            assert_eq!(npub, "npub1abc");
+        } else {
+            panic!("expected LoggedIn");
+        }
+
+        // A freshly constructed App starts in Login screen with LoggedOut identity
+        let (app, _rx) = make_app();
+        let snap = app.snapshot();
+        assert_eq!(snap.screen, Screen::Login);
+        assert_eq!(snap.identity_state, IdentityState::LoggedOut);
+    }
+
+    /// T5: select_channel resets message_scroll to 0 regardless of prior value.
+    #[test]
+    fn test_selected_channel_change_clears_scroll() {
+        let (mut app, _rx) = make_app();
+
+        // Scroll down first
+        app.scroll_messages(15);
+        assert_eq!(app.snapshot().message_scroll, 15);
+
+        // Selecting a channel must reset scroll to 0
+        let group = GroupId::new("wss://relay.example.com", "channel-a");
+        app.select_channel(group.clone());
+        assert_eq!(app.snapshot().message_scroll, 0);
+
+        // Scroll again, select a different channel — scroll resets again
+        app.scroll_messages(5);
+        let group2 = GroupId::new("wss://relay.example.com", "channel-b");
+        app.select_channel(group2);
+        assert_eq!(app.snapshot().message_scroll, 0);
+
+        // selected_channel_id in the snapshot reflects the last selection
+        assert_eq!(
+            app.snapshot().selected_channel_id.as_ref().map(|g| g.local_id.as_str()),
+            Some("channel-b"),
+        );
+    }
+
+    /// T6: reconcile_outbox promotes a Pending item to Confirmed when a
+    /// matching message (same trimmed content) appears in selected_messages.
+    #[test]
+    fn test_reconcile_outbox_pending_becomes_confirmed() {
+        let (mut app, _rx) = make_app();
+
+        // Inject a Pending item directly (private field visible from child mod).
+        app.outbox.push(PublishOutboxItem {
+            correlation_id: "cid-pending".to_string(),
+            group_local_id: "grp".to_string(),
+            content: "hello world".to_string(),
+            status: OutboxStatus::Pending,
+            error: None,
+        });
+
+        // A message with matching content; no my_pubkey means the pubkey guard
+        // defaults to `true`, so only the content needs to match.
+        let matching_msg = GroupChatMessage {
+            id: "event-1".to_string(),
+            pubkey: "any-pubkey".to_string(),
+            content: "hello world".to_string(),
+            created_at: 12345,
+            kind: 9,
+        };
+        let mut view = ProjectionView::default();
+        view.selected_messages = vec![matching_msg];
+
+        app.ingest_projection(view);
+
+        let snap = app.snapshot();
+        assert_eq!(snap.publish_outbox.len(), 1);
+        assert_eq!(snap.publish_outbox[0].status, OutboxStatus::Confirmed,
+            "pending item must become Confirmed once matching message arrives");
+    }
+
+    /// T6b: a Failed outbox item is NOT promoted even if a matching message arrives.
+    #[test]
+    fn test_reconcile_outbox_failed_stays_failed() {
+        let (mut app, _rx) = make_app();
+
+        app.outbox.push(PublishOutboxItem {
+            correlation_id: "cid-failed".to_string(),
+            group_local_id: "grp".to_string(),
+            content: "oops".to_string(),
+            status: OutboxStatus::Failed,
+            error: Some("dispatch failed".to_string()),
+        });
+
+        let msg = GroupChatMessage {
+            id: "event-2".to_string(),
+            pubkey: "pk".to_string(),
+            content: "oops".to_string(),
+            created_at: 9999,
+            kind: 9,
+        };
+        let mut view = ProjectionView::default();
+        view.selected_messages = vec![msg];
+        app.ingest_projection(view);
+
+        let snap = app.snapshot();
+        assert_eq!(snap.publish_outbox[0].status, OutboxStatus::Failed,
+            "a Failed item must NOT be re-confirmed by reconcile");
+    }
+
+    /// T7: Focus::next() cycles ChannelList -> Chat -> Composer -> ChannelList.
+    #[test]
+    fn test_focus_cycle() {
+        assert_eq!(Focus::ChannelList.next(), Focus::Chat);
+        assert_eq!(Focus::Chat.next(), Focus::Composer);
+        assert_eq!(Focus::Composer.next(), Focus::ChannelList);
+
+        let (mut app, _rx) = make_app();
+        assert_eq!(app.focus(), Focus::ChannelList);
+        app.cycle_focus();
+        assert_eq!(app.focus(), Focus::Chat);
+        app.cycle_focus();
+        assert_eq!(app.focus(), Focus::Composer);
+        app.cycle_focus();
+        assert_eq!(app.focus(), Focus::ChannelList);
+    }
+
+    /// T8: navigate() wraps around at both ends of the channel list.
+    #[test]
+    fn test_navigate_wraps() {
+        let (mut app, _rx) = make_app();
+
+        // Build a fake channel tree with 3 items.
+        let make_channel = |id: &str| ChannelListItem {
+            group_id: GroupId::new("wss://h", id),
+            local_id: id.to_string(),
+            name: id.to_string(),
+            depth: 0, unread: 0, member_count: 0, admin_count: 0,
+            is_branch: false, last_preview: None, last_timestamp: None,
+        };
+        let mut view = ProjectionView::default();
+        view.channel_tree = vec![make_channel("a"), make_channel("b"), make_channel("c")];
+        app.ingest_projection(view);
+
+        // Starts at index 0
+        assert_eq!(app.snapshot().selected_index, 0);
+
+        // Navigate forward
+        app.navigate(1);
+        assert_eq!(app.snapshot().selected_index, 1);
+        app.navigate(1);
+        assert_eq!(app.snapshot().selected_index, 2);
+
+        // Wrap around forward (3 -> 0)
+        app.navigate(1);
+        assert_eq!(app.snapshot().selected_index, 0);
+
+        // Wrap around backward (0 -> 2)
+        app.navigate(-1);
+        assert_eq!(app.snapshot().selected_index, 2);
     }
 }
