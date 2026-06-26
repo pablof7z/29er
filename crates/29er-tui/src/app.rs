@@ -25,10 +25,31 @@ type ActiveAccountSlot = Arc<Mutex<Option<String>>>;
 pub enum Screen { Login, App }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Focus { ChannelList, Chat, Composer }
+pub enum Focus {
+    RoomList,   // primary sidebar (was ChannelList)
+    Chat,
+    Composer,
+    Palette,    // command palette overlay
+    Modal,      // form/dialog overlay
+}
 impl Focus {
+    /// Forward Tab cycle: only cycles through the three base panels.
     #[must_use] pub fn next(self) -> Self {
-        match self { Focus::ChannelList => Focus::Chat, Focus::Chat => Focus::Composer, Focus::Composer => Focus::ChannelList }
+        match self {
+            Focus::RoomList => Focus::Chat,
+            Focus::Chat => Focus::Composer,
+            Focus::Composer => Focus::RoomList,
+            other => other, // Palette/Modal don't participate
+        }
+    }
+    /// Reverse Shift+Tab cycle.
+    #[must_use] pub fn prev(self) -> Self {
+        match self {
+            Focus::RoomList => Focus::Composer,
+            Focus::Chat => Focus::RoomList,
+            Focus::Composer => Focus::Chat,
+            other => other,
+        }
     }
 }
 
@@ -93,6 +114,7 @@ pub struct TuiSnapshot {
     pub active_form: Option<FormKind>,
     pub login_error: Option<String>,
     pub screen: Screen,
+    pub help_open: bool,
 }
 
 /// Projection-derived fields produced on the poller thread and sent over mpsc.
@@ -163,6 +185,8 @@ pub struct App {
     latest: ProjectionView,
     screen: Screen,
     focus: Focus,
+    /// Focus history stack — push on modal/palette open, pop on Esc.
+    focus_stack: Vec<Focus>,
     selected_index: usize,
     selected_channel: Option<GroupId>,
     outbox: Vec<PublishOutboxItem>,
@@ -171,6 +195,7 @@ pub struct App {
     active_form: Option<FormKind>,
     message_scroll: u16,
     login_error: Option<String>,
+    help_open: bool,
     should_quit: bool,
 }
 
@@ -189,10 +214,10 @@ impl App {
         Self {
             app_ptr: std::ptr::null_mut(), handle: std::ptr::null_mut(), relay_url,
             shared, poll_tx, chats: HashMap::new(), latest: ProjectionView::default(),
-            screen: Screen::Login, focus: Focus::ChannelList, selected_index: 0,
-            selected_channel: None, outbox: Vec::new(), errors: Vec::new(),
+            screen: Screen::Login, focus: Focus::RoomList, focus_stack: Vec::new(),
+            selected_index: 0, selected_channel: None, outbox: Vec::new(), errors: Vec::new(),
             palette_open: false, active_form: None, message_scroll: 0,
-            login_error: None, should_quit: false,
+            login_error: None, help_open: false, should_quit: false,
         }
     }
 
@@ -204,7 +229,7 @@ impl App {
             return;
         }
         match self.init_nmp(&nsec) {
-            Ok(()) => { self.screen = Screen::App; self.focus = Focus::ChannelList; self.login_error = None; }
+            Ok(()) => { self.screen = Screen::App; self.focus = Focus::RoomList; self.focus_stack.clear(); self.login_error = None; }
             Err(e) => { self.login_error = Some(format!("Sign-in failed: {e}")); }
         }
         // `nsec` is dropped here.
@@ -287,6 +312,7 @@ impl App {
             active_form: self.active_form.clone(),
             login_error: self.login_error.clone(),
             screen: self.screen,
+            help_open: self.help_open,
         }
     }
 
@@ -350,7 +376,7 @@ impl App {
 
     pub fn join(&mut self, group: GroupId, invite_code: Option<String>) {
         let body = serde_json::json!({ "group": group, "invite_code": invite_code }).to_string();
-        self.dispatch_json("nmp.nip29.join", &body); self.active_form = None;
+        self.dispatch_json("nmp.nip29.join", &body); self.close_form();
     }
     pub fn leave(&mut self, group: GroupId) {
         let body = serde_json::json!({ "group": group }).to_string();
@@ -358,11 +384,11 @@ impl App {
     }
     pub fn create_invite(&mut self, group: GroupId, codes: Vec<String>) {
         let body = serde_json::json!({ "group": group, "codes": codes }).to_string();
-        self.dispatch_json("nmp.nip29.create_invite", &body); self.active_form = None;
+        self.dispatch_json("nmp.nip29.create_invite", &body); self.close_form();
     }
     pub fn put_user(&mut self, group: GroupId, target_pubkey: String, role: Option<String>) {
         let body = serde_json::json!({ "group": group, "target_pubkey": target_pubkey, "role": role }).to_string();
-        self.dispatch_json("nmp.nip29.put_user", &body); self.active_form = None;
+        self.dispatch_json("nmp.nip29.put_user", &body); self.close_form();
     }
     pub fn create_child(&mut self, parent: GroupId, name: String) {
         let local_id = generate_local_id();
@@ -370,11 +396,11 @@ impl App {
             "group": { "host_relay_url": parent.host_relay_url, "local_id": local_id },
             "name": name, "visibility": "public", "access": "open", "parent": parent.local_id,
         }).to_string();
-        self.dispatch_json("nmp.nip29.create_public_group", &body); self.active_form = None;
+        self.dispatch_json("nmp.nip29.create_public_group", &body); self.close_form();
     }
     pub fn move_channel(&mut self, group: GroupId, parent: Option<String>) {
         let body = serde_json::json!({ "group": group, "parent": parent }).to_string();
-        self.dispatch_json("nmp.nip29.set_parent", &body); self.active_form = None;
+        self.dispatch_json("nmp.nip29.set_parent", &body); self.close_form();
     }
     pub fn show_members(&mut self, group: GroupId) { self.shared.members.select_group(group.local_id); }
 
@@ -393,17 +419,74 @@ impl App {
         if len == 0 { return; }
         self.selected_index = (self.selected_index as isize + delta).rem_euclid(len as isize) as usize;
     }
+    pub fn navigate_top(&mut self) {
+        if !self.latest.channel_tree.is_empty() { self.selected_index = 0; }
+    }
+    pub fn navigate_bottom(&mut self) {
+        let len = self.latest.channel_tree.len();
+        if len > 0 { self.selected_index = len - 1; }
+    }
     pub fn channel_at_cursor(&self) -> Option<GroupId> { self.latest.channel_tree.get(self.selected_index).map(|c| c.group_id.clone()) }
     pub fn scroll_messages(&mut self, delta: i32) { let n = self.message_scroll as i32 + delta; self.message_scroll = n.max(0) as u16; }
     pub fn focus(&self) -> Focus { self.focus }
     pub fn set_focus(&mut self, f: Focus) { self.focus = f; }
-    pub fn cycle_focus(&mut self) { self.focus = self.focus.next(); }
+    /// Forward Tab cycle (RoomList → Chat → Composer → RoomList). No-op in Palette/Modal.
+    pub fn cycle_focus(&mut self) {
+        if matches!(self.focus, Focus::RoomList | Focus::Chat | Focus::Composer) {
+            self.focus = self.focus.next();
+        }
+    }
+    /// Reverse Shift+Tab cycle. No-op in Palette/Modal.
+    pub fn reverse_cycle_focus(&mut self) {
+        if matches!(self.focus, Focus::RoomList | Focus::Chat | Focus::Composer) {
+            self.focus = self.focus.prev();
+        }
+    }
+    /// Push current focus onto the stack (e.g. before opening palette or modal).
+    pub fn push_focus(&mut self) { self.focus_stack.push(self.focus); }
+    /// Pop previous focus from the stack. Returns `true` if something was restored.
+    pub fn pop_focus(&mut self) -> bool {
+        if let Some(f) = self.focus_stack.pop() { self.focus = f; true } else { false }
+    }
     pub fn screen(&self) -> Screen { self.screen }
+    /// Open the command palette, pushing current focus onto the stack.
+    pub fn set_palette(&mut self, open: bool) {
+        if open && self.focus != Focus::Palette {
+            self.focus_stack.push(self.focus);
+            self.focus = Focus::Palette;
+            self.palette_open = true;
+        } else if !open && self.palette_open {
+            self.palette_open = false;
+            if self.focus == Focus::Palette {
+                self.focus = self.focus_stack.pop().unwrap_or(Focus::RoomList);
+            }
+        }
+    }
     pub fn palette_open(&self) -> bool { self.palette_open }
-    pub fn set_palette(&mut self, open: bool) { self.palette_open = open; }
-    pub fn open_form(&mut self, f: FormKind) { self.active_form = Some(f); }
-    pub fn close_form(&mut self) { self.active_form = None; }
+    /// Open a form, collapsing any open palette and pushing focus onto the stack.
+    pub fn open_form(&mut self, f: FormKind) {
+        // If palette is the current focus, close it and restore underlying focus first.
+        if self.focus == Focus::Palette {
+            self.palette_open = false;
+            self.focus = self.focus_stack.pop().unwrap_or(Focus::RoomList);
+        }
+        if self.focus != Focus::Modal {
+            self.focus_stack.push(self.focus);
+            self.focus = Focus::Modal;
+        }
+        self.active_form = Some(f);
+    }
+    /// Close the current form, restoring the previous focus from the stack.
+    pub fn close_form(&mut self) {
+        self.active_form = None;
+        if self.focus == Focus::Modal {
+            self.focus = self.focus_stack.pop().unwrap_or(Focus::RoomList);
+        }
+    }
     pub fn active_form(&self) -> Option<&FormKind> { self.active_form.as_ref() }
+    pub fn open_help(&mut self) { self.help_open = true; }
+    pub fn close_help(&mut self) { self.help_open = false; }
+    pub fn is_help_open(&self) -> bool { self.help_open }
     pub fn quit(&mut self) { self.should_quit = true; }
     pub fn should_quit(&self) -> bool { self.should_quit }
 }
@@ -612,6 +695,7 @@ mod tests {
             active_form: Some(FormKind::JoinWithCode(gid)),
             login_error: None,
             screen: Screen::App,
+            help_open: false,
         };
 
         assert_eq!(snap.selected_index, 3);
@@ -754,21 +838,29 @@ mod tests {
             "a Failed item must NOT be re-confirmed by reconcile");
     }
 
-    /// T7: Focus::next() cycles ChannelList -> Chat -> Composer -> ChannelList.
+    /// T7: Focus::next/prev cycle RoomList -> Chat -> Composer -> RoomList.
     #[test]
     fn test_focus_cycle() {
-        assert_eq!(Focus::ChannelList.next(), Focus::Chat);
+        // Forward cycle
+        assert_eq!(Focus::RoomList.next(), Focus::Chat);
         assert_eq!(Focus::Chat.next(), Focus::Composer);
-        assert_eq!(Focus::Composer.next(), Focus::ChannelList);
+        assert_eq!(Focus::Composer.next(), Focus::RoomList);
+        // Reverse cycle
+        assert_eq!(Focus::RoomList.prev(), Focus::Composer);
+        assert_eq!(Focus::Composer.prev(), Focus::Chat);
+        assert_eq!(Focus::Chat.prev(), Focus::RoomList);
+        // Palette/Modal don't participate
+        assert_eq!(Focus::Palette.next(), Focus::Palette);
+        assert_eq!(Focus::Modal.prev(), Focus::Modal);
 
         let (mut app, _rx) = make_app();
-        assert_eq!(app.focus(), Focus::ChannelList);
+        assert_eq!(app.focus(), Focus::RoomList);
         app.cycle_focus();
         assert_eq!(app.focus(), Focus::Chat);
         app.cycle_focus();
         assert_eq!(app.focus(), Focus::Composer);
         app.cycle_focus();
-        assert_eq!(app.focus(), Focus::ChannelList);
+        assert_eq!(app.focus(), Focus::RoomList);
     }
 
     /// T8: navigate() wraps around at both ends of the channel list.

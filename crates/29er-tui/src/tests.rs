@@ -69,12 +69,13 @@ fn base_snapshot() -> TuiSnapshot {
         relay_state: RelayState::Disconnected,
         errors: vec![],
         selected_index: 0,
-        focus: Focus::ChannelList,
+        focus: Focus::RoomList,
         message_scroll: 0,
         palette_open: false,
         active_form: None,
         login_error: None,
         screen: Screen::App,
+        help_open: false,
     }
 }
 

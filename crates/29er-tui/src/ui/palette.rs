@@ -329,12 +329,13 @@ mod tests {
             relay_state: RelayState::Connected,
             errors: vec![],
             selected_index: 0,
-            focus: Focus::ChannelList,
+            focus: Focus::RoomList,
             message_scroll: 0,
             palette_open: false,
             active_form: None,
             login_error: None,
             screen: Screen::App,
+            help_open: false,
         };
         let mut p = Palette::new();
         p.update(&base_snap);
