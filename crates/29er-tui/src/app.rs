@@ -111,6 +111,12 @@ pub struct PublishOutboxItem {
     /// Pubkeys of @mentioned users (hex-encoded). Stored so retry can re-send
     /// the same `p` tags without re-parsing the message text.
     pub mention_pubkeys: Vec<String>,
+    /// Nostr event-id echoed back by NMP after a successful dispatch.
+    /// When present, confirmation is matched on this id alone (precise match).
+    pub event_id: Option<String>,
+    /// Wall-clock instant the item was dispatched. Used to enforce
+    /// a 30-second content-match window and a 60-second timeout.
+    pub dispatched_at: std::time::Instant,
 }
 
 /// The immutable per-frame view-model. Contains ZERO Ratatui types (issue #3).
@@ -339,14 +345,40 @@ impl App {
     }
 
     fn reconcile_outbox(&mut self) {
-        let me = self.latest.my_pubkey.clone();
+        // Guard: never confirm outbox items if my_pubkey is not yet known.
+        let me = match self.latest.my_pubkey.as_deref() {
+            Some(pk) if !pk.is_empty() => pk.to_string(),
+            _ => return,
+        };
+        let now = Instant::now();
         for item in self.outbox.iter_mut() {
-            if matches!(item.status, OutboxStatus::Pending) {
-                let confirmed = self.latest.selected_messages.iter().any(|m| {
-                    m.content.trim() == item.content.trim()
-                        && me.as_deref().map(|pk| m.pubkey == pk).unwrap_or(true)
-                });
-                if confirmed { item.status = OutboxStatus::Confirmed; }
+            if !matches!(item.status, OutboxStatus::Pending) {
+                continue;
+            }
+            let elapsed = now.duration_since(item.dispatched_at);
+            // Items pending for more than 60 s are timed out (treated as Failed).
+            if elapsed >= Duration::from_secs(60) {
+                item.status = OutboxStatus::Failed;
+                item.error = Some("timed out waiting for confirmation".to_string());
+                continue;
+            }
+            // Only attempt matching within the 30-second dispatch window.
+            if elapsed >= Duration::from_secs(30) {
+                continue;
+            }
+            let confirmed = self.latest.selected_messages.iter().any(|m| {
+                if m.pubkey != me {
+                    return false;
+                }
+                // Prefer precise event-id match when NMP returned one.
+                if let Some(ref eid) = item.event_id {
+                    return m.id == *eid;
+                }
+                // Fallback: trimmed content equality (same pubkey already verified).
+                m.content.trim() == item.content.trim()
+            });
+            if confirmed {
+                item.status = OutboxStatus::Confirmed;
             }
         }
     }
@@ -441,6 +473,8 @@ impl App {
             status: OutboxStatus::Pending,
             error: None,
             mention_pubkeys: mention_pubkeys.clone(),
+            event_id: None,
+            dispatched_at: Instant::now(),
         };
         Self::apply_dispatch_result(&mut item, result);
         self.outbox.push(item);
@@ -464,6 +498,7 @@ impl App {
         let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
         let item = &mut self.outbox[idx];
         item.status = OutboxStatus::Pending; item.error = None;
+        item.event_id = None; item.dispatched_at = Instant::now();
         Self::apply_dispatch_result(item, result);
     }
 
@@ -471,8 +506,16 @@ impl App {
         match result {
             Some(r) => match serde_json::from_str::<serde_json::Value>(&r) {
                 Ok(v) => {
-                    if let Some(cid) = v.get("correlation_id").and_then(|c| c.as_str()) { item.correlation_id = cid.to_string(); }
-                    else if let Some(err) = v.get("error").and_then(|c| c.as_str()) { item.status = OutboxStatus::Failed; item.error = Some(err.to_string()); }
+                    if let Some(cid) = v.get("correlation_id").and_then(|c| c.as_str()) {
+                        item.correlation_id = cid.to_string();
+                        // Store the event_id if NMP echoed one back — used for precise confirmation.
+                        if let Some(eid) = v.get("event_id").and_then(|e| e.as_str()) {
+                            item.event_id = Some(eid.to_string());
+                        }
+                    } else if let Some(err) = v.get("error").and_then(|c| c.as_str()) {
+                        item.status = OutboxStatus::Failed;
+                        item.error = Some(err.to_string());
+                    }
                 }
                 Err(_) => { item.status = OutboxStatus::Failed; item.error = Some("bad dispatch reply".to_string()); }
             },
@@ -875,6 +918,8 @@ mod tests {
                 status: OutboxStatus::Pending,
                 error: None,
                 mention_pubkeys: Vec::new(),
+                event_id: None,
+                dispatched_at: Instant::now(),
             }],
             identity_state: IdentityState::LoggedIn { npub: "npub1test".to_string() },
             relay_state: RelayState::Connected,
@@ -973,7 +1018,7 @@ mod tests {
     }
 
     /// T6: reconcile_outbox promotes a Pending item to Confirmed when a
-    /// matching message (same trimmed content) appears in selected_messages.
+    /// matching message (same trimmed content, same pubkey as my_pubkey) arrives.
     #[test]
     fn test_reconcile_outbox_pending_becomes_confirmed() {
         let (mut app, _rx) = make_app();
@@ -986,10 +1031,47 @@ mod tests {
             status: OutboxStatus::Pending,
             error: None,
             mention_pubkeys: Vec::new(),
+            event_id: None,
+            dispatched_at: Instant::now(),
         });
 
-        // A message with matching content; no my_pubkey means the pubkey guard
-        // defaults to `true`, so only the content needs to match.
+        // The matching message MUST carry the same pubkey as my_pubkey.
+        let matching_msg = GroupChatMessage {
+            id: "event-1".to_string(),
+            pubkey: "my-pk".to_string(),
+            content: "hello world".to_string(),
+            created_at: 12345,
+            kind: 9,
+        };
+        let mut view = ProjectionView::default();
+        view.my_pubkey = Some("my-pk".to_string());
+        view.selected_messages = vec![matching_msg];
+
+        app.ingest_projection(view);
+
+        let snap = app.snapshot();
+        assert_eq!(snap.publish_outbox.len(), 1);
+        assert_eq!(snap.publish_outbox[0].status, OutboxStatus::Confirmed,
+            "pending item must become Confirmed once matching message with correct pubkey arrives");
+    }
+
+    /// T6b_guard: reconcile_outbox does NOT confirm a Pending item when my_pubkey
+    /// is unknown — the guard must return early and leave all items as Pending.
+    #[test]
+    fn test_reconcile_outbox_no_pubkey_stays_pending() {
+        let (mut app, _rx) = make_app();
+
+        app.outbox.push(PublishOutboxItem {
+            correlation_id: "cid-pending".to_string(),
+            group_local_id: "grp".to_string(),
+            content: "hello world".to_string(),
+            status: OutboxStatus::Pending,
+            error: None,
+            event_id: None,
+            dispatched_at: Instant::now(),
+        });
+
+        // Matching content, but my_pubkey is None — must NOT confirm.
         let matching_msg = GroupChatMessage {
             id: "event-1".to_string(),
             pubkey: "any-pubkey".to_string(),
@@ -998,14 +1080,14 @@ mod tests {
             kind: 9,
         };
         let mut view = ProjectionView::default();
+        // Intentionally NOT setting view.my_pubkey.
         view.selected_messages = vec![matching_msg];
 
         app.ingest_projection(view);
 
         let snap = app.snapshot();
-        assert_eq!(snap.publish_outbox.len(), 1);
-        assert_eq!(snap.publish_outbox[0].status, OutboxStatus::Confirmed,
-            "pending item must become Confirmed once matching message arrives");
+        assert_eq!(snap.publish_outbox[0].status, OutboxStatus::Pending,
+            "item must remain Pending when my_pubkey is not known");
     }
 
     /// T6b: a Failed outbox item is NOT promoted even if a matching message arrives.
@@ -1020,6 +1102,8 @@ mod tests {
             status: OutboxStatus::Failed,
             error: Some("dispatch failed".to_string()),
             mention_pubkeys: Vec::new(),
+            event_id: None,
+            dispatched_at: Instant::now(),
         });
 
         let msg = GroupChatMessage {
