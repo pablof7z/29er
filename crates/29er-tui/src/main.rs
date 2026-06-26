@@ -63,10 +63,16 @@ async fn run() -> Result<()> {
         ui.help.update(&state);
         terminal.draw(|f| draw(f, &state, &mut ui))?;
         tokio::select! {
-            _ = ticker.tick() => {}
+            _ = ticker.tick() => { app.tick(); }
             Some(view) = poll_rx.recv() => app.ingest_projection(view),
             maybe = reader.next() => match maybe {
-                Some(Ok(event)) => handle_event(&event, &mut app, &mut ui),
+                Some(Ok(event)) => {
+                    handle_event(&event, &mut app, &mut ui);
+                    // After any user action, immediately pull a fresh projection
+                    // so the next frame reflects the latest state without waiting
+                    // for the 4 Hz background poller.
+                    app.refresh_projection();
+                }
                 Some(Err(_)) | None => app.quit(),
             },
         }

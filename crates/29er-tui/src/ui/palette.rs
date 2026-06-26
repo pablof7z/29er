@@ -464,6 +464,7 @@ mod tests {
             login_error: None,
             screen: Screen::App,
             help_open: false,
+            status_message: None,
         };
         let mut p = Palette::new();
         p.update(&base_snap);
@@ -557,6 +558,7 @@ mod tests {
             login_error: None,
             screen: Screen::App,
             help_open: false,
+            status_message: None,
         };
         let mut p = Palette::new();
         p.update(&snap);

@@ -76,6 +76,7 @@ fn base_snapshot() -> TuiSnapshot {
         login_error: None,
         screen: Screen::App,
         help_open: false,
+        status_message: None,
     }
 }
 

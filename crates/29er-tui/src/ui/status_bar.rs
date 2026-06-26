@@ -56,6 +56,9 @@ pub struct StatusBar {
     identity: String,
     total_unread: u32,
     hints: &'static [HintEntry],
+    /// Transient acknowledgment message (e.g. "Joining room…"). Overrides hints
+    /// on the left side while set; `None` when expired.
+    status_message: Option<String>,
 }
 
 impl Default for StatusBar {
@@ -65,6 +68,7 @@ impl Default for StatusBar {
             identity: String::new(),
             total_unread: 0,
             hints: HINTS_ROOMLIST,
+            status_message: None,
         }
     }
 }
@@ -80,6 +84,7 @@ impl StatusBar {
             IdentityState::LoggedOut         => "offline".to_string(),
         };
         self.total_unread = s.channel_tree.iter().map(|c| c.unread).sum();
+        self.status_message = s.status_message.clone();
         self.hints = if s.help_open {
             HINTS_HELP
         } else if s.active_form.is_some() || matches!(s.focus, Focus::Modal) {
@@ -95,19 +100,28 @@ impl StatusBar {
         };
     }
 
-    /// Build the left-side line: identity then space-separated [key]verb hints.
+    /// Build the left-side line: identity, then either the transient status
+    /// message (when set) or the context-aware [key]verb hints.
     fn left_line(&self) -> Line<'static> {
         let mut spans: Vec<Span<'static>> = vec![
             Span::raw(" "),
             Span::styled(self.identity.clone(), Style::default().fg(ui::TEXT)),
             Span::raw("  "),
         ];
-        for (i, (key, action)) in self.hints.iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw("  "));
+        if let Some(msg) = &self.status_message {
+            // Show the transient acknowledgment message instead of hints.
+            spans.push(Span::styled(
+                msg.clone(),
+                Style::default().fg(ui::YELLOW).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            for (i, (key, action)) in self.hints.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::raw("  "));
+                }
+                spans.push(Span::styled(*key,    Style::default().fg(ui::LAVENDER)));
+                spans.push(Span::styled(*action, Style::default().fg(ui::TEXT)));
             }
-            spans.push(Span::styled(*key,    Style::default().fg(ui::LAVENDER)));
-            spans.push(Span::styled(*action, Style::default().fg(ui::TEXT)));
         }
         Line::from(spans)
     }
