@@ -790,10 +790,15 @@ struct GroupTimelineView: View {
         let text = trimmedDraft
         guard canSend else { return }
 
+        // Raw draft text + the user-picked mention pubkeys only. The shared
+        // `compose_chat_message` helper in `nmp-app-29er` owns NIP-19/21
+        // classification, the `@<hex>` → `nostr:npub1…` rewrite, and the
+        // `["p", …]` tags. The shell does zero content tokenization. This
+        // mirrors the TUI composer and Chirp's `GroupChatView.sendDraft`.
         let accepted = model.sendGroupMessage(
             groupId: groupId,
             content: text,
-            mentionPubkeys: activeMentionPubkeys(in: text)
+            mentionPubkeys: Array(selectedMentionPubkeys)
         )
         guard accepted else {
             composerFocused = true
@@ -849,33 +854,6 @@ struct GroupTimelineView: View {
             draft = parts.joined(separator: " ") + " "
         }
         composerFocused = true
-    }
-
-    private func activeMentionPubkeys(in text: String) -> [String] {
-        let selectedMembers = currentMembers
-            .filter { member in
-                selectedMentionPubkeys.contains(member.pubkey) &&
-                    (text.contains("@\(member.pubkey)") || text.contains("@\(member.pubkey.shortHex)"))
-            }
-            .map(\.pubkey)
-        return Array(Set(selectedMembers + rawMentionIdentifiers(in: text))).sorted()
-    }
-
-    private func rawMentionIdentifiers(in text: String) -> [String] {
-        text.split(whereSeparator: \.isWhitespace)
-            .compactMap { raw -> String? in
-                guard raw.hasPrefix("@") else { return nil }
-                let token = raw
-                    .dropFirst()
-                    .trimmingCharacters(in: CharacterSet(charactersIn: ".,:;!?)]}"))
-                guard looksLikeRawMentionIdentifier(token) else { return nil }
-                return String(token)
-            }
-    }
-
-    private func looksLikeRawMentionIdentifier(_ token: String) -> Bool {
-        token.hasPrefix("npub1") ||
-            (token.count == 64 && token.allSatisfy(\.isHexDigit))
     }
 
     private func outboxItem(for eventId: String) -> PublishOutboxItem? {
