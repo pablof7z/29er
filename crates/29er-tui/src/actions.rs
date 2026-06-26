@@ -20,7 +20,7 @@ pub enum Action {
     ScrollUp,
     ScrollDown,
     // chat / outbox
-    SendMessage(String),
+    SendMessage { content: String, mentions: Vec<String> },
     RetryOutbox(String),
     // palette
     OpenPalette,
