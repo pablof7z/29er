@@ -143,6 +143,8 @@ enum TypedProjectionGlue {
             adminCount: row.adminCount,
             isPublic: row.public_,
             isOpen: row.open_,
+            isMember: row.isMember,
+            isAdmin: row.isAdmin,
             isBranch: row.branch,
             lastMessageId: row.lastMessageId,
             lastMessagePubkey: row.lastMessagePubkey,

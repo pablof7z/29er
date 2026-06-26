@@ -38,6 +38,8 @@ pub mod nmp_app_29er {
         pub const VT_LAST_MESSAGE_PREVIEW: ::flatbuffers::VOffsetT = 28;
         pub const VT_LAST_MESSAGE_CREATED_AT: ::flatbuffers::VOffsetT = 30;
         pub const VT_UNREAD_COUNT: ::flatbuffers::VOffsetT = 32;
+        pub const VT_IS_MEMBER: ::flatbuffers::VOffsetT = 34;
+        pub const VT_IS_ADMIN: ::flatbuffers::VOffsetT = 36;
 
         #[inline]
         pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -82,6 +84,8 @@ pub mod nmp_app_29er {
             if let Some(x) = args.group_id {
                 builder.add_group_id(x);
             }
+            builder.add_is_admin(args.is_admin);
+            builder.add_is_member(args.is_member);
             builder.add_branch(args.branch);
             builder.add_open(args.open);
             builder.add_public(args.public);
@@ -259,6 +263,28 @@ pub mod nmp_app_29er {
                     .unwrap()
             }
         }
+        #[inline]
+        pub fn is_member(&self) -> bool {
+            // Safety:
+            // Created from valid Table for this object
+            // which contains a valid value in this slot
+            unsafe {
+                self._tab
+                    .get::<bool>(GroupTreeNode::VT_IS_MEMBER, Some(false))
+                    .unwrap()
+            }
+        }
+        #[inline]
+        pub fn is_admin(&self) -> bool {
+            // Safety:
+            // Created from valid Table for this object
+            // which contains a valid value in this slot
+            unsafe {
+                self._tab
+                    .get::<bool>(GroupTreeNode::VT_IS_ADMIN, Some(false))
+                    .unwrap()
+            }
+        }
     }
 
     impl ::flatbuffers::Verifiable for GroupTreeNode<'_> {
@@ -313,6 +339,8 @@ pub mod nmp_app_29er {
                     false,
                 )?
                 .visit_field::<u32>("unread_count", Self::VT_UNREAD_COUNT, false)?
+                .visit_field::<bool>("is_member", Self::VT_IS_MEMBER, false)?
+                .visit_field::<bool>("is_admin", Self::VT_IS_ADMIN, false)?
                 .finish();
             Ok(())
         }
@@ -337,6 +365,8 @@ pub mod nmp_app_29er {
         pub last_message_preview: Option<::flatbuffers::WIPOffset<&'a str>>,
         pub last_message_created_at: u64,
         pub unread_count: u32,
+        pub is_member: bool,
+        pub is_admin: bool,
     }
     impl<'a> Default for GroupTreeNodeArgs<'a> {
         #[inline]
@@ -357,6 +387,8 @@ pub mod nmp_app_29er {
                 last_message_preview: None,
                 last_message_created_at: 0,
                 unread_count: 0,
+                is_member: false,
+                is_admin: false,
             }
         }
     }
@@ -470,6 +502,16 @@ pub mod nmp_app_29er {
                 .push_slot::<u32>(GroupTreeNode::VT_UNREAD_COUNT, unread_count, 0);
         }
         #[inline]
+        pub fn add_is_member(&mut self, is_member: bool) {
+            self.fbb_
+                .push_slot::<bool>(GroupTreeNode::VT_IS_MEMBER, is_member, false);
+        }
+        #[inline]
+        pub fn add_is_admin(&mut self, is_admin: bool) {
+            self.fbb_
+                .push_slot::<bool>(GroupTreeNode::VT_IS_ADMIN, is_admin, false);
+        }
+        #[inline]
         pub fn new(
             _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
         ) -> GroupTreeNodeBuilder<'a, 'b, A> {
@@ -508,6 +550,8 @@ pub mod nmp_app_29er {
             ds.field("last_message_preview", &self.last_message_preview());
             ds.field("last_message_created_at", &self.last_message_created_at());
             ds.field("unread_count", &self.unread_count());
+            ds.field("is_member", &self.is_member());
+            ds.field("is_admin", &self.is_admin());
             ds.finish()
         }
     }

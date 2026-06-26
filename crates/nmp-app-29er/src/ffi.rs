@@ -13,11 +13,11 @@ use nmp_core::{KernelEventObserver, KernelEventObserverId, TypedProjectionData};
 use nmp_ffi::{nmp_app_dispatch_action_bytes, NmpApp};
 use nmp_nip29::group_id::GroupId;
 use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
-use nmp_nip29::projection::DiscoveredGroupsProjection;
+use nmp_nip29::projection::{DiscoveredGroupsProjection, JoinedGroupsProjection};
 
 use crate::group_tree::{
-    encode_group_tree_snapshot, GroupTreeProjection, GROUP_TREE_FILE_IDENTIFIER,
-    GROUP_TREE_SCHEMA_ID, GROUP_TREE_SCHEMA_VERSION,
+    encode_group_tree_snapshot, membership_from_joined, GroupMembershipMap, GroupTreeProjection,
+    GROUP_TREE_FILE_IDENTIFIER, GROUP_TREE_SCHEMA_ID, GROUP_TREE_SCHEMA_VERSION,
 };
 
 /// Opaque handle returned by [`nmp_app_29er_register`] and consumed by
@@ -372,6 +372,35 @@ fn open_group_discovery_with_tree(
         return None;
     }
 
+    // Fix #3 / #4: viewer membership/admin truth comes from the account-scoped
+    // `JoinedGroupsProjection`, NOT a Swift roster scan (D11 — the app crate
+    // owns membership/admin derivation). The projection accumulates relay-signed
+    // kind:39000/39001/39002 snapshots and keys `is_member`/`is_admin` on the
+    // active pubkey. We bake the pubkey at open time (discovery is opened
+    // post-sign-in, so the active account is known) and scope the projection to
+    // this discovery host relay. The `active_account` slot is read again at
+    // snapshot time so a later account switch fails safe (see
+    // `membership_from_joined`): membership is only surfaced while the live
+    // active pubkey still matches the snapshot's. Reopening discovery rebuilds
+    // this projection for the new account.
+    let active_account = app.active_account_handle();
+    let active_pubkey = active_account
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .unwrap_or_default();
+    let joined = Arc::new(JoinedGroupsProjection::new_for_host(
+        active_pubkey,
+        relay_url.clone(),
+    ));
+    let joined_observer_id =
+        app.register_live_event_tap(Arc::clone(&joined) as Arc<dyn KernelEventObserver>);
+    if joined_observer_id.0 == 0 {
+        app.unregister_event_observer(observer_id);
+        app.unregister_event_observer(tree_observer_id);
+        return None;
+    }
+
     let discovered_projection = Arc::clone(&projection);
     app.register_typed_snapshot_projection("nmp.nip29.discovered_groups", move || {
         let snapshot = discovered_projection.snapshot();
@@ -393,15 +422,26 @@ fn open_group_discovery_with_tree(
 
     let tree_projection = Arc::clone(&projection);
     let tree_messages_projection = Arc::clone(&tree_messages);
+    let joined_projection = Arc::clone(&joined);
+    let active_account_for_tree = Arc::clone(&active_account);
     app.register_typed_snapshot_projection("nmp.29er.group_tree", move || {
         let snapshot = tree_projection.snapshot();
         let messages = tree_messages_projection.snapshot();
+        // Re-read the live active pubkey every tick so membership is recomputed
+        // on an account switch and never leaks a previous account's truth.
+        let active_pubkey = active_account_for_tree
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .unwrap_or_default();
+        let membership: GroupMembershipMap =
+            membership_from_joined(&joined_projection.snapshot(), &active_pubkey);
         Some(TypedProjectionData {
             key: "nmp.29er.group_tree".to_string(),
             schema_id: GROUP_TREE_SCHEMA_ID.to_string(),
             schema_version: GROUP_TREE_SCHEMA_VERSION,
             file_identifier: String::from_utf8_lossy(GROUP_TREE_FILE_IDENTIFIER).into_owned(),
-            payload: encode_group_tree_snapshot(&snapshot, &messages),
+            payload: encode_group_tree_snapshot(&snapshot, &messages, &membership),
             ..Default::default()
         })
     });
@@ -415,7 +455,7 @@ fn open_group_discovery_with_tree(
 
     let app_addr = (app as *const NmpApp) as usize;
     Some(TwentyNinerGroupDiscoveryHandle {
-        observer_ids: vec![observer_id, tree_observer_id],
+        observer_ids: vec![observer_id, tree_observer_id, joined_observer_id],
         tree_projection: tree_messages,
         teardown_fn: Box::new(move |ids| {
             let app = unsafe { &*(app_addr as *const NmpApp) };

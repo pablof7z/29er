@@ -253,7 +253,10 @@ struct GroupTimelineView: View {
     }
 
     private var canCompose: Bool {
-        membersProjectionMatchesGroup && isCurrentMember && node != nil && !model.kernelIsDead
+        // Fix #3: composing is gated on the projection-emitted viewer membership
+        // flag, not a Swift roster scan. `isCurrentMember` reads `node.isMember`,
+        // which implies the node exists.
+        isCurrentMember && !model.kernelIsDead
     }
 
     private var currentMembers: [GroupMember] {
@@ -265,17 +268,18 @@ struct GroupTimelineView: View {
         model.groupMembers.groupId == groupId
     }
 
-    private var activeMember: GroupMember? {
-        guard let activePubkey = model.activeAccountPubkey else { return nil }
-        return currentMembers.first { $0.pubkey == activePubkey }
-    }
-
+    /// Viewer membership truth, read straight from the Rust group-tree
+    /// projection (`node.isMember`). The app crate derives this from the
+    /// account-scoped `JoinedGroupsProjection`; the shell never scans the member
+    /// roster to infer membership (D11).
     private var isCurrentMember: Bool {
-        activeMember != nil
+        node?.isMember == true
     }
 
+    /// Viewer admin truth, read straight from the Rust group-tree projection
+    /// (`node.isAdmin`). NOT a roster scan (D11).
     private var isCurrentAdmin: Bool {
-        activeMember?.admin == true
+        node?.isAdmin == true
     }
 
     private var membershipOutboxItems: [PublishOutboxItem] {
