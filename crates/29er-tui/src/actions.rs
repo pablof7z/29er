@@ -39,5 +39,7 @@ pub enum Action {
     // forms
     OpenForm(FormKind),
     CloseForm,
+    /// Alt+A: jump to the next channel with a Mention-tier unread notification.
+    JumpToNextMention,
     Noop,
 }

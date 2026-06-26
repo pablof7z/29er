@@ -147,6 +147,11 @@ fn handle_event(event: &Event, app: &mut App, ui: &mut Ui) {
     // --- Base-panel global keys ---
     if let Event::Key(key) = event {
         if key.kind == KeyEventKind::Press {
+            // Alt+A: jump to next mention channel.
+            if key.modifiers.contains(KeyModifiers::ALT) && key.code == KeyCode::Char('a') {
+                app.jump_to_next_mention();
+                return;
+            }
             // Ctrl+K or '/' (outside Composer) opens palette.
             let open_palette = (key.modifiers.contains(KeyModifiers::CONTROL)
                 && key.code == KeyCode::Char('k'))
@@ -243,6 +248,7 @@ fn apply(action: Action, app: &mut App) {
         // forms — open_form handles palette collapse + focus stack internally.
         Action::OpenForm(f) => app.open_form(f),
         Action::CloseForm => app.close_form(),
+        Action::JumpToNextMention => app.jump_to_next_mention(),
         Action::Noop => {}
     }
 }
