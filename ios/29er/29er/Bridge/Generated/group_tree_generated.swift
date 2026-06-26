@@ -35,6 +35,8 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     case lastMessagePreview = 28
     case lastMessageCreatedAt = 30
     case unreadCount = 32
+    case isMember = 34
+    case isAdmin = 36
     var v: Int32 { Int32(self.rawValue) }
     var p: VOffset { self.rawValue }
   }
@@ -61,7 +63,9 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
   public var lastMessagePreviewSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.lastMessagePreview.v) }
   public var lastMessageCreatedAt: UInt64 { let o = _accessor.offset(VTOFFSET.lastMessageCreatedAt.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
   public var unreadCount: UInt32 { let o = _accessor.offset(VTOFFSET.unreadCount.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt32.self, at: o) }
-  public static func startGroupTreeNode(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 15) }
+  public var isMember: Bool { let o = _accessor.offset(VTOFFSET.isMember.v); return o == 0 ? false : _accessor.readBuffer(of: Bool.self, at: o) }
+  public var isAdmin: Bool { let o = _accessor.offset(VTOFFSET.isAdmin.v); return o == 0 ? false : _accessor.readBuffer(of: Bool.self, at: o) }
+  public static func startGroupTreeNode(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 17) }
   public static func add(groupId: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: groupId, at: VTOFFSET.groupId.p) }
   public static func add(hostRelayUrl: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: hostRelayUrl, at: VTOFFSET.hostRelayUrl.p) }
   public static func add(name: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: name, at: VTOFFSET.name.p) }
@@ -80,6 +84,10 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
   public static func add(lastMessagePreview: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: lastMessagePreview, at: VTOFFSET.lastMessagePreview.p) }
   public static func add(lastMessageCreatedAt: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: lastMessageCreatedAt, def: 0, at: VTOFFSET.lastMessageCreatedAt.p) }
   public static func add(unreadCount: UInt32, _ fbb: inout FlatBufferBuilder) { fbb.add(element: unreadCount, def: 0, at: VTOFFSET.unreadCount.p) }
+  public static func add(isMember: Bool, _ fbb: inout FlatBufferBuilder) { fbb.add(element: isMember, def: false,
+   at: VTOFFSET.isMember.p) }
+  public static func add(isAdmin: Bool, _ fbb: inout FlatBufferBuilder) { fbb.add(element: isAdmin, def: false,
+   at: VTOFFSET.isAdmin.p) }
   public static func endGroupTreeNode(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); fbb.require(table: end, fields: [4, 6]); return end }
   public static func createGroupTreeNode(
     _ fbb: inout FlatBufferBuilder,
@@ -97,7 +105,9 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     lastMessagePubkeyOffset lastMessagePubkey: Offset = Offset(),
     lastMessagePreviewOffset lastMessagePreview: Offset = Offset(),
     lastMessageCreatedAt: UInt64 = 0,
-    unreadCount: UInt32 = 0
+    unreadCount: UInt32 = 0,
+    isMember: Bool = false,
+    isAdmin: Bool = false
   ) -> Offset {
     let __start = nmp_app_29er_GroupTreeNode.startGroupTreeNode(&fbb)
     nmp_app_29er_GroupTreeNode.add(groupId: groupId, &fbb)
@@ -115,6 +125,8 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     nmp_app_29er_GroupTreeNode.add(lastMessagePreview: lastMessagePreview, &fbb)
     nmp_app_29er_GroupTreeNode.add(lastMessageCreatedAt: lastMessageCreatedAt, &fbb)
     nmp_app_29er_GroupTreeNode.add(unreadCount: unreadCount, &fbb)
+    nmp_app_29er_GroupTreeNode.add(isMember: isMember, &fbb)
+    nmp_app_29er_GroupTreeNode.add(isAdmin: isAdmin, &fbb)
     return nmp_app_29er_GroupTreeNode.endGroupTreeNode(&fbb, start: __start)
   }
 
@@ -135,6 +147,8 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     try _v.visit(field: VTOFFSET.lastMessagePreview.p, fieldName: "lastMessagePreview", required: false, type: ForwardOffset<String>.self)
     try _v.visit(field: VTOFFSET.lastMessageCreatedAt.p, fieldName: "lastMessageCreatedAt", required: false, type: UInt64.self)
     try _v.visit(field: VTOFFSET.unreadCount.p, fieldName: "unreadCount", required: false, type: UInt32.self)
+    try _v.visit(field: VTOFFSET.isMember.p, fieldName: "isMember", required: false, type: Bool.self)
+    try _v.visit(field: VTOFFSET.isAdmin.p, fieldName: "isAdmin", required: false, type: Bool.self)
     _v.finish()
   }
 }

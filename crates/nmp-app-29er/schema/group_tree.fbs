@@ -16,6 +16,8 @@ table GroupTreeNode {
   last_message_preview:string;
   last_message_created_at:uint64;
   unread_count:uint32;
+  is_member:bool = false;
+  is_admin:bool = false;
 }
 
 table GroupTreeSnapshot {
