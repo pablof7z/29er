@@ -9,16 +9,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use nmp_core::dispatch_envelope::{encode_dispatch_envelope, DISPATCH_ENVELOPE_SCHEMA_VERSION};
-use nmp_core::substrate::{ActionPayload, ViewDependencies};
+use nmp_core::substrate::ActionPayload;
 use nmp_core::{KernelEventObserver, KernelEventObserverId, TypedProjectionData};
 use nmp_ffi::{nmp_app_dispatch_action_bytes, NmpApp};
 use nmp_nip29::group_id::GroupId;
 use nmp_nip29::interest::host_pinned_interest;
 use nmp_nip29::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use nmp_nip29::projection::DiscoveredGroupsProjection;
-use nmp_nip29::register::{wire_group_chat, wire_group_members};
 use nmp_planner::stable_hash::stable_hash64;
-use nmp_planner::{InterestId, InterestLifecycle, InterestScope};
+use nmp_planner::InterestLifecycle;
 
 use crate::group_tree::{
     encode_group_tree_snapshot, GroupTreeProjection, GROUP_TREE_FILE_IDENTIFIER,
@@ -36,7 +35,6 @@ pub struct TwentyNinerHandle {
 pub struct TwentyNinerGroupDiscoveryHandle {
     observer_ids: Vec<KernelEventObserverId>,
     tree_projection: Arc<GroupTreeProjection>,
-    members_projection: Arc<nmp_nip29::projection::GroupMembersProjection>,
     teardown_fn: Box<dyn FnOnce(Vec<KernelEventObserverId>) + Send>,
 }
 
@@ -110,7 +108,10 @@ pub extern "C" fn nmp_app_29er_register(
     //
     // SAFETY: same exclusive-borrow rationale as `register_defaults` — no
     // other reference aliases `app` at this point.
-    let _ = nmp_nip29::register::register_actions(unsafe { &mut *app });
+    // Take the immutable V-83 event-store publish-back handle BEFORE the
+    // exclusive `&mut *app` borrow so the two borrows do not overlap.
+    let store_slot = unsafe { &*app }.event_store_handle();
+    let _ = nmp_nip29::register::register_actions(unsafe { &mut *app }, store_slot);
 
     // Wire the NIP-29 group-create defaults projection so the suggested
     // public-group relay URL surfaces under `"nmp.nip29.group_defaults"`.
@@ -215,9 +216,11 @@ pub extern "C" fn nmp_app_29er_register_group_chat(app: *mut NmpApp, group_id_js
         return;
     };
 
-    wire_group_chat(app_ref, group_id.clone());
-    app_ref.push_interest(group_chat_history_interest(&group_id));
-    app_ref.push_interest(group_chat_live_interest(&group_id));
+    // v0.8.0: the per-open chat read view is the all-in-one `open_group_chat`.
+    // It registers the NGCS typed sidecar, the (muted) `GroupChatProjection`,
+    // replays the read cache, and opens the relay-pinned tailing interest —
+    // superseding the old `wire_group_chat` + two `push_interest` calls.
+    app_ref.open_group_chat(group_id);
 }
 
 fn group_chat_history_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
@@ -248,20 +251,6 @@ fn group_chat_live_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest 
         group_id,
         [KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
         BTreeMap::new(),
-        InterestLifecycle::Tailing,
-    )
-}
-
-fn group_tree_chat_summary_interest(host_relay_url: &str) -> nmp_planner::LogicalInterest {
-    let id = stable_hash64(("29er.nip29.group_tree.chat_summary", host_relay_url));
-    ViewDependencies {
-        kinds: vec![KIND_CHAT_MESSAGE],
-        relay_pin: Some(host_relay_url.to_string()),
-        ..Default::default()
-    }
-    .into_logical_interest(
-        InterestId(id),
-        InterestScope::Global,
         InterestLifecycle::Tailing,
     )
 }
@@ -425,24 +414,17 @@ fn open_group_discovery_with_tree(
 ) -> Option<TwentyNinerGroupDiscoveryHandle> {
     let projection = Arc::new(DiscoveredGroupsProjection::new(relay_url.clone()));
     let observer_id =
-        app.register_event_observer(Arc::clone(&projection) as Arc<dyn KernelEventObserver>);
+        app.register_live_event_tap(Arc::clone(&projection) as Arc<dyn KernelEventObserver>);
     if observer_id.0 == 0 {
         return None;
     }
     let tree_messages = Arc::new(GroupTreeProjection::new());
     let tree_observer_id =
-        app.register_event_observer(Arc::clone(&tree_messages) as Arc<dyn KernelEventObserver>);
+        app.register_live_event_tap(Arc::clone(&tree_messages) as Arc<dyn KernelEventObserver>);
     if tree_observer_id.0 == 0 {
         app.unregister_event_observer(observer_id);
         return None;
     }
-    let Some((members_projection, members_observer_id)) =
-        wire_group_members(app, relay_url.clone())
-    else {
-        app.unregister_event_observer(observer_id);
-        app.unregister_event_observer(tree_observer_id);
-        return None;
-    };
 
     let discovered_projection = Arc::clone(&projection);
     app.register_typed_snapshot_projection("nmp.nip29.discovered_groups", move || {
@@ -478,13 +460,17 @@ fn open_group_discovery_with_tree(
         })
     });
 
-    app.push_interest(group_tree_chat_summary_interest(&relay_url));
+    // v0.8.0: `push_interest`/`LogicalInterest` is gone from the FFI; express
+    // the relay's kind:9 chat-summary tail as a NIP-01 filter through the
+    // refcounted `open_interest` door (scope 1 = Global).
+    let chat_summary_filter = format!(r#"{{"kinds":[{KIND_CHAT_MESSAGE}]}}"#);
+    let chat_summary_consumer = format!("29er.nip29.group_tree.chat_summary:{relay_url}");
+    app.open_interest(chat_summary_filter, chat_summary_consumer, 1);
 
     let app_addr = (app as *const NmpApp) as usize;
     Some(TwentyNinerGroupDiscoveryHandle {
-        observer_ids: vec![observer_id, tree_observer_id, members_observer_id],
+        observer_ids: vec![observer_id, tree_observer_id],
         tree_projection: tree_messages,
-        members_projection,
         teardown_fn: Box::new(move |ids| {
             let app = unsafe { &*(app_addr as *const NmpApp) };
             for id in ids {
@@ -492,7 +478,6 @@ fn open_group_discovery_with_tree(
             }
             app.remove_snapshot_projection("nmp.nip29.discovered_groups");
             app.remove_snapshot_projection("nmp.29er.group_tree");
-            app.remove_snapshot_projection("nmp.nip29.group_members");
         }),
     })
 }
@@ -544,8 +529,13 @@ pub extern "C" fn nmp_app_29er_mark_group_read(
     handle.tree_projection.mark_read(&group_id);
 }
 
-/// Select the group whose 39002 members should be emitted in the
-/// `"nmp.nip29.group_members"` typed projection.
+/// Select a group's member roster.
+///
+/// v0.8.0: the per-member `GroupMembersProjection` was removed from `nmp-nip29`
+/// (membership now derives from `JoinedGroupsProjection` and the per-relay
+/// `DiscoveredGroup.member_count`/`admin_count`). The dedicated roster door no
+/// longer exists, so this entry point is retained for C-ABI stability as a
+/// validated no-op until 29er builds its own roster observer.
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn nmp_app_29er_select_group_members(
@@ -555,11 +545,9 @@ pub extern "C" fn nmp_app_29er_select_group_members(
     if handle.is_null() {
         return;
     }
-    let Some(group_id) = c_string_opt(group_id).filter(|s| !s.is_empty()) else {
+    let Some(_group_id) = c_string_opt(group_id).filter(|s| !s.is_empty()) else {
         return;
     };
-    let handle = unsafe { &*handle };
-    handle.members_projection.select_group(group_id);
 }
 
 /// Process-local correlation-id source for 29er's byte-doorway dispatches.
@@ -683,8 +671,8 @@ fn encode_payload_for_namespace(namespace: &str, json: &str) -> Option<Vec<u8>> 
             encode::<nmp_nip29::action::CreateInviteInput>(namespace, json)
         }
         "nmp.nip29.set_parent" => encode::<nmp_nip29::action::SetParentInput>(namespace, json),
-        "nmp.nip29.post_chat_message" => {
-            encode::<nmp_nip29::action::PostChatMessageInput>(namespace, json)
+        "nmp.nip29.publish_group_event" => {
+            encode::<nmp_nip29::action::PublishGroupEventInput>(namespace, json)
         }
         "nmp.nip29.react_in_group" => {
             encode::<nmp_nip29::action::ReactInGroupInput>(namespace, json)
