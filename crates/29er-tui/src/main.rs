@@ -226,7 +226,7 @@ fn handle_event(event: &Event, app: &mut App, ui: &mut Ui) {
 fn apply(action: Action, app: &mut App) {
     match action {
         Action::Quit => app.quit(),
-        Action::LoginSubmit(nsec) => app.login(nsec),
+        Action::LoginSubmit { nsec, relay } => app.login(nsec, relay),
         // navigation
         Action::NavigateUp => app.navigate(-1),
         Action::NavigateDown => app.navigate(1),

@@ -7,7 +7,7 @@ use crate::app::{Focus, FormKind};
 pub enum Action {
     Quit,
     // identity
-    LoginSubmit(String),
+    LoginSubmit { nsec: String, relay: String },
     // navigation
     NavigateUp,
     NavigateDown,
