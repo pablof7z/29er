@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["crates/shakeout", "crates/nmp-app-29er", "crates/29er-tui"]
-exclude = ["vendor/nmp"]
 
 [workspace.package]
 edition = "2021"
@@ -9,16 +8,19 @@ license = "MIT"
 repository = "https://github.com/pablof7z/29er"
 version = "0.1.0"
 
+# NMP is consumed as an external git dependency — never vendored.
+# Pinned to the head of PR #2131 (generic nmp.nip29.publish_group_event surface).
+# When #2131 merges, bump `rev` to the resulting master commit.
 [workspace.dependencies]
-nmp-core = { path = "vendor/nmp/crates/nmp-core" }
-nmp-ffi = { path = "vendor/nmp/crates/nmp-ffi" }
-nmp-defaults = { path = "vendor/nmp/crates/nmp-defaults" }
-nmp-nip29 = { path = "vendor/nmp/crates/nmp-nip29" }
-nmp-planner = { path = "vendor/nmp/crates/nmp-planner" }
-nmp-network = { path = "vendor/nmp/crates/nmp-network" }
-nmp-signer-iface = { path = "vendor/nmp/crates/nmp-signer-iface" }
+nmp-core = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
+nmp-ffi = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
+nmp-defaults = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
+nmp-nip29 = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
+nmp-planner = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
+nmp-network = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
+nmp-signer-iface = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
+nmp-content = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "a71b56f83ffd1227cc1c6a0eacc29a7ea8e90276" }
 nmp-app-29er = { path = "crates/nmp-app-29er" }
-nmp-content = { path = "vendor/nmp/crates/nmp-content" }
 flatbuffers = "25.12.19"
 nostr = "0.44"
 serde = "1.0"
