@@ -3,7 +3,6 @@
 //! to the S01 surface: register, open/close group discovery, register group
 //! chat, dispatch action bytes, declare consumed projections, unregister.
 
-use std::collections::BTreeMap;
 use std::ffi::c_char;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -13,18 +12,13 @@ use nmp_core::substrate::ActionPayload;
 use nmp_core::{KernelEventObserver, KernelEventObserverId, TypedProjectionData};
 use nmp_ffi::{nmp_app_dispatch_action_bytes, NmpApp};
 use nmp_nip29::group_id::GroupId;
-use nmp_nip29::interest::host_pinned_interest;
-use nmp_nip29::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
+use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
 use nmp_nip29::projection::DiscoveredGroupsProjection;
-use nmp_planner::stable_hash::stable_hash64;
-use nmp_planner::InterestLifecycle;
 
 use crate::group_tree::{
     encode_group_tree_snapshot, GroupTreeProjection, GROUP_TREE_FILE_IDENTIFIER,
     GROUP_TREE_SCHEMA_ID, GROUP_TREE_SCHEMA_VERSION,
 };
-
-const GROUP_CHAT_HISTORY_LIMIT: u32 = 200;
 
 /// Opaque handle returned by [`nmp_app_29er_register`] and consumed by
 /// [`nmp_app_29er_unregister`]. Boxed on the heap; the pointer is opaque to C.
@@ -223,85 +217,9 @@ pub extern "C" fn nmp_app_29er_register_group_chat(app: *mut NmpApp, group_id_js
     app_ref.open_group_chat(group_id);
 }
 
-fn group_chat_history_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
-    let id = stable_hash64((
-        "29er.nip29.group_chat.history",
-        group_id.host_relay_url.as_str(),
-        group_id.local_id.as_str(),
-    ));
-    let mut interest = host_pinned_interest(
-        id,
-        group_id,
-        [KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
-        BTreeMap::new(),
-        InterestLifecycle::OneShot,
-    );
-    interest.shape.limit = Some(GROUP_CHAT_HISTORY_LIMIT);
-    interest
-}
-
-fn group_chat_live_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
-    let id = stable_hash64((
-        "29er.nip29.group_chat.live",
-        group_id.host_relay_url.as_str(),
-        group_id.local_id.as_str(),
-    ));
-    host_pinned_interest(
-        id,
-        group_id,
-        [KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
-        BTreeMap::new(),
-        InterestLifecycle::Tailing,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn group_chat_history_interest_is_dedicated_room_fetch() {
-        let group = GroupId::new("wss://groups.example.com", "rust-nostr");
-        let interest = group_chat_history_interest(&group);
-
-        assert_eq!(
-            interest.shape.relay_pin.as_deref(),
-            Some("wss://groups.example.com")
-        );
-        assert!(interest.shape.kinds.contains(&KIND_CHAT_MESSAGE));
-        assert!(interest.shape.kinds.contains(&KIND_DISCUSSION_OR_ARTIFACT));
-        assert!(interest.shape.tags.get("h").unwrap().contains("rust-nostr"));
-        assert_eq!(interest.shape.limit, Some(GROUP_CHAT_HISTORY_LIMIT));
-        assert_eq!(interest.lifecycle, InterestLifecycle::OneShot);
-    }
-
-    #[test]
-    fn group_chat_live_interest_tails_room_without_history_limit() {
-        let group = GroupId::new("wss://groups.example.com", "rust-nostr");
-        let interest = group_chat_live_interest(&group);
-
-        assert_eq!(
-            interest.shape.relay_pin.as_deref(),
-            Some("wss://groups.example.com")
-        );
-        assert!(interest.shape.kinds.contains(&KIND_CHAT_MESSAGE));
-        assert!(interest.shape.kinds.contains(&KIND_DISCUSSION_OR_ARTIFACT));
-        assert!(interest.shape.tags.get("h").unwrap().contains("rust-nostr"));
-        assert_eq!(interest.shape.limit, None);
-        assert_eq!(interest.lifecycle, InterestLifecycle::Tailing);
-    }
-
-    #[test]
-    fn group_chat_interest_ids_are_deterministic_per_group_and_lifecycle() {
-        let a1 = group_chat_history_interest(&GroupId::new("wss://groups.example.com", "room-a"));
-        let a2 = group_chat_history_interest(&GroupId::new("wss://groups.example.com", "room-a"));
-        let b = group_chat_history_interest(&GroupId::new("wss://groups.example.com", "room-b"));
-        let live = group_chat_live_interest(&GroupId::new("wss://groups.example.com", "room-a"));
-
-        assert_eq!(a1.id, a2.id);
-        assert_ne!(a1.id, b.id);
-        assert_ne!(a1.id, live.id);
-    }
 
     #[test]
     fn m002_membership_and_admin_namespaces_encode_typed_payloads() {
