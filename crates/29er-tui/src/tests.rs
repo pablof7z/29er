@@ -8,7 +8,7 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::Terminal;
 
-use crate::app::{ChannelListItem, Focus, IdentityState, RelayState, Screen, TuiSnapshot};
+use crate::app::{ChannelListItem, ChannelTier, Focus, IdentityState, RelayState, Screen, TuiSnapshot};
 use crate::ui::chat::ChatComponent;
 use crate::ui::login::LoginComponent;
 use crate::ui::room_list::RoomListComponent;
@@ -53,6 +53,7 @@ fn fake_channel(id: &str) -> ChannelListItem {
         is_branch: false,
         last_preview: None,
         last_timestamp: None,
+        tier: ChannelTier::Normal,
     }
 }
 

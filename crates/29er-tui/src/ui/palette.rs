@@ -465,6 +465,10 @@ mod tests {
             screen: Screen::App,
             help_open: false,
             status_message: None,
+            last_read_message_id: None,
+            spinner_tick: 0,
+            connecting_since: None,
+            connected_at: None,
         };
         let mut p = Palette::new();
         p.update(&base_snap);
@@ -559,6 +563,10 @@ mod tests {
             screen: Screen::App,
             help_open: false,
             status_message: None,
+            last_read_message_id: None,
+            spinner_tick: 0,
+            connecting_since: None,
+            connected_at: None,
         };
         let mut p = Palette::new();
         p.update(&snap);
