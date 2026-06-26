@@ -264,11 +264,15 @@ impl App {
     }
 
     /// Validate + hand the nsec straight to NMP, never storing it (issue #10).
-    pub fn login(&mut self, nsec: String) {
+    /// `relay` overrides the relay URL configured at startup (collected in Step 2).
+    pub fn login(&mut self, nsec: String, relay: String) {
         let nsec = nsec.trim().to_string();
         if !nsec.starts_with("nsec1") {
             self.login_error = Some("Secret key must start with nsec1\u{2026}".to_string());
             return;
+        }
+        if !relay.is_empty() {
+            self.relay_url = relay;
         }
         match self.init_nmp(&nsec) {
             Ok(()) => {
