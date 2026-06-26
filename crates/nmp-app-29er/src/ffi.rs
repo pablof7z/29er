@@ -107,15 +107,21 @@ pub extern "C" fn nmp_app_29er_register(
     let store_slot = unsafe { &*app }.event_store_handle();
     let _ = nmp_nip29::register::register_actions(unsafe { &mut *app }, store_slot);
 
-    // Wire the NIP-29 group-create defaults projection so the suggested
-    // public-group relay URL surfaces under `"nmp.nip29.group_defaults"`.
-    // Output-only: the projection observes no kernel events — its snapshot is
-    // a pure function of the `nmp-nip29` crate constant — so this is a one-time
-    // registration at app init (same pattern as Chirp's `wire_group_defaults`).
+    // Wire the NIP-29 group-create defaults projection so 29er's suggested
+    // public-group relay URL surfaces under `"nmp.nip29.group_defaults"`. The
+    // relay is 29er operator policy ([`crate::config::public_group_relay_url`]),
+    // threaded in via `wire_group_defaults_with_relay` so the shell reads it
+    // from the projection instead of hardcoding it (D7). Output-only: the
+    // projection observes no kernel events — its snapshot is a pure function of
+    // the supplied URL — so this is a one-time registration at app init (same
+    // pattern as Chirp's `wire_group_defaults_with_relay`).
     //
     // SAFETY: shared-ref borrow; the projection registration is internally
     // lock-guarded.
-    nmp_nip29::register::wire_group_defaults(unsafe { &*app });
+    nmp_nip29::register::wire_group_defaults_with_relay(
+        unsafe { &*app },
+        crate::config::public_group_relay_url(),
+    );
 
     // D6 — guard the write-through before allocating the handle. A null
     // `handle_out` is a programmer-error contract violation; returning

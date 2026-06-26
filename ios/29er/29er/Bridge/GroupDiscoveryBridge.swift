@@ -330,7 +330,14 @@ extension KernelModel {
         access: String = "open",
         parent: String? = nil
     ) -> Bool {
-        let group = GroupId(hostRelayUrl: defaultNip29RelayUrl, localId: localId)
+        // Host relay comes from the Rust-owned `group_defaults` projection (D7),
+        // never a Swift literal. Empty until the defaults sidecar lands; the
+        // Rust create action also validates the host relay, so an empty URL is
+        // rejected there rather than silently defaulted here.
+        let group = GroupId(
+            hostRelayUrl: groupDefaults.suggestedRelayUrl,
+            localId: localId
+        )
         return kernel.createPublicGroup(
             group: group,
             name: name,

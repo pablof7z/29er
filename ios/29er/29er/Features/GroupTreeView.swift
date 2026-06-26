@@ -50,8 +50,13 @@ struct GroupTreeView: View {
             GroupChildrenView(parentGroupId: route.groupId)
         }
         .task {
-            if model.discoveredGroups.hostRelayUrl.isEmpty {
-                model.openGroupDiscovery(hostRelayUrl: defaultNip29RelayUrl)
+            // Host relay comes from the Rust-owned `group_defaults` projection
+            // (D7), never a Swift literal. Skip until it has landed; the
+            // apply-time auto-open (KernelModel+Apply) covers the common case,
+            // and this `.task` retries when the view appears after the tick.
+            let suggestedRelay = model.groupDefaults.suggestedRelayUrl
+            if model.discoveredGroups.hostRelayUrl.isEmpty, !suggestedRelay.isEmpty {
+                model.openGroupDiscovery(hostRelayUrl: suggestedRelay)
             }
         }
         .onChange(of: tree.totalCount) { _, count in
