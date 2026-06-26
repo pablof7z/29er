@@ -28,6 +28,7 @@ extension KernelModel {
         typedGroupMembers = result.typedGroupMembers
         typedPublishOutbox = result.typedPublishOutbox
         typedActiveAccount = result.typedActiveAccount
+        typedGroupDefaults = result.typedGroupDefaults
 
         // S02 — derive `identityState` from the `active_account` typed
         // projection. The first tick with `rev > 0` collapses `unknown` to
@@ -53,8 +54,16 @@ extension KernelModel {
             // `wasSignedIn` gates the transition tick, and `hostRelayUrl` being
             // non-empty after the first call prevents re-entry. GroupTreeView's
             // .task guard also deduplicates when the view appears later.
-            if !wasSignedIn, case .signedIn = identityState, discoveredGroups.hostRelayUrl.isEmpty {
-                openGroupDiscovery(hostRelayUrl: defaultNip29RelayUrl)
+            //
+            // The host relay comes from the Rust-owned `group_defaults`
+            // projection (D7) — never a Swift literal. `group_defaults` is a
+            // static snapshot registered at app init, so it is present on this
+            // tick; if it has not landed yet the guard skips and the next tick
+            // (or GroupTreeView's `.task`) retries.
+            let suggestedRelay = groupDefaults.suggestedRelayUrl
+            if !wasSignedIn, case .signedIn = identityState,
+               discoveredGroups.hostRelayUrl.isEmpty, !suggestedRelay.isEmpty {
+                openGroupDiscovery(hostRelayUrl: suggestedRelay)
             }
         }
 
@@ -97,6 +106,7 @@ extension KernelModel {
         typedGroupMembers = nil
         typedPublishOutbox = nil
         typedActiveAccount = nil
+        typedGroupDefaults = nil
     }
 
     /// Active account pubkey (`nil` ⇒ no active account). Read through the
@@ -126,5 +136,12 @@ extension KernelModel {
 
     var publishOutbox: [PublishOutboxItem] {
         typedPublishOutbox ?? []
+    }
+
+    /// NIP-29 group-create defaults (`nil` slot ⇒ `.empty`). Carries 29er's
+    /// Rust-owned suggested public-group host relay (`suggestedRelayUrl`); the
+    /// shell reads it instead of hardcoding a relay URL (D7).
+    var groupDefaults: GroupDefaultsSnapshot {
+        typedGroupDefaults ?? .empty
     }
 }

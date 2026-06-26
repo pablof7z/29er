@@ -29,6 +29,10 @@ struct KernelUpdateResult {
     /// Typed `active_account` projection decode (`KACT`). `nil` ⇒ no active
     /// account on this tick.
     let typedActiveAccount: String?
+    /// Typed `nmp.nip29.group_defaults` projection decode (`NGDF`). `nil` ⇒ the
+    /// sidecar was absent or malformed on this tick. Carries 29er's suggested
+    /// public-group host relay URL (Rust-owned operator policy).
+    let typedGroupDefaults: GroupDefaultsSnapshot?
     /// ADR-0044 Tier-3: bare envelope scalars read directly off the
     /// `SnapshotFrame` table. `rev` is the authoritative snapshot revision;
     /// `running` mirrors the kernel's `running` flag; `lastErrorToast` is the

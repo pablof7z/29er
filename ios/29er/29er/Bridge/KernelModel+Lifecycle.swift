@@ -4,8 +4,6 @@ import Combine
 import os.log
 
 private let kmLifecycleLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "KernelModel")
-let defaultNip29RelayUrl = ProcessInfo.processInfo.environment["M001_DEFAULT_RELAY_URL"]
-    .flatMap { $0.isEmpty ? nil : $0 } ?? "wss://nip29.f7z.io"
 
 // ── Lifecycle, liveness, open/close ──────────────────────────────────────────
 
@@ -36,12 +34,19 @@ extension KernelModel {
     func start() {
         guard !startedKernel else { return }
         startedKernel = true
-        // 29er's hardcoded default relay for M001 (R002): nip29.f7z.io.
-        // Policy lives in Rust (the canonical NMP composition wired by
-        // `nmp_app_29er_register`), but the bootstrap relay is a 29er product
-        // decision — surfaced here so the shell keeps a single explicit
-        // default (mirroring Chirp's `RelaySeeding.swift` posture).
-        kernel.addRelay(url: defaultNip29RelayUrl, role: "both")
+        // Seed the default relay set. Policy lives in Rust (D7): the URL + role
+        // come from `nmp_app_29er::config` via the seed FFI, so the shell holds
+        // no hardcoded relay literal. Swift's only job is the `NMP_TEST_RELAYS`
+        // env seam (mirroring Chirp's `RelaySeeding.swift`): a well-formed
+        // override seeds those relays, otherwise we fall back to the Rust
+        // defaults. Seeded pre-start so `configured_relays` is populated on a
+        // fresh install.
+        if let testRelaysJson = ProcessInfo.processInfo.environment["NMP_TEST_RELAYS"],
+           kernel.seedRelays(fromJSON: testRelaysJson) {
+            // overridden for tests
+        } else {
+            kernel.seedDefaultRelays()
+        }
         kernel.start(visibleLimit: visibleLimit, emitHz: emitHz)
         // S03 verification hook: auto-submit an nsec from the environment so
         // simulator runs can exercise the post-onboarding group tree without
@@ -74,7 +79,8 @@ extension KernelModel {
     /// Open NIP-29 group discovery for `hostRelayUrl` (the read side of the
     /// discover screen). Delegates to `DiscoveredGroupsStore.searchGroups`
     /// which opens the read projection + dispatches the `nmp.nip29.discover`
-    /// action. T06's `ShakeoutView` calls this with `wss://nip29.f7z.io`.
+    /// action. Callers pass `groupDefaults.suggestedRelayUrl` (the Rust-owned
+    /// default) or a user-entered relay — never a Swift literal (D7).
     func openGroupDiscovery(hostRelayUrl: String) {
         discoveredGroups.searchGroups(relayUrl: hostRelayUrl)
     }
