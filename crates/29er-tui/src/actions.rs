@@ -41,5 +41,7 @@ pub enum Action {
     CloseForm,
     /// Alt+A: jump to the next channel with a Mention-tier unread notification.
     JumpToNextMention,
+    // connectivity
+    Reconnect,
     Noop,
 }

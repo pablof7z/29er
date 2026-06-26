@@ -177,6 +177,11 @@ fn handle_event(event: &Event, app: &mut App, ui: &mut Ui) {
                     app.set_focus(Focus::Composer);
                     return;
                 }
+                // 'r' triggers relay reconnect from any base panel.
+                KeyCode::Char('r') if app.focus() != Focus::Composer => {
+                    apply(Action::Reconnect, app);
+                    return;
+                }
                 // Tab / Shift+Tab cycle through base panels.
                 KeyCode::Tab => { app.cycle_focus(); return; }
                 KeyCode::BackTab => { app.reverse_cycle_focus(); return; }
@@ -255,6 +260,8 @@ fn apply(action: Action, app: &mut App) {
         Action::OpenForm(f) => app.open_form(f),
         Action::CloseForm => app.close_form(),
         Action::JumpToNextMention => app.jump_to_next_mention(),
+        // connectivity
+        Action::Reconnect => app.reconnect(),
         Action::Noop => {}
     }
 }

@@ -2,6 +2,17 @@
 //!
 //! Left side:  identity  [key]verb hints (context-aware, LAVENDER keys)
 //! Right side: relay state indicator  optional unread badge
+//!
+//! Graduated async feedback:
+//!   Connecting < 1s  → hollow dot + "Connecting…" (quiet)
+//!   Connecting 1-10s → spinner + "Connecting…"
+//!   Connecting > 10s → spinner + "Connecting… (Xs)" (yellow urgency)
+//!   Connected flash  → solid green dot + "Connected" for 2 seconds
+//!   Error            → red remedy hint "Relay disconnected. Press [R] to reconnect."
+
+/// Braille spinner frames.  Use `(spinner_tick % SPINNER_FRAMES.len())` to pick one.
+pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 use crossterm::event::Event;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -59,6 +70,9 @@ pub struct StatusBar {
     /// Transient acknowledgment message (e.g. "Joining room…"). Overrides hints
     /// on the left side while set; `None` when expired.
     status_message: Option<String>,
+    spinner_tick: u64,
+    connecting_since: Option<std::time::Instant>,
+    connected_at: Option<std::time::Instant>,
 }
 
 impl Default for StatusBar {
@@ -69,6 +83,9 @@ impl Default for StatusBar {
             total_unread: 0,
             hints: HINTS_ROOMLIST,
             status_message: None,
+            spinner_tick: 0,
+            connecting_since: None,
+            connected_at: None,
         }
     }
 }
@@ -77,7 +94,7 @@ impl StatusBar {
     pub fn new() -> Self { Self::default() }
 
     pub fn update(&mut self, s: &TuiSnapshot) {
-        self.relay_state = s.relay_state;
+        self.relay_state = s.relay_state.clone();
         self.identity = match &s.identity_state {
             IdentityState::LoggedIn { npub } => ui::short_pubkey(npub),
             IdentityState::LoggingIn         => "signing in\u{2026}".to_string(),
@@ -85,6 +102,9 @@ impl StatusBar {
         };
         self.total_unread = s.channel_tree.iter().map(|c| c.unread).sum();
         self.status_message = s.status_message.clone();
+        self.spinner_tick = s.spinner_tick;
+        self.connecting_since = s.connecting_since;
+        self.connected_at = s.connected_at;
         self.hints = if s.help_open {
             HINTS_HELP
         } else if s.active_form.is_some() || matches!(s.focus, Focus::Modal) {
@@ -144,19 +164,61 @@ impl StatusBar {
             width += badge_width + 2;
         }
 
-        // Relay state indicator: "relay: ● Connected" / "relay: ○ Connecting…" / "relay: ✗ Offline"
-        let (dot, dot_fg, state_text, state_fg) = match self.relay_state {
-            RelayState::Connected    => ("\u{25cf}", ui::GREEN,  " Connected",           ui::TEXT),
-            RelayState::Connecting   => ("\u{25cb}", ui::YELLOW, " Connecting\u{2026}",  ui::SUBTEXT0),
-            RelayState::Disconnected => ("\u{2717}", ui::RED,    " Offline",             ui::SUBTEXT0),
-        };
-        // "relay: " = 7 cols, dot = 1 col, state_text chars
-        width += 7 + 1 + state_text.chars().count() as u16;
-        spans.push(Span::raw("relay: "));
-        spans.push(Span::styled(dot,        Style::default().fg(dot_fg)));
-        spans.push(Span::styled(state_text, Style::default().fg(state_fg)));
+        // Spinner frame (advances with spinner_tick).
+        let frame = SPINNER_FRAMES[(self.spinner_tick as usize) % SPINNER_FRAMES.len()];
 
-        // 1-col right padding so text doesn't hug the terminal edge
+        match &self.relay_state {
+            RelayState::Connected => {
+                // Flash "● Connected" in green for 2 s after first connection.
+                let flash_active = self.connected_at
+                    .map(|t| t.elapsed().as_secs_f32() < 2.0)
+                    .unwrap_or(false);
+                let state_fg = if flash_active { ui::GREEN } else { ui::TEXT };
+                // "relay: " = 7, "●" = 1, " Connected" = 10
+                width += 7 + 1 + 10;
+                spans.push(Span::raw("relay: "));
+                spans.push(Span::styled("\u{25cf}", Style::default().fg(ui::GREEN)));
+                spans.push(Span::styled(" Connected", Style::default().fg(state_fg)));
+            }
+            RelayState::Connecting => {
+                let elapsed = self.connecting_since
+                    .map(|t| t.elapsed().as_secs())
+                    .unwrap_or(0);
+                spans.push(Span::raw("relay: "));
+                if elapsed < 1 {
+                    // < 1 s: quiet hollow-dot indicator, no spinner yet.
+                    let text = " Connecting\u{2026}";
+                    width += 7 + 1 + text.chars().count() as u16;
+                    spans.push(Span::styled("\u{25cb}", Style::default().fg(ui::YELLOW)));
+                    spans.push(Span::styled(text, Style::default().fg(ui::SUBTEXT0)));
+                } else if elapsed <= 10 {
+                    // 1-10 s: animated spinner + label.
+                    let text = format!(" {frame} Connecting\u{2026}");
+                    width += 7 + text.chars().count() as u16;
+                    spans.push(Span::styled(text, Style::default().fg(ui::SUBTEXT0)));
+                } else {
+                    // > 10 s: spinner + elapsed seconds, colour bumped to yellow.
+                    let text = format!(" {frame} Connecting\u{2026} ({elapsed}s)");
+                    width += 7 + text.chars().count() as u16;
+                    spans.push(Span::styled(text, Style::default().fg(ui::YELLOW)));
+                }
+            }
+            RelayState::Disconnected => {
+                // "relay: " = 7, "✗" = 1, " Offline" = 8
+                width += 7 + 1 + 8;
+                spans.push(Span::raw("relay: "));
+                spans.push(Span::styled("\u{2717}", Style::default().fg(ui::RED)));
+                spans.push(Span::styled(" Offline", Style::default().fg(ui::SUBTEXT0)));
+            }
+            RelayState::Error(_msg) => {
+                // Remedy hint: tell the user exactly how to recover.
+                let remedy = "Relay disconnected. Press [R] to reconnect.";
+                width += remedy.chars().count() as u16;
+                spans.push(Span::styled(remedy, Style::default().fg(ui::RED)));
+            }
+        }
+
+        // 1-col right padding so text doesn't hug the terminal edge.
         spans.push(Span::raw(" "));
         width += 1;
 
