@@ -189,9 +189,18 @@ extension KernelHandle {
         return dispatchNip29("nmp.nip29.set_parent", payload: payload, label: "setParent")
     }
 
-    /// Dispatch a `nmp.nip29.post_chat_message` action — publish a kind:9
-    /// message to `group`. Rust owns the event shape, tags, signing, and
-    /// relay pinning; Swift only marshals the draft text.
+    /// Dispatch the `nmp.nip29.post_chat_message` chat-send doorway — the
+    /// stable app-level entrypoint (shared with the TUI) that takes raw text
+    /// (carrying `@<pubkey>` placeholders) plus the `@mentioned` pubkeys. As of
+    /// nmp-nip29 v0.8.0 the `nmp-app-29er` FFI runs the shared Rust composer
+    /// (`compose_chat_message`: NIP-21 `@<hex>` → `nostr:npub1…` rewrite +
+    /// deduplicated `["p", …]` tags) server-side, wraps the result as a kind:9
+    /// `PublishGroupEventInput`, and re-emits it under the real
+    /// `nmp.nip29.publish_group_event` action. Swift hand-formats nothing: it
+    /// only marshals the draft text + mention pubkeys. Keep the namespace as
+    /// the chat-send doorway key — dispatching `publish_group_event` directly
+    /// would bypass composition (that action expects `{group, kind, content,
+    /// tags}`, not raw text) and silently drop mentions.
     func postChatMessage(group: GroupId, content: String, mentionPubkeys: [String] = []) -> Bool {
         var payload: [String: Any] = [
             "group": group.jsonObject,

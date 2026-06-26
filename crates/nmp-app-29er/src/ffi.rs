@@ -3,29 +3,22 @@
 //! to the S01 surface: register, open/close group discovery, register group
 //! chat, dispatch action bytes, declare consumed projections, unregister.
 
-use std::collections::BTreeMap;
 use std::ffi::c_char;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use nmp_core::dispatch_envelope::{encode_dispatch_envelope, DISPATCH_ENVELOPE_SCHEMA_VERSION};
-use nmp_core::substrate::{ActionPayload, ViewDependencies};
+use nmp_core::substrate::ActionPayload;
 use nmp_core::{KernelEventObserver, KernelEventObserverId, TypedProjectionData};
 use nmp_ffi::{nmp_app_dispatch_action_bytes, NmpApp};
 use nmp_nip29::group_id::GroupId;
-use nmp_nip29::interest::host_pinned_interest;
-use nmp_nip29::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
+use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
 use nmp_nip29::projection::DiscoveredGroupsProjection;
-use nmp_nip29::register::{wire_group_chat, wire_group_members};
-use nmp_planner::stable_hash::stable_hash64;
-use nmp_planner::{InterestId, InterestLifecycle, InterestScope};
 
 use crate::group_tree::{
     encode_group_tree_snapshot, GroupTreeProjection, GROUP_TREE_FILE_IDENTIFIER,
     GROUP_TREE_SCHEMA_ID, GROUP_TREE_SCHEMA_VERSION,
 };
-
-const GROUP_CHAT_HISTORY_LIMIT: u32 = 200;
 
 /// Opaque handle returned by [`nmp_app_29er_register`] and consumed by
 /// [`nmp_app_29er_unregister`]. Boxed on the heap; the pointer is opaque to C.
@@ -36,7 +29,6 @@ pub struct TwentyNinerHandle {
 pub struct TwentyNinerGroupDiscoveryHandle {
     observer_ids: Vec<KernelEventObserverId>,
     tree_projection: Arc<GroupTreeProjection>,
-    members_projection: Arc<nmp_nip29::projection::GroupMembersProjection>,
     teardown_fn: Box<dyn FnOnce(Vec<KernelEventObserverId>) + Send>,
 }
 
@@ -110,7 +102,10 @@ pub extern "C" fn nmp_app_29er_register(
     //
     // SAFETY: same exclusive-borrow rationale as `register_defaults` — no
     // other reference aliases `app` at this point.
-    let _ = nmp_nip29::register::register_actions(unsafe { &mut *app });
+    // Take the immutable V-83 event-store publish-back handle BEFORE the
+    // exclusive `&mut *app` borrow so the two borrows do not overlap.
+    let store_slot = unsafe { &*app }.event_store_handle();
+    let _ = nmp_nip29::register::register_actions(unsafe { &mut *app }, store_slot);
 
     // Wire the NIP-29 group-create defaults projection so the suggested
     // public-group relay URL surfaces under `"nmp.nip29.group_defaults"`.
@@ -215,104 +210,16 @@ pub extern "C" fn nmp_app_29er_register_group_chat(app: *mut NmpApp, group_id_js
         return;
     };
 
-    wire_group_chat(app_ref, group_id.clone());
-    app_ref.push_interest(group_chat_history_interest(&group_id));
-    app_ref.push_interest(group_chat_live_interest(&group_id));
-}
-
-fn group_chat_history_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
-    let id = stable_hash64((
-        "29er.nip29.group_chat.history",
-        group_id.host_relay_url.as_str(),
-        group_id.local_id.as_str(),
-    ));
-    let mut interest = host_pinned_interest(
-        id,
-        group_id,
-        [KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
-        BTreeMap::new(),
-        InterestLifecycle::OneShot,
-    );
-    interest.shape.limit = Some(GROUP_CHAT_HISTORY_LIMIT);
-    interest
-}
-
-fn group_chat_live_interest(group_id: &GroupId) -> nmp_planner::LogicalInterest {
-    let id = stable_hash64((
-        "29er.nip29.group_chat.live",
-        group_id.host_relay_url.as_str(),
-        group_id.local_id.as_str(),
-    ));
-    host_pinned_interest(
-        id,
-        group_id,
-        [KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
-        BTreeMap::new(),
-        InterestLifecycle::Tailing,
-    )
-}
-
-fn group_tree_chat_summary_interest(host_relay_url: &str) -> nmp_planner::LogicalInterest {
-    let id = stable_hash64(("29er.nip29.group_tree.chat_summary", host_relay_url));
-    ViewDependencies {
-        kinds: vec![KIND_CHAT_MESSAGE],
-        relay_pin: Some(host_relay_url.to_string()),
-        ..Default::default()
-    }
-    .into_logical_interest(
-        InterestId(id),
-        InterestScope::Global,
-        InterestLifecycle::Tailing,
-    )
+    // v0.8.0: the per-open chat read view is the all-in-one `open_group_chat`.
+    // It registers the NGCS typed sidecar, the (muted) `GroupChatProjection`,
+    // replays the read cache, and opens the relay-pinned tailing interest —
+    // superseding the old `wire_group_chat` + two `push_interest` calls.
+    app_ref.open_group_chat(group_id);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn group_chat_history_interest_is_dedicated_room_fetch() {
-        let group = GroupId::new("wss://groups.example.com", "rust-nostr");
-        let interest = group_chat_history_interest(&group);
-
-        assert_eq!(
-            interest.shape.relay_pin.as_deref(),
-            Some("wss://groups.example.com")
-        );
-        assert!(interest.shape.kinds.contains(&KIND_CHAT_MESSAGE));
-        assert!(interest.shape.kinds.contains(&KIND_DISCUSSION_OR_ARTIFACT));
-        assert!(interest.shape.tags.get("h").unwrap().contains("rust-nostr"));
-        assert_eq!(interest.shape.limit, Some(GROUP_CHAT_HISTORY_LIMIT));
-        assert_eq!(interest.lifecycle, InterestLifecycle::OneShot);
-    }
-
-    #[test]
-    fn group_chat_live_interest_tails_room_without_history_limit() {
-        let group = GroupId::new("wss://groups.example.com", "rust-nostr");
-        let interest = group_chat_live_interest(&group);
-
-        assert_eq!(
-            interest.shape.relay_pin.as_deref(),
-            Some("wss://groups.example.com")
-        );
-        assert!(interest.shape.kinds.contains(&KIND_CHAT_MESSAGE));
-        assert!(interest.shape.kinds.contains(&KIND_DISCUSSION_OR_ARTIFACT));
-        assert!(interest.shape.tags.get("h").unwrap().contains("rust-nostr"));
-        assert_eq!(interest.shape.limit, None);
-        assert_eq!(interest.lifecycle, InterestLifecycle::Tailing);
-    }
-
-    #[test]
-    fn group_chat_interest_ids_are_deterministic_per_group_and_lifecycle() {
-        let a1 = group_chat_history_interest(&GroupId::new("wss://groups.example.com", "room-a"));
-        let a2 = group_chat_history_interest(&GroupId::new("wss://groups.example.com", "room-a"));
-        let b = group_chat_history_interest(&GroupId::new("wss://groups.example.com", "room-b"));
-        let live = group_chat_live_interest(&GroupId::new("wss://groups.example.com", "room-a"));
-
-        assert_eq!(a1.id, a2.id);
-        assert_ne!(a1.id, b.id);
-        assert_ne!(a1.id, live.id);
-    }
 
     #[test]
     fn m002_membership_and_admin_namespaces_encode_typed_payloads() {
@@ -372,6 +279,34 @@ mod tests {
     }
 
     #[test]
+    fn chat_send_doorway_composes_kind9_publish_group_event() {
+        const HEX: &str = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d";
+        let npub = nmp_core::nip19::encode_npub(HEX).expect("valid hex");
+        let bytes = encode_chat_send_payload(&format!(
+            r#"{{"group":{{"host_relay_url":"wss://groups.example.com","local_id":"room"}},"content":"hi @{HEX}","mention_pubkeys":["{HEX}"]}}"#
+        ))
+        .expect("chat-send composes");
+        let input = <nmp_nip29::action::PublishGroupEventInput as ActionPayload>::decode(&bytes)
+            .expect("decodes");
+        assert_eq!(input.group.local_id, "room");
+        assert_eq!(input.kind, KIND_CHAT_MESSAGE);
+        assert_eq!(input.content, format!("hi nostr:{npub}"));
+        assert_eq!(input.tags, vec![vec!["p".to_string(), HEX.to_string()]]);
+        // The envelope tags (`h` / `previous`) must NOT be present — nmp-nip29
+        // injects them and rejects caller-supplied copies.
+        assert!(input.tags.iter().all(|t| t.first().map(String::as_str) != Some("h")));
+        assert!(input
+            .tags
+            .iter()
+            .all(|t| t.first().map(String::as_str) != Some("previous")));
+    }
+
+    #[test]
+    fn chat_send_doorway_fails_closed_on_malformed_body() {
+        assert!(encode_chat_send_payload(r#"{"content":"no group"}"#).is_none());
+    }
+
+    #[test]
     fn action_encoder_fails_closed_for_unknown_or_malformed_payloads() {
         assert!(encode_payload_for_namespace("nmp.nip29.remove_everyone", "{}").is_none());
         assert!(encode_payload_for_namespace("nmp.nip29.leave", r#"{"group":42}"#).is_none());
@@ -425,24 +360,17 @@ fn open_group_discovery_with_tree(
 ) -> Option<TwentyNinerGroupDiscoveryHandle> {
     let projection = Arc::new(DiscoveredGroupsProjection::new(relay_url.clone()));
     let observer_id =
-        app.register_event_observer(Arc::clone(&projection) as Arc<dyn KernelEventObserver>);
+        app.register_live_event_tap(Arc::clone(&projection) as Arc<dyn KernelEventObserver>);
     if observer_id.0 == 0 {
         return None;
     }
     let tree_messages = Arc::new(GroupTreeProjection::new());
     let tree_observer_id =
-        app.register_event_observer(Arc::clone(&tree_messages) as Arc<dyn KernelEventObserver>);
+        app.register_live_event_tap(Arc::clone(&tree_messages) as Arc<dyn KernelEventObserver>);
     if tree_observer_id.0 == 0 {
         app.unregister_event_observer(observer_id);
         return None;
     }
-    let Some((members_projection, members_observer_id)) =
-        wire_group_members(app, relay_url.clone())
-    else {
-        app.unregister_event_observer(observer_id);
-        app.unregister_event_observer(tree_observer_id);
-        return None;
-    };
 
     let discovered_projection = Arc::clone(&projection);
     app.register_typed_snapshot_projection("nmp.nip29.discovered_groups", move || {
@@ -478,13 +406,17 @@ fn open_group_discovery_with_tree(
         })
     });
 
-    app.push_interest(group_tree_chat_summary_interest(&relay_url));
+    // v0.8.0: `push_interest`/`LogicalInterest` is gone from the FFI; express
+    // the relay's kind:9 chat-summary tail as a NIP-01 filter through the
+    // refcounted `open_interest` door (scope 1 = Global).
+    let chat_summary_filter = format!(r#"{{"kinds":[{KIND_CHAT_MESSAGE}]}}"#);
+    let chat_summary_consumer = format!("29er.nip29.group_tree.chat_summary:{relay_url}");
+    app.open_interest(chat_summary_filter, chat_summary_consumer, 1);
 
     let app_addr = (app as *const NmpApp) as usize;
     Some(TwentyNinerGroupDiscoveryHandle {
-        observer_ids: vec![observer_id, tree_observer_id, members_observer_id],
+        observer_ids: vec![observer_id, tree_observer_id],
         tree_projection: tree_messages,
-        members_projection,
         teardown_fn: Box::new(move |ids| {
             let app = unsafe { &*(app_addr as *const NmpApp) };
             for id in ids {
@@ -492,7 +424,6 @@ fn open_group_discovery_with_tree(
             }
             app.remove_snapshot_projection("nmp.nip29.discovered_groups");
             app.remove_snapshot_projection("nmp.29er.group_tree");
-            app.remove_snapshot_projection("nmp.nip29.group_members");
         }),
     })
 }
@@ -544,8 +475,13 @@ pub extern "C" fn nmp_app_29er_mark_group_read(
     handle.tree_projection.mark_read(&group_id);
 }
 
-/// Select the group whose 39002 members should be emitted in the
-/// `"nmp.nip29.group_members"` typed projection.
+/// Select a group's member roster.
+///
+/// v0.8.0: the per-member `GroupMembersProjection` was removed from `nmp-nip29`
+/// (membership now derives from `JoinedGroupsProjection` and the per-relay
+/// `DiscoveredGroup.member_count`/`admin_count`). The dedicated roster door no
+/// longer exists, so this entry point is retained for C-ABI stability as a
+/// validated no-op until 29er builds its own roster observer.
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn nmp_app_29er_select_group_members(
@@ -555,11 +491,9 @@ pub extern "C" fn nmp_app_29er_select_group_members(
     if handle.is_null() {
         return;
     }
-    let Some(group_id) = c_string_opt(group_id).filter(|s| !s.is_empty()) else {
+    let Some(_group_id) = c_string_opt(group_id).filter(|s| !s.is_empty()) else {
         return;
     };
-    let handle = unsafe { &*handle };
-    handle.members_projection.select_group(group_id);
 }
 
 /// Process-local correlation-id source for 29er's byte-doorway dispatches.
@@ -620,18 +554,41 @@ pub extern "C" fn nmp_app_29er_dispatch_action_bytes(
             .into_raw();
     };
 
-    let Some(payload) = encode_payload_for_namespace(&ns, &body) else {
-        return CString::new(format!(
-            r#"{{"error":"no typed payload encoder for action namespace '{ns}'"}}"#
-        ))
-        .unwrap_or_else(|_| c"{}".to_owned())
-        .into_raw();
+    // The 29er chat-send doorway is the one place that composes. The shell
+    // hands raw text + `@mention` pubkeys under `CHAT_SEND_NAMESPACE`; we run
+    // the shared `compose_chat_message` (NIP-21 rewrite + `p` tags), wrap the
+    // result as a kind:9 `PublishGroupEventInput`, and emit it under the real
+    // `nmp.nip29.publish_group_event` action namespace. NIP-29 injects the
+    // `h`/`previous` envelope itself — we must not (it rejects caller-supplied
+    // envelope tags). Every other namespace re-encodes its body verbatim.
+    let (dispatch_ns, payload): (&str, Vec<u8>) = if ns == CHAT_SEND_NAMESPACE {
+        match encode_chat_send_payload(&body) {
+            Some(p) => (PUBLISH_GROUP_EVENT_NAMESPACE, p),
+            None => {
+                return CString::new(
+                    r#"{"error":"could not compose chat message from body"}"#,
+                )
+                .unwrap_or_else(|_| c"{}".to_owned())
+                .into_raw();
+            }
+        }
+    } else {
+        match encode_payload_for_namespace(&ns, &body) {
+            Some(p) => (ns.as_str(), p),
+            None => {
+                return CString::new(format!(
+                    r#"{{"error":"no typed payload encoder for action namespace '{ns}'"}}"#
+                ))
+                .unwrap_or_else(|_| c"{}".to_owned())
+                .into_raw();
+            }
+        }
     };
 
     let correlation_id = mint_correlation_id();
     let envelope = encode_dispatch_envelope(
         &correlation_id,
-        &ns,
+        dispatch_ns,
         DISPATCH_ENVELOPE_SCHEMA_VERSION,
         &payload,
     );
@@ -650,6 +607,46 @@ pub extern "C" fn nmp_app_29er_dispatch_action_bytes(
     // parse it here — the host's dispatch helper does (mirroring Chirp's
     // `GroupDiscoveryBridge.dispatchNip29Discovery`).
     ptr
+}
+
+/// 29er's app-level chat-send doorway. NOT a NIP-29 action namespace — it is a
+/// 29er convenience surface that takes raw user input (`{group, content,
+/// mention_pubkeys}`) and is composed + re-emitted under
+/// [`PUBLISH_GROUP_EVENT_NAMESPACE`] by [`encode_chat_send_payload`]. Kept as a
+/// stable doorway key so both the TUI and the iOS shell route chat sends here.
+const CHAT_SEND_NAMESPACE: &str = "nmp.nip29.post_chat_message";
+
+/// The real NIP-29 generic-publish action namespace the composed chat send is
+/// dispatched under.
+const PUBLISH_GROUP_EVENT_NAMESPACE: &str = "nmp.nip29.publish_group_event";
+
+/// Raw chat-send body the shell hands to [`CHAT_SEND_NAMESPACE`]: the target
+/// group, the user's verbatim text (carrying `@<pubkey>` placeholders), and the
+/// pubkeys they `@mentioned`. The app composes; the shell holds no NIP-21 / tag
+/// knowledge.
+#[derive(serde::Deserialize)]
+struct ChatSendBody {
+    group: GroupId,
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    mention_pubkeys: Vec<String>,
+}
+
+/// Compose a raw chat-send body into the typed [`ActionPayload`] bytes for a
+/// kind:9 `PublishGroupEventInput`. NIP-21 mention rewriting + `["p", …]` tags
+/// are produced by the shared [`crate::compose::compose_chat_message`] (the one
+/// place that composition lives). Returns `None` on a malformed body (D6).
+fn encode_chat_send_payload(json: &str) -> Option<Vec<u8>> {
+    let body: ChatSendBody = serde_json::from_str(json).ok()?;
+    let composed = crate::compose::compose_chat_message(&body.content, &body.mention_pubkeys);
+    let input = nmp_nip29::action::PublishGroupEventInput {
+        group: body.group,
+        kind: KIND_CHAT_MESSAGE,
+        content: composed.content,
+        tags: composed.tags,
+    };
+    Some(input.encode())
 }
 
 /// Encode `json` into the typed [`ActionPayload`] FlatBuffers bytes for
@@ -683,8 +680,8 @@ fn encode_payload_for_namespace(namespace: &str, json: &str) -> Option<Vec<u8>> 
             encode::<nmp_nip29::action::CreateInviteInput>(namespace, json)
         }
         "nmp.nip29.set_parent" => encode::<nmp_nip29::action::SetParentInput>(namespace, json),
-        "nmp.nip29.post_chat_message" => {
-            encode::<nmp_nip29::action::PostChatMessageInput>(namespace, json)
+        "nmp.nip29.publish_group_event" => {
+            encode::<nmp_nip29::action::PublishGroupEventInput>(namespace, json)
         }
         "nmp.nip29.react_in_group" => {
             encode::<nmp_nip29::action::ReactInGroupInput>(namespace, json)

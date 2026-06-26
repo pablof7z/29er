@@ -30,8 +30,11 @@
 //!   poisoning, or serialization failure; init-only config symbols return
 //!   explicit status codes for ordering errors.
 
+pub mod compose;
 pub mod ffi;
 pub mod group_tree;
+
+pub use compose::{compose_chat_message, ComposedGroupMessage};
 
 pub use ffi::{
     nmp_app_29er_close_group_discovery, nmp_app_29er_declare_consumed_projections,

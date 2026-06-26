@@ -5,9 +5,8 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph};
 use ratatui::Frame;
-use nmp_nip29::projection::GroupMemberRow;
 use crate::actions::Action;
-use crate::app::{FormKind, TuiSnapshot};
+use crate::app::{FormKind, GroupMemberRow, TuiSnapshot};
 use crate::ui;
 use crate::Component;
 

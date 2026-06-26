@@ -835,7 +835,12 @@ struct GroupTimelineView: View {
 
     private func acceptMention(_ member: GroupMember) {
         selectedMentionPubkeys.insert(member.pubkey)
-        let mention = "@\(member.title)"
+        // Insert an `@<pubkey>` *placeholder* (the raw hex identifier, NOT a
+        // display name). The shared `compose_chat_message` helper in
+        // `nmp-app-29er` owns the NIP-21 rewrite (`@<hex>` → `nostr:npub1…`) and
+        // the `["p", …]` tag at send time. This matches the TUI composer
+        // contract; the iOS shell holds zero nostr/NIP-21 knowledge.
+        let mention = "@\(member.pubkey)"
         var parts = draft.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
         if parts.isEmpty {
             draft = mention + " "
@@ -850,7 +855,7 @@ struct GroupTimelineView: View {
         let selectedMembers = currentMembers
             .filter { member in
                 selectedMentionPubkeys.contains(member.pubkey) &&
-                    (text.contains("@\(member.title)") || text.contains("@\(member.pubkey.shortHex)"))
+                    (text.contains("@\(member.pubkey)") || text.contains("@\(member.pubkey.shortHex)"))
             }
             .map(\.pubkey)
         return Array(Set(selectedMembers + rawMentionIdentifiers(in: text))).sorted()

@@ -14,12 +14,28 @@ use nmp_core::{KernelEventObserver, KernelEventObserverId};
 use nmp_ffi::{nmp_free_string, NmpApp};
 use nmp_nip29::projection::{
     DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, GroupChatMessage,
-    GroupChatProjection, GroupMemberRow, GroupMembersProjection,
+    GroupChatProjection, JoinedGroupsProjection,
 };
 use nmp_nip29::GroupId;
 use tokio::sync::mpsc::UnboundedSender;
 
 type ActiveAccountSlot = Arc<Mutex<Option<String>>>;
+
+/// A single member row rendered by the composer `@mention` popup and the
+/// members panel.
+///
+/// v0.8.0 removed `nmp_nip29::projection::GroupMembersProjection` /
+/// `GroupMemberRow` (NIP-29 no longer surfaces a per-member roster; membership
+/// now derives from [`JoinedGroupsProjection`] and `DiscoveredGroup` counts).
+/// 29er keeps this view-model shape locally so the roster UI compiles and is
+/// ready to be repopulated once a custom roster observer lands.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GroupMemberRow {
+    pub pubkey: String,
+    pub display_name: Option<String>,
+    pub admin: bool,
+    pub role: Option<String>,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Screen { Login, App }
@@ -186,7 +202,10 @@ struct ChatEntry {
 pub struct SharedProjections {
     pub group_tree: Arc<GroupTreeProjection>,
     pub discovered: Arc<DiscoveredGroupsProjection>,
-    pub members: Arc<GroupMembersProjection>,
+    /// Active-account joined/admin state (v0.8.0 replacement for the removed
+    /// `GroupMembersProjection`). Wired lazily once the active pubkey resolves
+    /// (the projection captures the pubkey at construction).
+    pub joined: Mutex<Option<Arc<JoinedGroupsProjection>>>,
     pub active_account: Mutex<ActiveAccountSlot>,
     pub selected_chat: Mutex<Option<Arc<GroupChatProjection>>>,
     pub selected_group: Mutex<Option<GroupId>>,
@@ -202,8 +221,19 @@ impl SharedProjections {
         let channel_tree = derive_channel_tree(&discovered, &tree_state, me.as_deref());
         let selected_messages = self.selected_chat.lock().ok()
             .and_then(|c| c.as_ref().map(|c| c.snapshot().messages)).unwrap_or_default();
-        let members = self.members.snapshot().members;
-        let is_admin = me.as_ref().map(|pk| members.iter().any(|m| &m.pubkey == pk && m.admin)).unwrap_or(false);
+        // The per-member roster API was removed in v0.8.0; no source yet.
+        let members: Vec<GroupMemberRow> = Vec::new();
+        // Derive admin status for the selected group from the joined-groups
+        // projection (relay-signed 39002), the canonical v0.8.0 source.
+        let selected_local = self.selected_group.lock().ok().and_then(|g| g.as_ref().map(|g| g.local_id.clone()));
+        let is_admin = match (selected_local, self.joined.lock().ok().and_then(|j| j.clone())) {
+            (Some(local), Some(joined)) => joined
+                .snapshot()
+                .groups
+                .iter()
+                .any(|g| g.group_id == local && g.is_admin),
+            _ => false,
+        };
         let identity_state = match &me {
             Some(pk) => IdentityState::LoggedIn { npub: nmp_core::display::to_npub(pk) },
             None => IdentityState::LoggingIn,
@@ -268,7 +298,7 @@ impl App {
         let shared = Arc::new(SharedProjections {
             group_tree: Arc::new(GroupTreeProjection::new()),
             discovered: Arc::new(DiscoveredGroupsProjection::new(relay_url.clone())),
-            members: Arc::new(GroupMembersProjection::new(relay_url.clone())),
+            joined: Mutex::new(None),
             active_account: Mutex::new(Arc::new(Mutex::new(None))),
             selected_chat: Mutex::new(None),
             selected_group: Mutex::new(None),
@@ -325,9 +355,29 @@ impl App {
             if status != 0 { nmp_ffi::nmp_app_free(app); anyhow::bail!("register failed ({status})"); }
             nmp_app_29er_declare_consumed_projections(app);
             let app_ref = &*app;
-            let _ = app_ref.register_event_observer(Arc::clone(&self.shared.group_tree) as Arc<dyn KernelEventObserver>);
-            let _ = app_ref.register_event_observer(Arc::clone(&self.shared.discovered) as Arc<dyn KernelEventObserver>);
-            let _ = app_ref.register_event_observer(Arc::clone(&self.shared.members) as Arc<dyn KernelEventObserver>);
+            // v0.8.0: `register_event_observer` is now `register_live_event_tap`.
+            let _ = app_ref.register_live_event_tap(Arc::clone(&self.shared.group_tree) as Arc<dyn KernelEventObserver>);
+            let _ = app_ref.register_live_event_tap(Arc::clone(&self.shared.discovered) as Arc<dyn KernelEventObserver>);
+            // The `JoinedGroupsProjection` captures the active pubkey at
+            // construction, which is not known until sign-in resolves. Wire it
+            // from an identity-change observer (registered BEFORE sign-in so we
+            // never miss the first frame). Best-effort (D6): a poisoned slot or
+            // an already-wired projection makes this a no-op.
+            let joined_app_addr = app as usize;
+            let joined_shared = Arc::clone(&self.shared);
+            let joined_relay = relay.clone();
+            app_ref.register_identity_change_observer(move |pubkey| {
+                let Some(pk) = pubkey.filter(|p| !p.is_empty()) else { return; };
+                let Ok(mut slot) = joined_shared.joined.lock() else { return; };
+                if slot.is_some() { return; }
+                let proj = Arc::new(JoinedGroupsProjection::new_for_host(pk, joined_relay.clone()));
+                // SAFETY: the App owns `app` for the whole session and frees it
+                // only in `Drop` after the listener thread is gone. (The deref
+                // is covered by the enclosing `unsafe` block in `init_nmp`.)
+                let app = &*(joined_app_addr as *const NmpApp);
+                let _ = app.register_live_event_tap(Arc::clone(&proj) as Arc<dyn KernelEventObserver>);
+                *slot = Some(proj);
+            });
             let c_relay = CString::new(relay.clone())?;
             let c_role = CString::new("read")?;
             nmp_ffi::nmp_app_add_relay(app, c_relay.as_ptr(), c_role.as_ptr());
@@ -471,7 +521,7 @@ impl App {
             let chat = Arc::new(GroupChatProjection::new(group.clone()));
             let observer_id = if !self.app_ptr.is_null() {
                 let obs_id = unsafe {
-                    (&*self.app_ptr).register_event_observer(Arc::clone(&chat) as Arc<dyn KernelEventObserver>)
+                    (&*self.app_ptr).register_live_event_tap(Arc::clone(&chat) as Arc<dyn KernelEventObserver>)
                 };
                 if let Ok(json) = serde_json::to_string(&group) {
                     if let Ok(c) = CString::new(json) { nmp_app_29er_register_group_chat(self.app_ptr, c.as_ptr()); }
@@ -488,7 +538,6 @@ impl App {
             if let Ok(mut slot) = self.shared.selected_chat.lock() { *slot = Some(chat); }
         }
         if let Ok(mut g) = self.shared.selected_group.lock() { *g = Some(group.clone()); }
-        self.shared.members.select_group(group.local_id.clone());
         self.shared.group_tree.mark_read(&group.local_id);
         self.selected_channel = Some(group);
         self.message_scroll = 0;
@@ -607,7 +656,7 @@ impl App {
         self.dispatch_json("nmp.nip29.set_parent", &body);
         self.close_form();
     }
-    pub fn show_members(&mut self, group: GroupId) { self.shared.members.select_group(group.local_id); }
+    pub fn show_members(&mut self, group: GroupId) { let _ = group; }
 
     fn dispatch_json(&mut self, namespace: &str, body: &str) -> Option<String> {
         if self.app_ptr.is_null() { return None; }
@@ -852,7 +901,7 @@ mod tests {
     use super::*;
     use nmp_core::substrate::KernelEvent;
     use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
-    use nmp_nip29::projection::{GroupChatMessage, GroupMemberRow};
+    use nmp_nip29::projection::GroupChatMessage;
 
     fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
         DiscoveredGroup {
@@ -1112,6 +1161,7 @@ mod tests {
             content: "hello world".to_string(),
             status: OutboxStatus::Pending,
             error: None,
+            mention_pubkeys: Vec::new(),
             event_id: None,
             dispatched_at: Instant::now(),
         });
