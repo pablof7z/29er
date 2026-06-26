@@ -19,8 +19,6 @@ use nmp_defaults::{NmpAppBuilder, RunConfig};
 use nmp_ffi::{
     nmp_app_free, nmp_app_set_update_callback, nmp_app_signin_nsec, nmp_app_stop, NmpApp,
 };
-use nmp_nip29::interest::relay_discovery_interest;
-use nmp_nip29::register::open_group_discovery;
 use nmp_nip29::wire::discovered_groups_fb::decode_discovered_groups_snapshot;
 
 const DEFAULT_RELAY: &str = "wss://nip29.f7z.io";
@@ -86,9 +84,8 @@ fn main() {
     wait_for_active_account(app_ref, &ticks);
 
     println!("shakeout: opening group discovery projection on {relay}");
-    let _discovery_handle = open_group_discovery(app_ref, relay.clone());
-    println!("shakeout: pushing tailing discovery interest (39000/39001/39002)");
-    app_ref.push_interest(relay_discovery_interest(&relay));
+    println!("shakeout: (open_group_discovery registers the typed projection AND opens the tailing interest internally)");
+    let _discovery_handle = app_ref.open_group_discovery(relay.clone());
 
     println!("shakeout: waiting {WAIT_SECS}s for relay to stream metadata...");
     let deadline = Instant::now() + Duration::from_secs(WAIT_SECS);
