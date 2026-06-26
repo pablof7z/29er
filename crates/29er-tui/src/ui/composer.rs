@@ -21,18 +21,21 @@ pub struct Composer {
     mention_open: bool,
     mention_sel: usize,
     mention_state: ListState,
+    /// Pubkeys of all @mentions the user has committed (selected from the popup)
+    /// in the current message. Cleared when the composer is reset after send.
+    mentions: Vec<String>,
 }
 impl Default for Composer { fn default() -> Self { Self::new() } }
 impl Composer {
     pub fn new() -> Self {
-        Self { textarea: Self::fresh(), members: Vec::new(), outbox: Vec::new(), focused: false, mention_open: false, mention_sel: 0, mention_state: ListState::default() }
+        Self { textarea: Self::fresh(), members: Vec::new(), outbox: Vec::new(), focused: false, mention_open: false, mention_sel: 0, mention_state: ListState::default(), mentions: Vec::new() }
     }
     fn fresh() -> TextArea<'static> {
         let mut ta = TextArea::default();
         ta.set_placeholder_text("Type a message \u{2014} Enter to send, Shift+Enter for newline");
         ta
     }
-    fn reset(&mut self) { self.textarea = Self::fresh(); self.mention_open = false; self.mention_sel = 0; }
+    fn reset(&mut self) { self.textarea = Self::fresh(); self.mention_open = false; self.mention_sel = 0; self.mentions.clear(); }
     pub fn update(&mut self, s: &TuiSnapshot) {
         self.members = s.selected_members.clone();
         self.outbox = s.publish_outbox.clone();
@@ -61,6 +64,10 @@ impl Composer {
         for _ in 0..word.chars().count() { self.textarea.delete_char(); }
         let handle = format!("@{} ", Self::label(m));
         for ch in handle.chars() { self.textarea.insert_char(ch); }
+        // Record the pubkey so we can pass it as a NIP-29 `p` tag on send.
+        if !self.mentions.contains(&m.pubkey) {
+            self.mentions.push(m.pubkey.clone());
+        }
         self.mention_open = false; self.mention_sel = 0;
     }
     fn refresh_mention(&mut self) {
@@ -148,7 +155,11 @@ impl Component for Composer {
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => { self.textarea.insert_newline(); self.refresh_mention(); None }
             KeyCode::Enter => {
                 let text = self.textarea.lines().join("\n").trim().to_string();
-                if text.is_empty() { None } else { self.reset(); Some(Action::SendMessage(text)) }
+                if text.is_empty() { None } else {
+                    let mentions = self.mentions.clone();
+                    self.reset();
+                    Some(Action::SendMessage { content: text, mentions })
+                }
             }
             KeyCode::Char(c) => { self.textarea.insert_char(c); self.refresh_mention(); None }
             KeyCode::Backspace => { self.textarea.delete_char(); self.refresh_mention(); None }
@@ -170,7 +181,7 @@ mod tests {
     fn enter_emits_send_with_trimmed_text() {
         let mut c = Composer::new();
         c.handle_event(&ch('h')); c.handle_event(&ch('i'));
-        assert!(matches!(c.handle_event(&enter()), Some(Action::SendMessage(t)) if t == "hi"));
+        assert!(matches!(c.handle_event(&enter()), Some(Action::SendMessage { content: t, .. }) if t == "hi"));
     }
     #[test]
     fn empty_enter_does_not_send() {
@@ -188,7 +199,7 @@ mod tests {
     #[test]
     fn ctrl_r_retries_latest_failed() {
         let mut c = Composer::new();
-        c.outbox = vec![PublishOutboxItem { correlation_id: "29er-1".into(), group_local_id: "g".into(), content: "x".into(), status: OutboxStatus::Failed, error: None }];
+        c.outbox = vec![PublishOutboxItem { correlation_id: "29er-1".into(), group_local_id: "g".into(), content: "x".into(), status: OutboxStatus::Failed, error: None, mention_pubkeys: Vec::new() }];
         let ev = Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
         assert!(matches!(c.handle_event(&ev), Some(Action::RetryOutbox(id)) if id == "29er-1"));
     }

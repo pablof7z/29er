@@ -108,6 +108,9 @@ pub struct PublishOutboxItem {
     pub content: String,
     pub status: OutboxStatus,
     pub error: Option<String>,
+    /// Pubkeys of @mentioned users (hex-encoded). Stored so retry can re-send
+    /// the same `p` tags without re-parsing the message text.
+    pub mention_pubkeys: Vec<String>,
 }
 
 /// The immutable per-frame view-model. Contains ZERO Ratatui types (issue #3).
@@ -418,14 +421,18 @@ impl App {
         self.refresh_projection();
     }
 
-    pub fn send_message(&mut self, body: String) {
+    pub fn send_message(&mut self, body: String, mention_pubkeys: Vec<String>) {
         let trimmed = body.trim().to_string();
         if trimmed.is_empty() { return; }
         let Some(group) = self.selected_channel.clone() else { self.errors.push("No channel selected".to_string()); return; };
         // Assign an optimistic local id immediately so the item is identifiable
         // before NMP echoes back a correlation_id.
         let optimistic_id = generate_local_id();
-        let json = serde_json::json!({ "group": group, "content": trimmed }).to_string();
+        let json = serde_json::json!({
+            "group": group,
+            "content": trimmed,
+            "mention_pubkeys": mention_pubkeys,
+        }).to_string();
         let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
         let mut item = PublishOutboxItem {
             correlation_id: optimistic_id,
@@ -433,6 +440,7 @@ impl App {
             content: trimmed,
             status: OutboxStatus::Pending,
             error: None,
+            mention_pubkeys: mention_pubkeys.clone(),
         };
         Self::apply_dispatch_result(&mut item, result);
         self.outbox.push(item);
@@ -443,9 +451,16 @@ impl App {
 
     pub fn retry_outbox(&mut self, correlation_id: String) {
         let Some(idx) = self.outbox.iter().position(|i| i.correlation_id == correlation_id) else { return; };
-        let (content, local_id) = { let it = &self.outbox[idx]; (it.content.clone(), it.group_local_id.clone()) };
+        let (content, local_id, mention_pubkeys) = {
+            let it = &self.outbox[idx];
+            (it.content.clone(), it.group_local_id.clone(), it.mention_pubkeys.clone())
+        };
         let Some(group) = self.selected_channel.clone().filter(|g| g.local_id == local_id) else { return; };
-        let json = serde_json::json!({ "group": group, "content": content }).to_string();
+        let json = serde_json::json!({
+            "group": group,
+            "content": content,
+            "mention_pubkeys": mention_pubkeys,
+        }).to_string();
         let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
         let item = &mut self.outbox[idx];
         item.status = OutboxStatus::Pending; item.error = None;
@@ -664,15 +679,15 @@ fn name_for(d: &DiscoveredGroupsSnapshot, id: &str) -> String {
         .filter(|n| !n.is_empty()).unwrap_or_else(|| id.to_string())
 }
 
-fn make_item(g: &DiscoveredGroup, depth: usize, tree: &GroupTreeMessageState, is_branch: bool, my_pubkey: Option<&str>) -> ChannelListItem {
+fn make_item(g: &DiscoveredGroup, depth: usize, tree: &GroupTreeMessageState, is_branch: bool, _my_pubkey: Option<&str>) -> ChannelListItem {
     let last = tree.last_message_for(&g.group_id);
     let unread = tree.unread_for(&g.group_id);
     let tier = if unread > 0 {
-        // Mention detection: check whether the latest message preview contains @<pubkey>.
-        let is_mention = my_pubkey.map(|pk| {
-            last.map(|m| m.preview.contains(&format!("@{pk}"))).unwrap_or(false)
-        }).unwrap_or(false);
-        if is_mention { ChannelTier::Mention } else { ChannelTier::Unread }
+        // NMP does not yet surface per-message `p` tags in GroupTreeProjection,
+        // so we cannot reliably detect @mentions here (the preview contains the
+        // display-name token, not the pubkey). Use Unread for all unread channels;
+        // Mention tier will be promoted when NMP exposes a dedicated field.
+        ChannelTier::Unread
     } else {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -859,6 +874,7 @@ mod tests {
                 content: "hi".to_string(),
                 status: OutboxStatus::Pending,
                 error: None,
+                mention_pubkeys: Vec::new(),
             }],
             identity_state: IdentityState::LoggedIn { npub: "npub1test".to_string() },
             relay_state: RelayState::Connected,
@@ -969,6 +985,7 @@ mod tests {
             content: "hello world".to_string(),
             status: OutboxStatus::Pending,
             error: None,
+            mention_pubkeys: Vec::new(),
         });
 
         // A message with matching content; no my_pubkey means the pubkey guard
@@ -1002,6 +1019,7 @@ mod tests {
             content: "oops".to_string(),
             status: OutboxStatus::Failed,
             error: Some("dispatch failed".to_string()),
+            mention_pubkeys: Vec::new(),
         });
 
         let msg = GroupChatMessage {

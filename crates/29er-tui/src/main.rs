@@ -240,7 +240,7 @@ fn apply(action: Action, app: &mut App) {
         Action::ScrollUp => app.scroll_messages(1),
         Action::ScrollDown => app.scroll_messages(-1),
         // chat / outbox
-        Action::SendMessage(b) => app.send_message(b),
+        Action::SendMessage { content, mentions } => app.send_message(content, mentions),
         Action::RetryOutbox(id) => app.retry_outbox(id),
         // palette
         Action::OpenPalette => app.set_palette(true),
