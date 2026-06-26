@@ -10,7 +10,7 @@ use nmp_app_29er::{
     nmp_app_29er_register, nmp_app_29er_register_group_chat, nmp_app_29er_unregister,
     TwentyNinerHandle,
 };
-use nmp_core::KernelEventObserver;
+use nmp_core::{KernelEventObserver, KernelEventObserverId};
 use nmp_ffi::{nmp_free_string, NmpApp};
 use nmp_nip29::projection::{
     DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, GroupChatMessage,
@@ -163,9 +163,24 @@ pub struct ProjectionView {
     pub is_admin: bool,
     pub my_pubkey: Option<String>,
     pub identity_state: IdentityState,
-    pub relay_connected: bool,
+    /// Last time any snapshot data was observed; used for heartbeat relay-state inference.
+    pub last_data_at: Option<Instant>,
 }
 impl Default for IdentityState { fn default() -> Self { IdentityState::LoggedOut } }
+
+/// Maximum number of live `GroupChatProjection` observers kept in `App::chats`.
+/// The least-recently-used entry is evicted (and its NMP observer unregistered)
+/// when this limit is exceeded.
+const CHAT_LRU_LIMIT: usize = 50;
+
+/// A `GroupChatProjection` pinned to an open NMP observer, with an LRU timestamp.
+struct ChatEntry {
+    projection: Arc<GroupChatProjection>,
+    /// The observer handle returned by `register_event_observer`; `None` when
+    /// the projection was created before NMP was initialised (app_ptr was null).
+    observer_id: Option<KernelEventObserverId>,
+    last_accessed: Instant,
+}
 
 /// Send+Sync read-side state shared between App (main thread) and the poller.
 pub struct SharedProjections {
@@ -197,8 +212,8 @@ impl SharedProjections {
         if has_data {
             if let Ok(mut ts) = self.last_update_at.lock() { *ts = Some(std::time::Instant::now()); }
         }
-        let relay_connected = self.last_update_at.lock().ok().and_then(|ts| *ts).is_some();
-        ProjectionView { channel_tree, selected_messages, selected_members: members, is_admin, my_pubkey: me, identity_state, relay_connected }
+        let last_data_at = self.last_update_at.lock().ok().and_then(|ts| *ts);
+        ProjectionView { channel_tree, selected_messages, selected_members: members, is_admin, my_pubkey: me, identity_state, last_data_at }
     }
 }
 
@@ -219,7 +234,7 @@ pub struct App {
     relay_url: String,
     shared: Arc<SharedProjections>,
     poll_tx: UnboundedSender<ProjectionView>,
-    chats: HashMap<String, Arc<GroupChatProjection>>,
+    chats: HashMap<String, ChatEntry>,
     latest: ProjectionView,
     screen: Screen,
     focus: Focus,
@@ -331,10 +346,15 @@ impl App {
 
     /// Store the latest poller view; clamp selection; reconcile the outbox.
     pub fn ingest_projection(&mut self, view: ProjectionView) {
-        let was_connected = self.latest.relay_connected;
+        let was_connected = self.latest.last_data_at
+            .map(|t| t.elapsed() < Duration::from_secs(30))
+            .unwrap_or(false);
         self.latest = view;
-        // Record the first moment relay_connected flips to true (drives the 2s flash).
-        if !was_connected && self.latest.relay_connected && self.connected_at.is_none() {
+        // Record the first moment we see fresh relay data (drives the 2s Connected flash).
+        let is_connected_now = self.latest.last_data_at
+            .map(|t| t.elapsed() < Duration::from_secs(30))
+            .unwrap_or(false);
+        if !was_connected && is_connected_now && self.connected_at.is_none() {
             self.connected_at = Some(std::time::Instant::now());
         }
         if self.latest.channel_tree.is_empty() { self.selected_index = 0; }
@@ -395,12 +415,15 @@ impl App {
             identity_state: self.latest.identity_state.clone(),
             relay_state: if let Some(ref err) = self.relay_error {
                 RelayState::Error(err.clone())
-            } else if !self.app_ptr.is_null() && self.latest.relay_connected {
-                RelayState::Connected
-            } else if !self.app_ptr.is_null() {
-                RelayState::Connecting
-            } else {
+            } else if self.app_ptr.is_null() {
                 RelayState::Disconnected
+            } else {
+                // Heartbeat: Connected if last data arrived within 30 s; otherwise
+                // Connecting (covers initial, unstable-30-120 s, and reconnecting->120 s).
+                match self.latest.last_data_at {
+                    Some(t) if t.elapsed() < Duration::from_secs(30) => RelayState::Connected,
+                    _ => RelayState::Connecting,
+                }
             },
             errors: self.errors.clone(),
             selected_index: self.selected_index,
@@ -430,17 +453,39 @@ impl App {
         }
         let key = group.local_id.clone();
         if !self.chats.contains_key(&key) {
+            // LRU eviction: drop the least-recently-used entry when at capacity.
+            if self.chats.len() >= CHAT_LRU_LIMIT {
+                let lru_key = self.chats.iter()
+                    .min_by_key(|(_, e)| e.last_accessed)
+                    .map(|(k, _)| k.clone());
+                if let Some(lru) = lru_key {
+                    if let Some(evicted) = self.chats.remove(&lru) {
+                        if let Some(obs_id) = evicted.observer_id {
+                            if !self.app_ptr.is_null() {
+                                unsafe { (&*self.app_ptr).unregister_event_observer(obs_id); }
+                            }
+                        }
+                    }
+                }
+            }
             let chat = Arc::new(GroupChatProjection::new(group.clone()));
-            if !self.app_ptr.is_null() {
-                unsafe { let _ = (&*self.app_ptr).register_event_observer(Arc::clone(&chat) as Arc<dyn KernelEventObserver>); }
+            let observer_id = if !self.app_ptr.is_null() {
+                let obs_id = unsafe {
+                    (&*self.app_ptr).register_event_observer(Arc::clone(&chat) as Arc<dyn KernelEventObserver>)
+                };
                 if let Ok(json) = serde_json::to_string(&group) {
                     if let Ok(c) = CString::new(json) { nmp_app_29er_register_group_chat(self.app_ptr, c.as_ptr()); }
                 }
-            }
-            self.chats.insert(key.clone(), chat);
+                Some(obs_id)
+            } else {
+                None
+            };
+            self.chats.insert(key.clone(), ChatEntry { projection: chat, observer_id, last_accessed: Instant::now() });
         }
-        if let Some(chat) = self.chats.get(&key) {
-            if let Ok(mut slot) = self.shared.selected_chat.lock() { *slot = Some(Arc::clone(chat)); }
+        if let Some(entry) = self.chats.get_mut(&key) {
+            entry.last_accessed = Instant::now();
+            let chat = Arc::clone(&entry.projection);
+            if let Ok(mut slot) = self.shared.selected_chat.lock() { *slot = Some(chat); }
         }
         if let Ok(mut g) = self.shared.selected_group.lock() { *g = Some(group.clone()); }
         self.shared.members.select_group(group.local_id.clone());
