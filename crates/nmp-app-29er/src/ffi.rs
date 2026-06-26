@@ -361,6 +361,34 @@ mod tests {
     }
 
     #[test]
+    fn chat_send_doorway_composes_kind9_publish_group_event() {
+        const HEX: &str = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d";
+        let npub = nmp_core::nip19::encode_npub(HEX).expect("valid hex");
+        let bytes = encode_chat_send_payload(&format!(
+            r#"{{"group":{{"host_relay_url":"wss://groups.example.com","local_id":"room"}},"content":"hi @{HEX}","mention_pubkeys":["{HEX}"]}}"#
+        ))
+        .expect("chat-send composes");
+        let input = <nmp_nip29::action::PublishGroupEventInput as ActionPayload>::decode(&bytes)
+            .expect("decodes");
+        assert_eq!(input.group.local_id, "room");
+        assert_eq!(input.kind, KIND_CHAT_MESSAGE);
+        assert_eq!(input.content, format!("hi nostr:{npub}"));
+        assert_eq!(input.tags, vec![vec!["p".to_string(), HEX.to_string()]]);
+        // The envelope tags (`h` / `previous`) must NOT be present — nmp-nip29
+        // injects them and rejects caller-supplied copies.
+        assert!(input.tags.iter().all(|t| t.first().map(String::as_str) != Some("h")));
+        assert!(input
+            .tags
+            .iter()
+            .all(|t| t.first().map(String::as_str) != Some("previous")));
+    }
+
+    #[test]
+    fn chat_send_doorway_fails_closed_on_malformed_body() {
+        assert!(encode_chat_send_payload(r#"{"content":"no group"}"#).is_none());
+    }
+
+    #[test]
     fn action_encoder_fails_closed_for_unknown_or_malformed_payloads() {
         assert!(encode_payload_for_namespace("nmp.nip29.remove_everyone", "{}").is_none());
         assert!(encode_payload_for_namespace("nmp.nip29.leave", r#"{"group":42}"#).is_none());
@@ -608,18 +636,41 @@ pub extern "C" fn nmp_app_29er_dispatch_action_bytes(
             .into_raw();
     };
 
-    let Some(payload) = encode_payload_for_namespace(&ns, &body) else {
-        return CString::new(format!(
-            r#"{{"error":"no typed payload encoder for action namespace '{ns}'"}}"#
-        ))
-        .unwrap_or_else(|_| c"{}".to_owned())
-        .into_raw();
+    // The 29er chat-send doorway is the one place that composes. The shell
+    // hands raw text + `@mention` pubkeys under `CHAT_SEND_NAMESPACE`; we run
+    // the shared `compose_chat_message` (NIP-21 rewrite + `p` tags), wrap the
+    // result as a kind:9 `PublishGroupEventInput`, and emit it under the real
+    // `nmp.nip29.publish_group_event` action namespace. NIP-29 injects the
+    // `h`/`previous` envelope itself — we must not (it rejects caller-supplied
+    // envelope tags). Every other namespace re-encodes its body verbatim.
+    let (dispatch_ns, payload): (&str, Vec<u8>) = if ns == CHAT_SEND_NAMESPACE {
+        match encode_chat_send_payload(&body) {
+            Some(p) => (PUBLISH_GROUP_EVENT_NAMESPACE, p),
+            None => {
+                return CString::new(
+                    r#"{"error":"could not compose chat message from body"}"#,
+                )
+                .unwrap_or_else(|_| c"{}".to_owned())
+                .into_raw();
+            }
+        }
+    } else {
+        match encode_payload_for_namespace(&ns, &body) {
+            Some(p) => (ns.as_str(), p),
+            None => {
+                return CString::new(format!(
+                    r#"{{"error":"no typed payload encoder for action namespace '{ns}'"}}"#
+                ))
+                .unwrap_or_else(|_| c"{}".to_owned())
+                .into_raw();
+            }
+        }
     };
 
     let correlation_id = mint_correlation_id();
     let envelope = encode_dispatch_envelope(
         &correlation_id,
-        &ns,
+        dispatch_ns,
         DISPATCH_ENVELOPE_SCHEMA_VERSION,
         &payload,
     );
@@ -638,6 +689,46 @@ pub extern "C" fn nmp_app_29er_dispatch_action_bytes(
     // parse it here — the host's dispatch helper does (mirroring Chirp's
     // `GroupDiscoveryBridge.dispatchNip29Discovery`).
     ptr
+}
+
+/// 29er's app-level chat-send doorway. NOT a NIP-29 action namespace — it is a
+/// 29er convenience surface that takes raw user input (`{group, content,
+/// mention_pubkeys}`) and is composed + re-emitted under
+/// [`PUBLISH_GROUP_EVENT_NAMESPACE`] by [`encode_chat_send_payload`]. Kept as a
+/// stable doorway key so both the TUI and the iOS shell route chat sends here.
+const CHAT_SEND_NAMESPACE: &str = "nmp.nip29.post_chat_message";
+
+/// The real NIP-29 generic-publish action namespace the composed chat send is
+/// dispatched under.
+const PUBLISH_GROUP_EVENT_NAMESPACE: &str = "nmp.nip29.publish_group_event";
+
+/// Raw chat-send body the shell hands to [`CHAT_SEND_NAMESPACE`]: the target
+/// group, the user's verbatim text (carrying `@<pubkey>` placeholders), and the
+/// pubkeys they `@mentioned`. The app composes; the shell holds no NIP-21 / tag
+/// knowledge.
+#[derive(serde::Deserialize)]
+struct ChatSendBody {
+    group: GroupId,
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    mention_pubkeys: Vec<String>,
+}
+
+/// Compose a raw chat-send body into the typed [`ActionPayload`] bytes for a
+/// kind:9 `PublishGroupEventInput`. NIP-21 mention rewriting + `["p", …]` tags
+/// are produced by the shared [`crate::compose::compose_chat_message`] (the one
+/// place that composition lives). Returns `None` on a malformed body (D6).
+fn encode_chat_send_payload(json: &str) -> Option<Vec<u8>> {
+    let body: ChatSendBody = serde_json::from_str(json).ok()?;
+    let composed = crate::compose::compose_chat_message(&body.content, &body.mention_pubkeys);
+    let input = nmp_nip29::action::PublishGroupEventInput {
+        group: body.group,
+        kind: KIND_CHAT_MESSAGE,
+        content: composed.content,
+        tags: composed.tags,
+    };
+    Some(input.encode())
 }
 
 /// Encode `json` into the typed [`ActionPayload`] FlatBuffers bytes for

@@ -7,9 +7,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 use ratatui_textarea::{CursorMove, DataCursor, TextArea};
-use nmp_nip29::projection::GroupMemberRow;
 use crate::actions::Action;
-use crate::app::{Focus, OutboxStatus, PublishOutboxItem, TuiSnapshot};
+use crate::app::{Focus, GroupMemberRow, OutboxStatus, PublishOutboxItem, TuiSnapshot};
 use crate::ui;
 use crate::Component;
 
@@ -59,12 +58,17 @@ impl Composer {
     }
     fn label(m: &GroupMemberRow) -> String { m.display_name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| ui::short_pubkey(&m.pubkey)) }
     fn accept_mention(&mut self, m: &GroupMemberRow) {
-        // delete the @partial token then insert the resolved handle
+        // Delete the `@partial` token, then insert an `@<pubkey>` *placeholder*
+        // (the raw identifier, NOT a display name). The shared
+        // `compose_chat_message` helper in `nmp-app-29er` owns the NIP-21
+        // rewrite (`@<hex>` → `nostr:npub1…`) at send time; the TUI holds zero
+        // nostr/NIP-21 knowledge.
         let word = self.current_word();
         for _ in 0..word.chars().count() { self.textarea.delete_char(); }
-        let handle = format!("@{} ", Self::label(m));
-        for ch in handle.chars() { self.textarea.insert_char(ch); }
-        // Record the pubkey so we can pass it as a NIP-29 `p` tag on send.
+        let placeholder = format!("@{} ", m.pubkey);
+        for ch in placeholder.chars() { self.textarea.insert_char(ch); }
+        // Record the pubkey so we can pass it as a mention on send (the helper
+        // turns it into a NIP-29 `["p", …]` tag).
         if !self.mentions.contains(&m.pubkey) {
             self.mentions.push(m.pubkey.clone());
         }
@@ -199,7 +203,7 @@ mod tests {
     #[test]
     fn ctrl_r_retries_latest_failed() {
         let mut c = Composer::new();
-        c.outbox = vec![PublishOutboxItem { correlation_id: "29er-1".into(), group_local_id: "g".into(), content: "x".into(), status: OutboxStatus::Failed, error: None, mention_pubkeys: Vec::new() }];
+        c.outbox = vec![PublishOutboxItem { correlation_id: "29er-1".into(), group_local_id: "g".into(), content: "x".into(), status: OutboxStatus::Failed, error: None, mention_pubkeys: Vec::new(), event_id: None, dispatched_at: std::time::Instant::now() }];
         let ev = Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
         assert!(matches!(c.handle_event(&ev), Some(Action::RetryOutbox(id)) if id == "29er-1"));
     }
