@@ -63,7 +63,7 @@ async fn run() -> Result<()> {
         ui.help.update(&state);
         terminal.draw(|f| draw(f, &state, &mut ui))?;
         tokio::select! {
-            _ = ticker.tick() => {}
+            _ = ticker.tick() => { app.tick(); }
             Some(view) = poll_rx.recv() => app.ingest_projection(view),
             maybe = reader.next() => match maybe {
                 Some(Ok(event)) => handle_event(&event, &mut app, &mut ui),
@@ -166,6 +166,11 @@ fn handle_event(event: &Event, app: &mut App, ui: &mut Ui) {
                     app.set_focus(Focus::Composer);
                     return;
                 }
+                // 'r' triggers relay reconnect from any base panel.
+                KeyCode::Char('r') if app.focus() != Focus::Composer => {
+                    apply(Action::Reconnect, app);
+                    return;
+                }
                 // Tab / Shift+Tab cycle through base panels.
                 KeyCode::Tab => { app.cycle_focus(); return; }
                 KeyCode::BackTab => { app.reverse_cycle_focus(); return; }
@@ -243,6 +248,8 @@ fn apply(action: Action, app: &mut App) {
         // forms — open_form handles palette collapse + focus stack internally.
         Action::OpenForm(f) => app.open_form(f),
         Action::CloseForm => app.close_form(),
+        // connectivity
+        Action::Reconnect => app.reconnect(),
         Action::Noop => {}
     }
 }

@@ -56,8 +56,8 @@ impl Focus {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IdentityState { LoggedOut, LoggingIn, LoggedIn { npub: String } }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RelayState { Disconnected, Connecting, Connected }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RelayState { Disconnected, Connecting, Connected, Error(String) }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutboxStatus { Pending, Confirmed, Failed }
@@ -115,6 +115,12 @@ pub struct TuiSnapshot {
     pub login_error: Option<String>,
     pub screen: Screen,
     pub help_open: bool,
+    /// Monotonically incrementing tick counter; drives the spinner frame selector.
+    pub spinner_tick: u64,
+    /// When the NMP relay connection attempt started (set at login / reconnect).
+    pub connecting_since: Option<std::time::Instant>,
+    /// When we first observed `relay_connected = true` (used for the 2-second flash).
+    pub connected_at: Option<std::time::Instant>,
 }
 
 /// Projection-derived fields produced on the poller thread and sent over mpsc.
@@ -197,6 +203,10 @@ pub struct App {
     login_error: Option<String>,
     help_open: bool,
     should_quit: bool,
+    spinner_tick: u64,
+    connecting_since: Option<std::time::Instant>,
+    connected_at: Option<std::time::Instant>,
+    relay_error: Option<String>,
 }
 
 impl App {
@@ -218,6 +228,7 @@ impl App {
             selected_index: 0, selected_channel: None, outbox: Vec::new(), errors: Vec::new(),
             palette_open: false, active_form: None, message_scroll: 0,
             login_error: None, help_open: false, should_quit: false,
+            spinner_tick: 0, connecting_since: None, connected_at: None, relay_error: None,
         }
     }
 
@@ -229,7 +240,12 @@ impl App {
             return;
         }
         match self.init_nmp(&nsec) {
-            Ok(()) => { self.screen = Screen::App; self.focus = Focus::RoomList; self.focus_stack.clear(); self.login_error = None; }
+            Ok(()) => {
+                self.screen = Screen::App; self.focus = Focus::RoomList;
+                self.focus_stack.clear(); self.login_error = None;
+                self.connecting_since = Some(std::time::Instant::now());
+                self.connected_at = None; self.relay_error = None;
+            }
             Err(e) => { self.login_error = Some(format!("Sign-in failed: {e}")); }
         }
         // `nsec` is dropped here.
@@ -271,7 +287,12 @@ impl App {
 
     /// Store the latest poller view; clamp selection; reconcile the outbox.
     pub fn ingest_projection(&mut self, view: ProjectionView) {
+        let was_connected = self.latest.relay_connected;
         self.latest = view;
+        // Record the first moment relay_connected flips to true (drives the 2s flash).
+        if !was_connected && self.latest.relay_connected && self.connected_at.is_none() {
+            self.connected_at = Some(std::time::Instant::now());
+        }
         if self.latest.channel_tree.is_empty() { self.selected_index = 0; }
         else if self.selected_index >= self.latest.channel_tree.len() {
             self.selected_index = self.latest.channel_tree.len() - 1;
@@ -302,8 +323,15 @@ impl App {
             my_pubkey: self.latest.my_pubkey.clone(),
             publish_outbox: self.outbox.clone(),
             identity_state: self.latest.identity_state.clone(),
-            relay_state: if !self.app_ptr.is_null() && self.latest.relay_connected { RelayState::Connected }
-                else if !self.app_ptr.is_null() { RelayState::Connecting } else { RelayState::Disconnected },
+            relay_state: if let Some(ref err) = self.relay_error {
+                RelayState::Error(err.clone())
+            } else if !self.app_ptr.is_null() && self.latest.relay_connected {
+                RelayState::Connected
+            } else if !self.app_ptr.is_null() {
+                RelayState::Connecting
+            } else {
+                RelayState::Disconnected
+            },
             errors: self.errors.clone(),
             selected_index: self.selected_index,
             focus: self.focus,
@@ -313,6 +341,9 @@ impl App {
             login_error: self.login_error.clone(),
             screen: self.screen,
             help_open: self.help_open,
+            spinner_tick: self.spinner_tick,
+            connecting_since: self.connecting_since,
+            connected_at: self.connected_at,
         }
     }
 
@@ -489,6 +520,21 @@ impl App {
     pub fn is_help_open(&self) -> bool { self.help_open }
     pub fn quit(&mut self) { self.should_quit = true; }
     pub fn should_quit(&self) -> bool { self.should_quit }
+
+    /// Advance the spinner counter by one. Called on every UI tick (~8 Hz).
+    pub fn tick(&mut self) { self.spinner_tick = self.spinner_tick.wrapping_add(1); }
+
+    /// Clear any relay error and re-dispatch discover to attempt reconnection.
+    pub fn reconnect(&mut self) {
+        self.relay_error = None;
+        self.connecting_since = Some(std::time::Instant::now());
+        self.connected_at = None;
+        if !self.app_ptr.is_null() {
+            let relay = self.relay_url.clone();
+            let discover_body = serde_json::json!({ "relay_url": relay }).to_string();
+            self.dispatch_json("nmp.nip29.discover", &discover_body);
+        }
+    }
 }
 
 impl Drop for App {
@@ -696,9 +742,13 @@ mod tests {
             login_error: None,
             screen: Screen::App,
             help_open: false,
+            spinner_tick: 42,
+            connecting_since: None,
+            connected_at: None,
         };
 
         assert_eq!(snap.selected_index, 3);
+        assert_eq!(snap.spinner_tick, 42);
         assert!(snap.is_admin);
         assert_eq!(snap.focus, Focus::Composer);
         assert_eq!(snap.message_scroll, 7);

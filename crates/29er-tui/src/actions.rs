@@ -39,5 +39,7 @@ pub enum Action {
     // forms
     OpenForm(FormKind),
     CloseForm,
+    // connectivity
+    Reconnect,
     Noop,
 }
