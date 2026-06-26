@@ -6,7 +6,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
-use tui_textarea::{CursorMove, TextArea};
+use ratatui_textarea::{CursorMove, DataCursor, TextArea};
 use nmp_nip29::projection::GroupMemberRow;
 use crate::actions::Action;
 use crate::app::{Focus, OutboxStatus, PublishOutboxItem, TuiSnapshot};
@@ -39,7 +39,7 @@ impl Composer {
         self.focused = s.focus == Focus::Composer;
     }
     fn current_word(&self) -> String {
-        let (row, col) = self.textarea.cursor();
+        let DataCursor(row, col) = self.textarea.cursor();
         let line = self.textarea.lines().get(row).cloned().unwrap_or_default();
         let upto: String = line.chars().take(col).collect();
         upto.rsplit(|c: char| c.is_whitespace()).next().unwrap_or("").to_string()
