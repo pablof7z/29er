@@ -9,6 +9,7 @@ pub mod login;
 pub mod membership;
 pub mod palette;
 pub mod room_list;
+pub mod smoke;
 pub mod status_bar;
 
 // Catppuccin Mocha (issue #4 spec).
