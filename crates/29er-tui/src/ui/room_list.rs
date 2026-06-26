@@ -27,7 +27,7 @@ impl RoomListComponent {
         self.items = s.channel_tree.clone();
         self.selected = s.selected_index;
         self.selected_channel = s.selected_channel_id.clone();
-        self.focused = s.focus == Focus::ChannelList;
+        self.focused = s.focus == Focus::RoomList;
         self.state.select(if self.items.is_empty() { None } else { Some(self.selected) });
     }
     fn row(&self, it: &ChannelListItem) -> ListItem<'static> {
@@ -88,6 +88,8 @@ impl Component for RoomListComponent {
         match key.code {
             KeyCode::Down | KeyCode::Char('j') | KeyCode::PageDown => Some(Action::NavigateDown),
             KeyCode::Up | KeyCode::Char('k') | KeyCode::PageUp => Some(Action::NavigateUp),
+            KeyCode::Char('g') => Some(Action::NavigateTop),
+            KeyCode::Char('G') => Some(Action::NavigateBottom),
             KeyCode::Enter => self.items.get(self.selected).map(|it| Action::SelectChannel(it.group_id.clone())),
             _ => None,
         }

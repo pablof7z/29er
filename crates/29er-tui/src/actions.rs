@@ -11,8 +11,11 @@ pub enum Action {
     // navigation
     NavigateUp,
     NavigateDown,
+    NavigateTop,     // 'g' — jump to first channel
+    NavigateBottom,  // 'G' — jump to last channel
     SelectChannel(GroupId),
     CycleFocus,
+    ReverseCycleFocus,
     SetFocus(Focus),
     ScrollUp,
     ScrollDown,
@@ -22,6 +25,9 @@ pub enum Action {
     // palette
     OpenPalette,
     ClosePalette,
+    // help overlay
+    OpenHelp,
+    CloseHelp,
     // membership / admin (typed dispatch happens in App)
     Join { group: GroupId, invite_code: Option<String> },
     Leave { group: GroupId },

@@ -17,13 +17,22 @@ impl StatusBar {
     pub fn update(&mut self, s: &TuiSnapshot) {
         self.connected = matches!(s.relay_state, RelayState::Connected);
         self.identity = match &s.identity_state { IdentityState::LoggedIn { npub } => ui::short_pubkey(npub), IdentityState::LoggingIn => "signing in\u{2026}".to_string(), IdentityState::LoggedOut => "offline".to_string() };
-        self.focus_label = match s.focus { Focus::ChannelList => "channels", Focus::Chat => "chat", Focus::Composer => "compose" };
-        self.hint = if s.active_form.is_some() { "Enter submit  Tab next field  Esc cancel" }
+        self.focus_label = match s.focus {
+            Focus::RoomList => "channels",
+            Focus::Chat => "chat",
+            Focus::Composer => "compose",
+            Focus::Palette => "palette",
+            Focus::Modal => "dialog",
+        };
+        self.hint = if s.help_open { "? or Esc closes help" }
+            else if s.active_form.is_some() { "Enter submit  Tab next field  Esc cancel" }
             else if s.palette_open { "type to filter  Enter run  Esc close" }
             else { match s.focus {
-                Focus::ChannelList => "j/k move  Enter open  / palette  n compose  q quit",
-                Focus::Chat => "PgUp/PgDn scroll  Tab next  n compose  Esc back",
-                Focus::Composer => "Enter send  Shift+Enter newline  @ mention  Ctrl-R retry  Esc back",
+                Focus::RoomList => "j/k/g/G move  Enter open  / palette  n compose  ? help  q quit",
+                Focus::Chat => "j/k scroll  Tab next  n compose  ? help  Esc back",
+                Focus::Composer => "Enter send  Shift+Enter newline  Esc back",
+                Focus::Palette => "type to filter  Enter run  Esc close",
+                Focus::Modal => "Enter submit  Tab next field  Esc cancel",
             } };
     }
 }

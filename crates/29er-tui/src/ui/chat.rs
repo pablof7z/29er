@@ -95,7 +95,12 @@ impl Component for ChatComponent {
     fn handle_event(&mut self, event: &Event) -> Option<Action> {
         let Event::Key(key) = event else { return None };
         if key.kind != KeyEventKind::Press { return None; }
-        match key.code { KeyCode::PageUp => Some(Action::ScrollUp), KeyCode::PageDown => Some(Action::ScrollDown), _ => None }
+        // j/k mirror PageDown/PageUp for vim-style scrolling in the chat pane.
+        match key.code {
+            KeyCode::PageUp | KeyCode::Char('k') => Some(Action::ScrollUp),
+            KeyCode::PageDown | KeyCode::Char('j') => Some(Action::ScrollDown),
+            _ => None,
+        }
     }
 }
 
@@ -140,6 +145,7 @@ mod tests {
             relay_state: if connected { RelayState::Connected } else { RelayState::Connecting },
             errors: vec![], selected_index: 0, focus: Focus::Chat, message_scroll: 0,
             palette_open: false, active_form: None, login_error: None, screen: Screen::App,
+            help_open: false,
         }
     }
 }

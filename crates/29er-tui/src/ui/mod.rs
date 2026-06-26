@@ -5,6 +5,7 @@ use ratatui::style::Color;
 
 pub mod chat;
 pub mod composer;
+pub mod help;
 pub mod login;
 pub mod membership;
 pub mod palette;
