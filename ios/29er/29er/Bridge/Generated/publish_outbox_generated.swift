@@ -34,6 +34,7 @@ public struct nmp_kernel_PublishOutboxRelay: FlatBufferTable, FlatbuffersVectorI
   public var status: String? { let o = _accessor.offset(VTOFFSET.status.v); return o == 0 ? nil : _accessor.string(at: o) }
   public var statusSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.status.v) }
   public var attempt: UInt32 { let o = _accessor.offset(VTOFFSET.attempt.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt32.self, at: o) }
+  @discardableResult public func mutate(attempt: UInt32) -> Bool {let o = _accessor.offset(VTOFFSET.attempt.v);  return _accessor.mutate(attempt, index: o) }
   public var message: String? { let o = _accessor.offset(VTOFFSET.message.v); return o == 0 ? nil : _accessor.string(at: o) }
   public var messageSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.message.v) }
   public var relayReason: String? { let o = _accessor.offset(VTOFFSET.relayReason.v); return o == 0 ? nil : _accessor.string(at: o) }
@@ -73,43 +74,6 @@ public struct nmp_kernel_PublishOutboxRelay: FlatBufferTable, FlatbuffersVectorI
   }
 }
 
-public struct nmp_kernel_PublishOutboxTag: FlatBufferTable, FlatbuffersVectorInitializable, Verifiable {
-
-  static func validateVersion() { FlatBuffersVersion_25_12_19() }
-  public var __buffer: ByteBuffer! { return _accessor.bb }
-  private var _accessor: Table
-
-  public static var id: String { "KPBO" } 
-  public static func finish(_ fbb: inout FlatBufferBuilder, end: Offset, prefix: Bool = false) { fbb.finish(offset: end, fileId: nmp_kernel_PublishOutboxTag.id, addPrefix: prefix) }
-  private init(_ t: Table) { _accessor = t }
-  public init(_ bb: ByteBuffer, o: Int32) { _accessor = Table(bb: bb, position: o) }
-
-  private enum VTOFFSET: VOffset {
-    case values = 4
-    var v: Int32 { Int32(self.rawValue) }
-    var p: VOffset { self.rawValue }
-  }
-
-  public var values: FlatbufferVector<String?> { return _accessor.vector(at: VTOFFSET.values.v, byteSize: 4) }
-  public static func startPublishOutboxTag(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 1) }
-  public static func addVectorOf(values: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: values, at: VTOFFSET.values.p) }
-  public static func endPublishOutboxTag(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
-  public static func createPublishOutboxTag(
-    _ fbb: inout FlatBufferBuilder,
-    valuesVectorOffset values: Offset = Offset()
-  ) -> Offset {
-    let __start = nmp_kernel_PublishOutboxTag.startPublishOutboxTag(&fbb)
-    nmp_kernel_PublishOutboxTag.addVectorOf(values: values, &fbb)
-    return nmp_kernel_PublishOutboxTag.endPublishOutboxTag(&fbb, start: __start)
-  }
-
-  public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
-    var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.values.p, fieldName: "values", required: false, type: ForwardOffset<Vector<ForwardOffset<String>, String>>.self)
-    _v.finish()
-  }
-}
-
 public struct nmp_kernel_PublishOutboxItem: FlatBufferTable, FlatbuffersVectorInitializable, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_12_19() }
@@ -131,7 +95,6 @@ public struct nmp_kernel_PublishOutboxItem: FlatBufferTable, FlatbuffersVectorIn
     case relays = 16
     case createdAt = 18
     case content = 20
-    case tags = 22
     var v: Int32 { Int32(self.rawValue) }
     var p: VOffset { self.rawValue }
   }
@@ -141,16 +104,19 @@ public struct nmp_kernel_PublishOutboxItem: FlatBufferTable, FlatbuffersVectorIn
   public var eventId: String? { let o = _accessor.offset(VTOFFSET.eventId.v); return o == 0 ? nil : _accessor.string(at: o) }
   public var eventIdSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.eventId.v) }
   public var kind: UInt32 { let o = _accessor.offset(VTOFFSET.kind.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt32.self, at: o) }
+  @discardableResult public func mutate(kind: UInt32) -> Bool {let o = _accessor.offset(VTOFFSET.kind.v);  return _accessor.mutate(kind, index: o) }
   public var status: String? { let o = _accessor.offset(VTOFFSET.status.v); return o == 0 ? nil : _accessor.string(at: o) }
   public var statusSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.status.v) }
   public var canRetry: Bool { let o = _accessor.offset(VTOFFSET.canRetry.v); return o == 0 ? false : _accessor.readBuffer(of: Bool.self, at: o) }
+  @discardableResult public func mutate(canRetry: Bool) -> Bool {let o = _accessor.offset(VTOFFSET.canRetry.v);  return _accessor.mutate(canRetry, index: o) }
   public var targetRelays: UInt32 { let o = _accessor.offset(VTOFFSET.targetRelays.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt32.self, at: o) }
+  @discardableResult public func mutate(targetRelays: UInt32) -> Bool {let o = _accessor.offset(VTOFFSET.targetRelays.v);  return _accessor.mutate(targetRelays, index: o) }
   public var relays: FlatbufferVector<nmp_kernel_PublishOutboxRelay> { return _accessor.vector(at: VTOFFSET.relays.v, byteSize: 4) }
   public var createdAt: UInt64 { let o = _accessor.offset(VTOFFSET.createdAt.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
+  @discardableResult public func mutate(createdAt: UInt64) -> Bool {let o = _accessor.offset(VTOFFSET.createdAt.v);  return _accessor.mutate(createdAt, index: o) }
   public var content: String? { let o = _accessor.offset(VTOFFSET.content.v); return o == 0 ? nil : _accessor.string(at: o) }
   public var contentSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.content.v) }
-  public var tags: FlatbufferVector<nmp_kernel_PublishOutboxTag> { return _accessor.vector(at: VTOFFSET.tags.v, byteSize: 4) }
-  public static func startPublishOutboxItem(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 10) }
+  public static func startPublishOutboxItem(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 9) }
   public static func add(handle: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: handle, at: VTOFFSET.handle.p) }
   public static func add(eventId: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: eventId, at: VTOFFSET.eventId.p) }
   public static func add(kind: UInt32, _ fbb: inout FlatBufferBuilder) { fbb.add(element: kind, def: 0, at: VTOFFSET.kind.p) }
@@ -161,7 +127,6 @@ public struct nmp_kernel_PublishOutboxItem: FlatBufferTable, FlatbuffersVectorIn
   public static func addVectorOf(relays: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: relays, at: VTOFFSET.relays.p) }
   public static func add(createdAt: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: createdAt, def: 0, at: VTOFFSET.createdAt.p) }
   public static func add(content: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: content, at: VTOFFSET.content.p) }
-  public static func addVectorOf(tags: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: tags, at: VTOFFSET.tags.p) }
   public static func endPublishOutboxItem(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createPublishOutboxItem(
     _ fbb: inout FlatBufferBuilder,
@@ -173,8 +138,7 @@ public struct nmp_kernel_PublishOutboxItem: FlatBufferTable, FlatbuffersVectorIn
     targetRelays: UInt32 = 0,
     relaysVectorOffset relays: Offset = Offset(),
     createdAt: UInt64 = 0,
-    contentOffset content: Offset = Offset(),
-    tagsVectorOffset tags: Offset = Offset()
+    contentOffset content: Offset = Offset()
   ) -> Offset {
     let __start = nmp_kernel_PublishOutboxItem.startPublishOutboxItem(&fbb)
     nmp_kernel_PublishOutboxItem.add(handle: handle, &fbb)
@@ -186,7 +150,6 @@ public struct nmp_kernel_PublishOutboxItem: FlatBufferTable, FlatbuffersVectorIn
     nmp_kernel_PublishOutboxItem.addVectorOf(relays: relays, &fbb)
     nmp_kernel_PublishOutboxItem.add(createdAt: createdAt, &fbb)
     nmp_kernel_PublishOutboxItem.add(content: content, &fbb)
-    nmp_kernel_PublishOutboxItem.addVectorOf(tags: tags, &fbb)
     return nmp_kernel_PublishOutboxItem.endPublishOutboxItem(&fbb, start: __start)
   }
 
@@ -201,7 +164,6 @@ public struct nmp_kernel_PublishOutboxItem: FlatBufferTable, FlatbuffersVectorIn
     try _v.visit(field: VTOFFSET.relays.p, fieldName: "relays", required: false, type: ForwardOffset<Vector<ForwardOffset<nmp_kernel_PublishOutboxRelay>, nmp_kernel_PublishOutboxRelay>>.self)
     try _v.visit(field: VTOFFSET.createdAt.p, fieldName: "createdAt", required: false, type: UInt64.self)
     try _v.visit(field: VTOFFSET.content.p, fieldName: "content", required: false, type: ForwardOffset<String>.self)
-    try _v.visit(field: VTOFFSET.tags.p, fieldName: "tags", required: false, type: ForwardOffset<Vector<ForwardOffset<nmp_kernel_PublishOutboxTag>, nmp_kernel_PublishOutboxTag>>.self)
     _v.finish()
   }
 }
