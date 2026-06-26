@@ -91,12 +91,20 @@ struct PublishOutboxRelay: Decodable, Identifiable, Equatable {
 }
 
 /// One in-flight publish row from the kernel-owned publish engine.
+///
+/// A generic outbox/rendering DTO — it mirrors the canonical kernel
+/// `publish_outbox` (`KPBO`) schema field-for-field. `kind` is canonical and
+/// retained for rendering, but the shell MUST NOT branch group policy on it.
+/// The previously-decoded `tags` field was stale Swift/generated drift (the
+/// pinned `publish_outbox.fbs` carries no `tags`, so it always decoded empty);
+/// it is dropped. Group-scoped pending state (chat delivery status, membership
+/// / admin actions) is owned by Rust projections, never reconstructed here from
+/// raw outbox tags.
 struct PublishOutboxItem: Decodable, Identifiable, Equatable {
     let handle: String
     let eventId: String
     let kind: UInt32
     let content: String
-    let tags: [[String]]
     let createdAt: UInt64
     let status: String
     let canRetry: Bool
@@ -165,4 +173,21 @@ struct DiscoveredGroupsSnapshot: Decodable, Equatable {
     let groups: [DiscoveredGroup]
 
     static let empty = DiscoveredGroupsSnapshot(hostRelayUrl: "", groups: [])
+}
+
+// ─── NIP-29 group-create defaults read model ──────────────────────────────
+
+/// App/operator-supplied defaults for the create-public-group flow, mirrored
+/// verbatim from the kernel `nmp.nip29.group_defaults` projection (`NGDF`).
+///
+/// `suggestedRelayUrl` is 29er's suggested NIP-29 host relay, sourced in Rust
+/// from `nmp_app_29er::config::public_group_relay_url` via
+/// `wire_group_defaults_with_relay`. The shell reads it from here instead of
+/// hardcoding a URL (D7): it pre-fills the editable relay field and uses it as
+/// the host relay for `createGroup` / auto-opened discovery. Empty until the
+/// first snapshot tick (the `.empty` default).
+struct GroupDefaultsSnapshot: Decodable, Equatable {
+    let suggestedRelayUrl: String
+
+    static let empty = GroupDefaultsSnapshot(suggestedRelayUrl: "")
 }

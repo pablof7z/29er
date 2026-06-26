@@ -64,9 +64,6 @@ enum TypedProjectionGlue {
                 eventId: item.eventId ?? "",
                 kind: item.kind,
                 content: item.content ?? "",
-                tags: item.tags.map { tag in
-                    tag.values.map { $0 ?? "" }
-                },
                 createdAt: item.createdAt,
                 status: item.status ?? "",
                 canRetry: item.canRetry,
@@ -120,6 +117,20 @@ enum TypedProjectionGlue {
         )
     }
 
+    // MARK: nmp.nip29.group_defaults → GroupDefaultsSnapshot
+
+    /// Map the typed `nmp.nip29.group_defaults` sidecar (`NGDF` /
+    /// `nmp_nip29_GroupDefaultsSnapshot`) to the `GroupDefaultsSnapshot` the
+    /// JSON `projections["nmp.nip29.group_defaults"]` path yields. Flat
+    /// single-field copy: `suggestedRelayUrl` is 29er's app/operator-owned
+    /// default host relay URL for a new public group, carried verbatim (raw
+    /// protocol value; the shell pre-fills it but the user may overwrite it).
+    static func groupDefaults(
+        _ reader: nmp_nip29_GroupDefaultsSnapshot
+    ) -> GroupDefaultsSnapshot {
+        GroupDefaultsSnapshot(suggestedRelayUrl: reader.suggestedRelayUrl ?? "")
+    }
+
     // MARK: nmp.29er.group_tree → GroupTreeSnapshot
 
     static func groupTree(_ reader: nmp_app_29er_GroupTreeSnapshot) -> GroupTreeSnapshot {
@@ -143,6 +154,8 @@ enum TypedProjectionGlue {
             adminCount: row.adminCount,
             isPublic: row.public_,
             isOpen: row.open_,
+            isMember: row.isMember,
+            isAdmin: row.isAdmin,
             isBranch: row.branch,
             lastMessageId: row.lastMessageId,
             lastMessagePubkey: row.lastMessagePubkey,

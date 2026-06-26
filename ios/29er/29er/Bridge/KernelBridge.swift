@@ -216,6 +216,24 @@ final class KernelHandle {
         }
     }
 
+    /// Seed 29er's Rust-owned default relay set (D7 — seeding policy lives in
+    /// Rust, not the shell). Wraps `nmp_app_29er_seed_default_relays`; the
+    /// kernel dedups against session-restored rows so re-seeding is a no-op.
+    /// Returns `true` when at least one relay was handed to the kernel.
+    @discardableResult
+    func seedDefaultRelays() -> Bool {
+        nmp_app_29er_seed_default_relays(raw)
+    }
+
+    /// Seed relays from a `[["url","role"],…]` JSON array (the
+    /// `NMP_TEST_RELAYS` override shape). Wraps
+    /// `nmp_app_29er_seed_relays_from_json`; returns `false` on null/malformed/
+    /// empty input so the caller falls back to `seedDefaultRelays()`. Parsing +
+    /// validation live in Rust — Swift only forwards the env-var string.
+    func seedRelays(fromJSON json: String) -> Bool {
+        json.withCString { nmp_app_29er_seed_relays_from_json(raw, $0) }
+    }
+
     /// Sign in with a local nsec and activate it as the active account.
     /// Fire-and-forget (D6): the nsec is validated by `nostr::Keys::parse`
     /// in Rust. On success the `active_account` slot is populated and the
@@ -322,6 +340,7 @@ extension KernelHandle {
                 let typedGroupMembers = TypedGroupMembersDecoder.decode(from: envelopes)
                 let typedPublishOutbox = TypedPublishOutboxDecoder.decode(from: envelopes)
                 let typedActiveAccount = TypedActiveAccountDecoder.decode(from: envelopes)
+                let typedGroupDefaults = TypedGroupDefaultsDecoder.decode(from: envelopes)
                 let duration = start.duration(to: .now)
                 kbLog.info("decoded ok rev=\(rev) activeAccount=\(typedActiveAccount ?? "nil")")
                 return .snapshot(
@@ -332,6 +351,7 @@ extension KernelHandle {
                         typedGroupMembers: typedGroupMembers,
                         typedPublishOutbox: typedPublishOutbox,
                         typedActiveAccount: typedActiveAccount,
+                        typedGroupDefaults: typedGroupDefaults,
                         rev: rev,
                         running: running,
                         lastErrorToast: lastErrorToast,

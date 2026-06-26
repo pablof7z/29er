@@ -62,6 +62,12 @@ final class KernelModel: ObservableObject {
     /// `activeAccountPubkey` accessor.
     @Published var typedActiveAccount: String?
 
+    /// Typed `nmp.nip29.group_defaults` sidecar (`NGDF`). `nil` ⇒ the defaults
+    /// projection sidecar was absent/malformed on the last tick. Carries 29er's
+    /// Rust-owned suggested public-group host relay URL. Read through the
+    /// `groupDefaults` accessor.
+    @Published var typedGroupDefaults: GroupDefaultsSnapshot?
+
     // ── Identity routing (S02) ─────────────────────────────────────────────
 
     /// Root-routing state derived from `typedActiveAccount` on every tick,

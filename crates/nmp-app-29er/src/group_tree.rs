@@ -4,7 +4,7 @@ use std::sync::Mutex;
 use nmp_core::substrate::{BoundedMessageMap, KernelEvent, MAX_PROJECTION_MESSAGES};
 use nmp_core::KernelEventObserver;
 use nmp_nip29::kinds::{h_tag_value, KIND_CHAT_MESSAGE};
-use nmp_nip29::projection::{DiscoveredGroup, DiscoveredGroupsSnapshot};
+use nmp_nip29::projection::{DiscoveredGroup, DiscoveredGroupsSnapshot, JoinedGroupsSnapshot};
 
 #[path = "wire/generated/group_tree_generated.rs"]
 mod generated;
@@ -41,6 +41,55 @@ impl GroupTreeMessageState {
     pub fn last_message_for(&self, group_id: &str) -> Option<&GroupTreeMessageSummary> {
         self.last_message_by_group.get(group_id)
     }
+}
+
+/// Per-group viewer membership truth for the active account.
+///
+/// Sourced from the account-scoped `JoinedGroupsProjection`, whose
+/// `is_member`/`is_admin` are keyed on the active pubkey (relay-signed
+/// kind:39001 / kind:39002 snapshots). The shell renders these flags; it does
+/// not derive membership/admin from a roster scan (D11 — the kernel/app crate
+/// owns membership truth).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GroupViewerMembership {
+    pub is_member: bool,
+    pub is_admin: bool,
+}
+
+/// Per-group membership lookup keyed by NIP-29 `local_id` (group id).
+pub type GroupMembershipMap = BTreeMap<String, GroupViewerMembership>;
+
+/// Build a per-group membership lookup from the account-scoped joined-groups
+/// snapshot.
+///
+/// Returns an empty map (membership unknown / not surfaced) when `active_pubkey`
+/// is empty or does not match the snapshot's `active_pubkey`. The mismatch guard
+/// fails safe across an account switch: a `JoinedGroupsProjection` bakes its
+/// pubkey at construction, so a snapshot whose `active_pubkey` no longer matches
+/// the live active account is stale and must not leak the previous account's
+/// membership/admin truth onto the current viewer. Reopening discovery rebuilds
+/// the projection for the new account, at which point membership repopulates.
+#[must_use]
+pub fn membership_from_joined(
+    joined: &JoinedGroupsSnapshot,
+    active_pubkey: &str,
+) -> GroupMembershipMap {
+    if active_pubkey.is_empty() || joined.active_pubkey != active_pubkey {
+        return GroupMembershipMap::new();
+    }
+    joined
+        .groups
+        .iter()
+        .map(|group| {
+            (
+                group.group_id.clone(),
+                GroupViewerMembership {
+                    is_member: group.is_member,
+                    is_admin: group.is_admin,
+                },
+            )
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -177,6 +226,8 @@ struct GroupTreeNode {
     admin_count: u32,
     public: bool,
     open: bool,
+    is_member: bool,
+    is_admin: bool,
     last_message: Option<GroupTreeMessageSummary>,
     unread_count: u32,
 }
@@ -191,8 +242,9 @@ struct GroupTreeSnapshot {
 pub fn encode_group_tree_snapshot(
     discovered: &DiscoveredGroupsSnapshot,
     messages: &GroupTreeMessageState,
+    membership: &GroupMembershipMap,
 ) -> Vec<u8> {
-    let tree = derive_group_tree(discovered, messages);
+    let tree = derive_group_tree(discovered, messages, membership);
     let mut fbb = flatbuffers::FlatBufferBuilder::new();
     let root_offsets = encode_nodes(&mut fbb, &tree.roots);
     let node_offsets = encode_nodes(&mut fbb, &tree.nodes);
@@ -269,6 +321,8 @@ fn encode_node<'a>(
             admin_count: node.admin_count,
             public: node.public,
             open: node.open,
+            is_member: node.is_member,
+            is_admin: node.is_admin,
             branch: !node.child_ids.is_empty(),
             last_message_id,
             last_message_pubkey,
@@ -282,6 +336,7 @@ fn encode_node<'a>(
 fn derive_group_tree(
     discovered: &DiscoveredGroupsSnapshot,
     messages: &GroupTreeMessageState,
+    membership: &GroupMembershipMap,
 ) -> GroupTreeSnapshot {
     let groups_by_id: BTreeMap<_, _> = discovered
         .groups
@@ -319,7 +374,7 @@ fn derive_group_tree(
         let parent_id = parent_by_child
             .get(group.group_id.as_str())
             .map(|value| (*value).to_string());
-        let node = build_node(group, parent_id, &children_by_parent, messages);
+        let node = build_node(group, parent_id, &children_by_parent, messages, membership);
         nodes_by_id.insert(node.group_id.clone(), node);
     }
 
@@ -359,10 +414,15 @@ fn build_node(
     parent_id: Option<String>,
     children_by_parent: &BTreeMap<&str, BTreeSet<&str>>,
     messages: &GroupTreeMessageState,
+    membership: &GroupMembershipMap,
 ) -> GroupTreeNode {
     let child_ids = children_by_parent
         .get(group.group_id.as_str())
         .map(|children| children.iter().map(|child| (*child).to_string()).collect())
+        .unwrap_or_default();
+    let viewer = membership
+        .get(&group.group_id)
+        .copied()
         .unwrap_or_default();
     GroupTreeNode {
         group_id: group.group_id.clone(),
@@ -374,6 +434,8 @@ fn build_node(
         admin_count: group.admin_count,
         public: group.public,
         open: group.open,
+        is_member: viewer.is_member,
+        is_admin: viewer.is_admin,
         last_message: messages.last_message_by_group.get(&group.group_id).cloned(),
         unread_count: messages
             .direct_unread_by_group
@@ -457,7 +519,7 @@ mod tests {
         projection.on_kernel_event(&event("old", "child", 10, "older"));
         projection.on_kernel_event(&event("new", "child", 20, "newer"));
 
-        let tree = derive_group_tree(&discovered(), &projection.snapshot());
+        let tree = derive_group_tree(&discovered(), &projection.snapshot(), &GroupMembershipMap::new());
         let child = tree
             .nodes
             .iter()
@@ -486,7 +548,7 @@ mod tests {
         projection.on_kernel_event(&event("root-msg", "root", 10, "root direct"));
         projection.on_kernel_event(&event("child-msg", "child", 20, "child direct"));
 
-        let tree = derive_group_tree(&discovered(), &projection.snapshot());
+        let tree = derive_group_tree(&discovered(), &projection.snapshot(), &GroupMembershipMap::new());
         let root = tree
             .nodes
             .iter()
@@ -509,7 +571,7 @@ mod tests {
         projection.on_kernel_event(&event("child-msg", "child", 20, "child direct"));
         projection.mark_read("child");
 
-        let tree = derive_group_tree(&discovered(), &projection.snapshot());
+        let tree = derive_group_tree(&discovered(), &projection.snapshot(), &GroupMembershipMap::new());
         let root = tree
             .nodes
             .iter()
@@ -532,7 +594,7 @@ mod tests {
         projection.on_kernel_event(&event);
         projection.on_kernel_event(&event);
 
-        let tree = derive_group_tree(&discovered(), &projection.snapshot());
+        let tree = derive_group_tree(&discovered(), &projection.snapshot(), &GroupMembershipMap::new());
         let root = tree
             .nodes
             .iter()
@@ -540,5 +602,71 @@ mod tests {
             .expect("root node");
 
         assert_eq!(root.unread_count, 1);
+    }
+
+    fn joined(active_pubkey: &str) -> JoinedGroupsSnapshot {
+        use nmp_nip29::projection::JoinedGroup;
+        JoinedGroupsSnapshot {
+            active_pubkey: active_pubkey.to_string(),
+            groups: vec![
+                JoinedGroup {
+                    group_id: "root".to_string(),
+                    host_relay_url: "wss://groups.example.com".to_string(),
+                    is_member: true,
+                    is_admin: true,
+                    ..Default::default()
+                },
+                JoinedGroup {
+                    group_id: "child".to_string(),
+                    host_relay_url: "wss://groups.example.com".to_string(),
+                    is_member: true,
+                    is_admin: false,
+                    ..Default::default()
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn nodes_carry_viewer_membership_from_joined_projection() {
+        let membership = membership_from_joined(&joined("viewer-pubkey"), "viewer-pubkey");
+        let tree = derive_group_tree(
+            &discovered(),
+            &GroupTreeMessageState::default(),
+            &membership,
+        );
+
+        let root = tree
+            .nodes
+            .iter()
+            .find(|node| node.group_id == "root")
+            .expect("root node");
+        let child = tree
+            .nodes
+            .iter()
+            .find(|node| node.group_id == "child")
+            .expect("child node");
+        let sibling = tree
+            .nodes
+            .iter()
+            .find(|node| node.group_id == "sibling")
+            .expect("sibling node");
+
+        assert!(root.is_member && root.is_admin);
+        assert!(child.is_member && !child.is_admin);
+        // No joined row → membership defaults to false/false.
+        assert!(!sibling.is_member && !sibling.is_admin);
+    }
+
+    #[test]
+    fn membership_is_empty_when_active_pubkey_mismatches_snapshot() {
+        // Snapshot baked for a different account must not leak membership onto
+        // the current viewer (fail-safe across an account switch).
+        let membership = membership_from_joined(&joined("other-pubkey"), "viewer-pubkey");
+        assert!(membership.is_empty());
+
+        // An empty active pubkey (no signed-in account) is also empty.
+        let none = membership_from_joined(&joined(""), "");
+        assert!(none.is_empty());
     }
 }

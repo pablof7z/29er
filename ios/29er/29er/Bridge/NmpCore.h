@@ -108,6 +108,16 @@ void nmp_app_set_capability_callback(void *app, void *context, NmpCapabilityCall
 void nmp_app_add_relay(void *app, const char *url, const char *role);
 void nmp_app_remove_relay(void *app, const char *url);
 
+// 29er relay-seeding (D7 — seeding policy lives in Rust, not the shell).
+//   * nmp_app_29er_seed_default_relays    — production default relay set.
+//   * nmp_app_29er_seed_relays_from_json  — NMP_TEST_RELAYS override
+//     (`[["url","role"],…]`); returns false on null/malformed/empty so the
+//     caller falls back to the default path.
+// Both are fire-and-forget (D6); the kernel dedups against session-restored
+// rows so re-seeding an existing install is a no-op.
+bool nmp_app_29er_seed_default_relays(void *app);
+bool nmp_app_29er_seed_relays_from_json(void *app, const char *json);
+
 // ADR-0064 / Cut-B (#1756) — the typed-FlatBuffers BYTE doorway (sole
 // remaining dispatch entry point). The caller passes the bytes of an open
 // `DispatchEnvelope` (correlation_id + action_namespace + schema_version +

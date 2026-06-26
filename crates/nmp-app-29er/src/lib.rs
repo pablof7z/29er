@@ -31,8 +31,10 @@
 //!   explicit status codes for ordering errors.
 
 pub mod compose;
+pub mod config;
 pub mod ffi;
 pub mod group_tree;
+pub mod relay_seeding;
 
 pub use compose::{compose_chat_message, ComposedGroupMessage};
 
@@ -42,6 +44,11 @@ pub use ffi::{
     nmp_app_29er_open_group_discovery, nmp_app_29er_register, nmp_app_29er_register_group_chat,
     nmp_app_29er_unregister, NmpRegisterStatus, TwentyNinerHandle,
 };
+
+// Relay-seeding C-ABI surface (D7 — seeding policy lives in Rust, not the
+// shell). Mirrors Chirp's `nmp_app_chirp_seed_default_relays` /
+// `nmp_app_chirp_seed_relays_from_json`.
+pub use relay_seeding::{nmp_app_29er_seed_default_relays, nmp_app_29er_seed_relays_from_json};
 // Re-export `nmp_free_string` so the 29er shell links it through this archive
 // the same way Chirp links it through `libnmp_app_chirp.a`.
 pub use nmp_ffi::nmp_free_string;
