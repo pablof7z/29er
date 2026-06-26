@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nmp_app_29er::group_tree::{GroupTreeMessageState, GroupTreeProjection};
 use nmp_app_29er::{
@@ -115,6 +115,9 @@ pub struct TuiSnapshot {
     pub login_error: Option<String>,
     pub screen: Screen,
     pub help_open: bool,
+    /// Transient command-acknowledgment line (e.g. "Joining room…" → "Joined ✓").
+    /// `None` when nothing to show; cleared after 2 seconds.
+    pub status_message: Option<String>,
 }
 
 /// Projection-derived fields produced on the poller thread and sent over mpsc.
@@ -197,6 +200,8 @@ pub struct App {
     login_error: Option<String>,
     help_open: bool,
     should_quit: bool,
+    /// Transient status line: (message, when_set). Cleared by `tick()` after 2s.
+    status_message: Option<(String, Instant)>,
 }
 
 impl App {
@@ -218,6 +223,7 @@ impl App {
             selected_index: 0, selected_channel: None, outbox: Vec::new(), errors: Vec::new(),
             palette_open: false, active_form: None, message_scroll: 0,
             login_error: None, help_open: false, should_quit: false,
+            status_message: None,
         }
     }
 
@@ -313,6 +319,7 @@ impl App {
             login_error: self.login_error.clone(),
             screen: self.screen,
             help_open: self.help_open,
+            status_message: self.status_message.as_ref().map(|(msg, _)| msg.clone()),
         }
     }
 
@@ -337,17 +344,32 @@ impl App {
         self.selected_channel = Some(group);
         self.message_scroll = 0;
         self.focus = Focus::Chat;
+        // Immediately pull the projection for the newly selected channel so
+        // the first frame shows whatever messages are already cached.
+        self.refresh_projection();
     }
 
     pub fn send_message(&mut self, body: String) {
         let trimmed = body.trim().to_string();
         if trimmed.is_empty() { return; }
         let Some(group) = self.selected_channel.clone() else { self.errors.push("No channel selected".to_string()); return; };
+        // Assign an optimistic local id immediately so the item is identifiable
+        // before NMP echoes back a correlation_id.
+        let optimistic_id = generate_local_id();
         let json = serde_json::json!({ "group": group, "content": trimmed }).to_string();
         let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
-        let mut item = PublishOutboxItem { correlation_id: String::new(), group_local_id: group.local_id.clone(), content: trimmed, status: OutboxStatus::Pending, error: None };
+        let mut item = PublishOutboxItem {
+            correlation_id: optimistic_id,
+            group_local_id: group.local_id.clone(),
+            content: trimmed,
+            status: OutboxStatus::Pending,
+            error: None,
+        };
         Self::apply_dispatch_result(&mut item, result);
         self.outbox.push(item);
+        // Immediately pull fresh projection data so the outbox strip renders
+        // without waiting for the next 4 Hz poll tick.
+        self.refresh_projection();
     }
 
     pub fn retry_outbox(&mut self, correlation_id: String) {
@@ -376,19 +398,26 @@ impl App {
 
     pub fn join(&mut self, group: GroupId, invite_code: Option<String>) {
         let body = serde_json::json!({ "group": group, "invite_code": invite_code }).to_string();
-        self.dispatch_json("nmp.nip29.join", &body); self.close_form();
+        self.set_status_message("Joining room\u{2026}".to_string());
+        self.dispatch_json("nmp.nip29.join", &body);
+        self.close_form();
     }
     pub fn leave(&mut self, group: GroupId) {
         let body = serde_json::json!({ "group": group }).to_string();
+        self.set_status_message("Leaving room\u{2026}".to_string());
         self.dispatch_json("nmp.nip29.leave", &body);
     }
     pub fn create_invite(&mut self, group: GroupId, codes: Vec<String>) {
         let body = serde_json::json!({ "group": group, "codes": codes }).to_string();
-        self.dispatch_json("nmp.nip29.create_invite", &body); self.close_form();
+        self.set_status_message("Creating invite\u{2026}".to_string());
+        self.dispatch_json("nmp.nip29.create_invite", &body);
+        self.close_form();
     }
     pub fn put_user(&mut self, group: GroupId, target_pubkey: String, role: Option<String>) {
         let body = serde_json::json!({ "group": group, "target_pubkey": target_pubkey, "role": role }).to_string();
-        self.dispatch_json("nmp.nip29.put_user", &body); self.close_form();
+        self.set_status_message("Updating member\u{2026}".to_string());
+        self.dispatch_json("nmp.nip29.put_user", &body);
+        self.close_form();
     }
     pub fn create_child(&mut self, parent: GroupId, name: String) {
         let local_id = generate_local_id();
@@ -396,11 +425,15 @@ impl App {
             "group": { "host_relay_url": parent.host_relay_url, "local_id": local_id },
             "name": name, "visibility": "public", "access": "open", "parent": parent.local_id,
         }).to_string();
-        self.dispatch_json("nmp.nip29.create_public_group", &body); self.close_form();
+        self.set_status_message("Creating channel\u{2026}".to_string());
+        self.dispatch_json("nmp.nip29.create_public_group", &body);
+        self.close_form();
     }
     pub fn move_channel(&mut self, group: GroupId, parent: Option<String>) {
         let body = serde_json::json!({ "group": group, "parent": parent }).to_string();
-        self.dispatch_json("nmp.nip29.set_parent", &body); self.close_form();
+        self.set_status_message("Moving channel\u{2026}".to_string());
+        self.dispatch_json("nmp.nip29.set_parent", &body);
+        self.close_form();
     }
     pub fn show_members(&mut self, group: GroupId) { self.shared.members.select_group(group.local_id); }
 
@@ -489,6 +522,31 @@ impl App {
     pub fn is_help_open(&self) -> bool { self.help_open }
     pub fn quit(&mut self) { self.should_quit = true; }
     pub fn should_quit(&self) -> bool { self.should_quit }
+
+    // ── optimistic UX helpers ────────────────────────────────────────────────
+
+    /// Set a transient command-acknowledgment status message.
+    /// It is cleared automatically by [`Self::tick`] after 2 seconds.
+    pub fn set_status_message(&mut self, msg: String) {
+        self.status_message = Some((msg, Instant::now()));
+    }
+
+    /// Called on every UI timer tick (~120 ms). Expires status messages older
+    /// than 2 seconds so the status bar returns to normal hints.
+    pub fn tick(&mut self) {
+        if let Some((_, set_at)) = &self.status_message {
+            if set_at.elapsed() >= Duration::from_secs(2) {
+                self.status_message = None;
+            }
+        }
+    }
+
+    /// Pull a fresh projection snapshot inline (bypasses the 4 Hz poller).
+    /// Call after any user action so the very next frame sees up-to-date data.
+    pub fn refresh_projection(&mut self) {
+        let view = self.shared.project();
+        self.ingest_projection(view);
+    }
 }
 
 impl Drop for App {
@@ -696,6 +754,7 @@ mod tests {
             login_error: None,
             screen: Screen::App,
             help_open: false,
+            status_message: Some("Joining room\u{2026}".to_string()),
         };
 
         assert_eq!(snap.selected_index, 3);
@@ -714,6 +773,7 @@ mod tests {
         assert!(matches!(snap.identity_state, IdentityState::LoggedIn { ref npub } if npub == "npub1test"));
         assert!(matches!(snap.active_form, Some(FormKind::JoinWithCode(_))));
         assert!(snap.login_error.is_none());
+        assert_eq!(snap.status_message.as_deref(), Some("Joining room\u{2026}"));
     }
 
     /// T4: IdentityState state-machine — Default is LoggedOut; transitions
@@ -896,5 +956,53 @@ mod tests {
         // Wrap around backward (0 -> 2)
         app.navigate(-1);
         assert_eq!(app.snapshot().selected_index, 2);
+    }
+
+    /// T9: set_status_message appears immediately in snapshot; tick() expires it
+    /// after the 2-second window.
+    #[test]
+    fn test_status_message_set_and_expires() {
+        let (mut app, _rx) = make_app();
+
+        // Initially no status message.
+        assert!(app.snapshot().status_message.is_none());
+
+        // Set a message — should appear in the very next snapshot.
+        app.set_status_message("Joining room\u{2026}".to_string());
+        assert_eq!(
+            app.snapshot().status_message.as_deref(),
+            Some("Joining room\u{2026}"),
+        );
+
+        // tick() before expiry must NOT clear it.
+        app.tick();
+        assert!(app.snapshot().status_message.is_some(), "message cleared too early");
+
+        // Back-date the timestamp to simulate 2+ seconds having passed.
+        if let Some((_, ref mut ts)) = app.status_message {
+            *ts = Instant::now() - Duration::from_secs(3);
+        }
+        app.tick();
+        assert!(
+            app.snapshot().status_message.is_none(),
+            "expired message must be cleared by tick()"
+        );
+    }
+
+    /// T10: refresh_projection() updates `latest` immediately without waiting
+    /// for the background poller.
+    #[test]
+    fn test_refresh_projection_is_immediate() {
+        let (mut app, _rx) = make_app();
+
+        // Default latest has an empty channel_tree.
+        assert!(app.snapshot().channel_tree.is_empty());
+
+        // Manually inject state into the shared projections via ingest_projection
+        // (refresh_projection calls shared.project() which will still be empty here
+        //  because no NMP is running; this test just verifies the call does NOT panic
+        //  and the method is reachable).
+        app.refresh_projection(); // must not panic
+        assert!(app.snapshot().channel_tree.is_empty()); // still empty — no NMP running
     }
 }
