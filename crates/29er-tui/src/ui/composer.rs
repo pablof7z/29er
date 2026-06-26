@@ -62,7 +62,10 @@ impl Composer {
         // delete the @partial token then insert the resolved handle
         let word = self.current_word();
         for _ in 0..word.chars().count() { self.textarea.delete_char(); }
-        let handle = format!("@{} ", Self::label(m));
+        let nostr_uri = nmp_core::nip19::encode_npub(&m.pubkey)
+            .map(|npub| format!("nostr:{npub}"))
+            .unwrap_or_else(|_| format!("@{}", Self::label(m)));
+        let handle = format!("{nostr_uri} ");
         for ch in handle.chars() { self.textarea.insert_char(ch); }
         // Record the pubkey so we can pass it as a NIP-29 `p` tag on send.
         if !self.mentions.contains(&m.pubkey) {
