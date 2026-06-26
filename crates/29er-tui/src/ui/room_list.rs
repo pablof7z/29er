@@ -1,96 +1,256 @@
-//! Left sidebar: hierarchical NIP-29 channel list with indentation, unread
-//! badges, member counts, and last-message preview + timestamp (issue #4).
+//! Left sidebar: hierarchical NIP-29 channel list rendered with tui-tree-widget.
+//! Provides keyboard-driven expand/collapse (h/l), navigation (j/k),
+//! and channel selection (Enter). TreeState is ephemeral view state
+//! stored here, not in TuiSnapshot.
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use ratatui::Frame;
+use tui_tree_widget::{Tree, TreeItem, TreeState};
 use nmp_nip29::GroupId;
 use crate::actions::Action;
 use crate::app::{ChannelListItem, Focus, TuiSnapshot};
 use crate::ui;
 use crate::Component;
 
-#[derive(Default)]
 pub struct RoomListComponent {
     items: Vec<ChannelListItem>,
-    selected: usize,
+    /// Pre-built tree items, rebuilt on every channel-tree update.
+    tree_items: Vec<TreeItem<'static, String>>,
+    /// The currently active (chat-open) channel — used to sync tree cursor on change.
     selected_channel: Option<GroupId>,
     focused: bool,
-    state: ListState,
+    state: TreeState<String>,
+}
+
+impl Default for RoomListComponent {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            tree_items: Vec::new(),
+            selected_channel: None,
+            focused: false,
+            state: TreeState::default(),
+        }
+    }
 }
 
 impl RoomListComponent {
     pub fn new() -> Self { Self::default() }
+
     pub fn update(&mut self, s: &TuiSnapshot) {
         self.items = s.channel_tree.clone();
-        self.selected = s.selected_index;
-        self.selected_channel = s.selected_channel_id.clone();
         self.focused = s.focus == Focus::RoomList;
-        self.state.select(if self.items.is_empty() { None } else { Some(self.selected) });
-    }
-    fn row(&self, it: &ChannelListItem) -> ListItem<'static> {
-        let indent = "  ".repeat(it.depth);
-        let is_selected_channel = self.selected_channel.as_ref().map(|g| g.local_id == it.local_id).unwrap_or(false);
-        let name_color = if is_selected_channel { ui::LAVENDER } else { ui::TEXT };
-        let glyph = if it.is_branch { "\u{25be} " } else { "  " };
-        let mut header = vec![
-            Span::raw(indent.clone()),
-            Span::styled(glyph, Style::default().fg(ui::OVERLAY)),
-            Span::styled(it.name.clone(), Style::default().fg(name_color).add_modifier(Modifier::BOLD)),
-        ];
-        if it.unread > 0 {
-            header.push(Span::raw(" "));
-            header.push(Span::styled(format!("({})", it.unread), Style::default().fg(ui::RED).add_modifier(Modifier::BOLD)));
+
+        // Rebuild tree items when the channel list changes.
+        self.tree_items = Self::build_tree_items(&self.items);
+
+        // Only reposition the tree cursor when the active channel changes.
+        let new_id = s.selected_channel_id.as_ref().map(|g| g.local_id.as_str());
+        let old_id = self.selected_channel.as_ref().map(|g| g.local_id.as_str());
+        if new_id != old_id {
+            self.selected_channel = s.selected_channel_id.clone();
+            if let Some(gid) = &self.selected_channel {
+                let path = Self::path_to_id(&self.items, &gid.local_id);
+                if !path.is_empty() {
+                    self.state.select(path);
+                }
+            }
         }
-        let mut lines = vec![Line::from(header)];
-        let mut meta = vec![
-            Span::raw(indent.clone()),
-            Span::raw("  "),
-            Span::styled(format!("\u{1f465}{}", it.member_count), Style::default().fg(ui::SUBTEXT0)),
-        ];
+    }
+
+    /// Build the full path (root-id → … → leaf-id) for `local_id` from the
+    /// flat DFS-ordered channel list.
+    fn path_to_id(items: &[ChannelListItem], local_id: &str) -> Vec<String> {
+        let Some(pos) = items.iter().position(|it| it.local_id == local_id) else {
+            return vec![];
+        };
+        let mut path = Vec::new();
+        let mut depth = items[pos].depth;
+        path.push(items[pos].local_id.clone());
+        if depth == 0 {
+            return path;
+        }
+        let mut i = pos;
+        while i > 0 {
+            i -= 1;
+            if items[i].depth < depth {
+                path.push(items[i].local_id.clone());
+                depth = items[i].depth;
+                if depth == 0 { break; }
+            }
+        }
+        path.reverse();
+        path
+    }
+
+    /// Format a channel item into a single-line styled Text.
+    /// Layout: `[(unread)] name — preview (timestamp)`
+    fn item_text(it: &ChannelListItem) -> Text<'static> {
+        let mut spans = Vec::new();
+
+        // Unread badge: bold red
+        if it.unread > 0 {
+            spans.push(Span::styled(
+                format!("({}) ", it.unread),
+                Style::default().fg(ui::RED).add_modifier(Modifier::BOLD),
+            ));
+        }
+
+        // Channel name: bold
+        spans.push(Span::styled(
+            it.name.clone(),
+            Style::default().fg(ui::TEXT).add_modifier(Modifier::BOLD),
+        ));
+
+        // Optional preview + timestamp, separated by em-dash
+        let has_extra = it.last_preview.is_some() || it.last_timestamp.is_some();
+        if has_extra {
+            spans.push(Span::styled(
+                " \u{2014} ".to_string(),
+                Style::default().fg(ui::OVERLAY0),
+            ));
+        }
         if let Some(preview) = &it.last_preview {
-            let trimmed: String = preview.chars().take(24).collect();
-            meta.push(Span::raw("  "));
-            meta.push(Span::styled(trimmed, Style::default().fg(ui::OVERLAY0)));
+            let trimmed: String = preview.chars().take(20).collect();
+            spans.push(Span::styled(trimmed, Style::default().fg(ui::OVERLAY0)));
         }
         if let Some(ts) = it.last_timestamp {
-            meta.push(Span::raw("  "));
-            meta.push(Span::styled(ui::relative_time(ts), Style::default().fg(ui::OVERLAY0)));
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                format!("({})", ui::relative_time(ts)),
+                Style::default().fg(ui::OVERLAY0),
+            ));
         }
-        lines.push(Line::from(meta));
-        ListItem::new(lines)
+
+        Text::from(Line::from(spans))
+    }
+
+    /// Convert the flat DFS-ordered `ChannelListItem` list into a nested
+    /// `TreeItem` hierarchy using depth annotations.
+    fn build_tree_items(items: &[ChannelListItem]) -> Vec<TreeItem<'static, String>> {
+        let mut pos = 0;
+        Self::build_subtree(items, 0, &mut pos)
+    }
+
+    fn build_subtree(
+        items: &[ChannelListItem],
+        depth: usize,
+        pos: &mut usize,
+    ) -> Vec<TreeItem<'static, String>> {
+        let mut result = Vec::new();
+        while *pos < items.len() {
+            let item = &items[*pos];
+            if item.depth < depth {
+                break; // back up to parent level
+            }
+            if item.depth > depth {
+                // Malformed DFS: skip
+                *pos += 1;
+                continue;
+            }
+            *pos += 1;
+            let children = Self::build_subtree(items, depth + 1, pos);
+            let text = Self::item_text(item);
+            let id = item.local_id.clone();
+            let tree_item = if children.is_empty() {
+                TreeItem::new_leaf(id, text)
+            } else {
+                // Duplicate sibling IDs would be a NIP-29 bug; fall back gracefully.
+                TreeItem::new(id, text, children)
+                    .unwrap_or_else(|_| TreeItem::new_leaf(item.local_id.clone(), Self::item_text(item)))
+            };
+            result.push(tree_item);
+        }
+        result
+    }
+
+    /// Return the GroupId for the tree item currently under the cursor.
+    fn selected_group_id(&self) -> Option<GroupId> {
+        let path = self.state.selected();
+        let leaf_id = path.last()?;
+        self.items.iter().find(|it| &it.local_id == leaf_id).map(|it| it.group_id.clone())
     }
 }
 
 impl Component for RoomListComponent {
     fn draw(&mut self, f: &mut Frame, area: Rect) {
-        let border_style = if self.focused { Style::default().fg(ui::MAUVE) } else { Style::default().fg(ui::OVERLAY0) };
-        let block = Block::default().title(" channels ").borders(Borders::ALL).border_type(BorderType::Rounded).border_style(border_style);
-        let items: Vec<ListItem> = if self.items.is_empty() {
-            vec![ListItem::new(Line::from(Span::styled("discovering channels\u{2026}", Style::default().fg(ui::SUBTEXT0))))]
+        let border_style = if self.focused {
+            Style::default().fg(ui::MAUVE)
         } else {
-            self.items.iter().map(|it| self.row(it)).collect()
+            Style::default().fg(ui::OVERLAY0)
         };
+        let block = Block::default()
+            .title(" channels ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style);
+
+        if self.tree_items.is_empty() {
+            let p = Paragraph::new(Span::styled(
+                "discovering channels\u{2026}",
+                Style::default().fg(ui::SUBTEXT0),
+            ))
+            .block(block);
+            f.render_widget(p, area);
+            return;
+        }
+
+        // Catppuccin Mocha: SURFACE0 (#313244) bg, TEXT (#cdd6f4) fg when focused.
         let highlight = if self.focused {
-            Style::default().bg(ui::SURFACE0).add_modifier(Modifier::BOLD)
+            Style::default()
+                .bg(ui::SURFACE0)
+                .fg(ui::TEXT)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().bg(ui::MANTLE)
         };
-        let symbol = if self.focused { "> " } else { "  " };
-        let list = List::new(items).block(block).highlight_style(highlight).highlight_symbol(symbol);
-        f.render_stateful_widget(list, area, &mut self.state);
+
+        match Tree::new(&self.tree_items) {
+            Ok(tree) => {
+                let tree = tree
+                    .block(block)
+                    .highlight_style(highlight)
+                    // Tree connector lines use OVERLAY0 (#6c7086) via the widget's
+                    // default rendering; we configure the node glyphs here.
+                    .node_closed_symbol("\u{25b8} ") // ▸
+                    .node_open_symbol("\u{25be} ")   // ▾
+                    .node_no_children_symbol("  ");
+                f.render_stateful_widget(tree, area, &mut self.state);
+            }
+            Err(_) => {
+                let p = Paragraph::new("(tree render error)").block(block);
+                f.render_widget(p, area);
+            }
+        }
     }
+
     fn handle_event(&mut self, event: &Event) -> Option<Action> {
         let Event::Key(key) = event else { return None };
         if key.kind != KeyEventKind::Press { return None; }
+
         match key.code {
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::PageDown => Some(Action::NavigateDown),
-            KeyCode::Up | KeyCode::Char('k') | KeyCode::PageUp => Some(Action::NavigateUp),
-            KeyCode::Char('g') => Some(Action::NavigateTop),
-            KeyCode::Char('G') => Some(Action::NavigateBottom),
-            KeyCode::Enter => self.items.get(self.selected).map(|it| Action::SelectChannel(it.group_id.clone())),
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::PageDown => {
+                self.state.key_down();
+                Some(Action::Noop)
+            }
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::PageUp => {
+                self.state.key_up();
+                Some(Action::Noop)
+            }
+            // l / right arrow: expand node
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.state.key_right();
+                Some(Action::Noop)
+            }
+            // h / left arrow: collapse node (or move to parent)
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.state.key_left();
+                Some(Action::Noop)
+            }
+            KeyCode::Enter => self.selected_group_id().map(Action::SelectChannel),
             _ => None,
         }
     }
@@ -101,35 +261,94 @@ mod tests {
     use super::*;
     use crossterm::event::{KeyEvent, KeyModifiers};
     fn key(code: KeyCode) -> Event { Event::Key(KeyEvent::new(code, KeyModifiers::NONE)) }
-    #[test]
-    fn arrows_and_vim_keys_map_to_navigation() {
-        let mut c = RoomListComponent::new();
-        assert!(matches!(c.handle_event(&key(KeyCode::Char('j'))), Some(Action::NavigateDown)));
-        assert!(matches!(c.handle_event(&key(KeyCode::Up)), Some(Action::NavigateUp)));
+
+    fn one_item() -> ChannelListItem {
+        ChannelListItem {
+            group_id: GroupId::new("wss://h", "a"),
+            local_id: "a".into(),
+            name: "A".into(),
+            depth: 0,
+            unread: 0,
+            member_count: 1,
+            admin_count: 0,
+            is_branch: false,
+            last_preview: None,
+            last_timestamp: None,
+        }
     }
+
+    #[test]
+    fn arrows_and_vim_keys_return_noop_or_none() {
+        let mut c = RoomListComponent::new();
+        // Empty tree — navigation returns Noop (widget handles gracefully).
+        assert!(matches!(c.handle_event(&key(KeyCode::Char('j'))), Some(Action::Noop)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Up)), Some(Action::Noop)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Char('h'))), Some(Action::Noop)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Char('l'))), Some(Action::Noop)));
+    }
+
     #[test]
     fn enter_selects_channel_at_cursor() {
         let mut c = RoomListComponent::new();
-        c.items = vec![ChannelListItem { group_id: GroupId::new("wss://h", "a"), local_id: "a".into(), name: "A".into(), depth: 0, unread: 0, member_count: 1, admin_count: 0, is_branch: false, last_preview: None, last_timestamp: None }];
-        c.selected = 0;
+        c.items = vec![one_item()];
+        c.tree_items = RoomListComponent::build_tree_items(&c.items);
+        c.state.select(vec!["a".to_string()]);
         assert!(matches!(c.handle_event(&key(KeyCode::Enter)), Some(Action::SelectChannel(_))));
     }
 
-    /// Down arrow, PageDown, and 'j' all emit NavigateDown.
+    #[test]
+    fn enter_with_no_selection_returns_none() {
+        let mut c = RoomListComponent::new();
+        c.items = vec![one_item()];
+        c.tree_items = RoomListComponent::build_tree_items(&c.items);
+        // No explicit select → state.selected() is empty → None
+        assert!(c.handle_event(&key(KeyCode::Enter)).is_none());
+    }
+
     #[test]
     fn test_navigation_down() {
         let mut c = RoomListComponent::new();
-        assert!(matches!(c.handle_event(&key(KeyCode::Down)), Some(Action::NavigateDown)));
-        assert!(matches!(c.handle_event(&key(KeyCode::PageDown)), Some(Action::NavigateDown)));
-        assert!(matches!(c.handle_event(&key(KeyCode::Char('j'))), Some(Action::NavigateDown)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Down)), Some(Action::Noop)));
+        assert!(matches!(c.handle_event(&key(KeyCode::PageDown)), Some(Action::Noop)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Char('j'))), Some(Action::Noop)));
     }
 
-    /// Up arrow, PageUp, and 'k' all emit NavigateUp.
     #[test]
     fn test_navigation_up() {
         let mut c = RoomListComponent::new();
-        assert!(matches!(c.handle_event(&key(KeyCode::Up)), Some(Action::NavigateUp)));
-        assert!(matches!(c.handle_event(&key(KeyCode::PageUp)), Some(Action::NavigateUp)));
-        assert!(matches!(c.handle_event(&key(KeyCode::Char('k'))), Some(Action::NavigateUp)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Up)), Some(Action::Noop)));
+        assert!(matches!(c.handle_event(&key(KeyCode::PageUp)), Some(Action::Noop)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Char('k'))), Some(Action::Noop)));
+    }
+
+    #[test]
+    fn test_expand_collapse_keys() {
+        let mut c = RoomListComponent::new();
+        assert!(matches!(c.handle_event(&key(KeyCode::Right)), Some(Action::Noop)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Left)), Some(Action::Noop)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Char('l'))), Some(Action::Noop)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Char('h'))), Some(Action::Noop)));
+    }
+
+    #[test]
+    fn path_to_id_finds_nested_item() {
+        let items = vec![
+            ChannelListItem { group_id: GroupId::new("wss://h", "root"), local_id: "root".into(), name: "Root".into(), depth: 0, unread: 0, member_count: 1, admin_count: 0, is_branch: true, last_preview: None, last_timestamp: None },
+            ChannelListItem { group_id: GroupId::new("wss://h", "child"), local_id: "child".into(), name: "Child".into(), depth: 1, unread: 0, member_count: 1, admin_count: 0, is_branch: false, last_preview: None, last_timestamp: None },
+        ];
+        let path = RoomListComponent::path_to_id(&items, "child");
+        assert_eq!(path, vec!["root".to_string(), "child".to_string()]);
+    }
+
+    #[test]
+    fn build_tree_items_nests_children() {
+        let items = vec![
+            ChannelListItem { group_id: GroupId::new("wss://h", "root"), local_id: "root".into(), name: "Root".into(), depth: 0, unread: 0, member_count: 1, admin_count: 0, is_branch: true, last_preview: None, last_timestamp: None },
+            ChannelListItem { group_id: GroupId::new("wss://h", "child"), local_id: "child".into(), name: "Child".into(), depth: 1, unread: 0, member_count: 1, admin_count: 0, is_branch: false, last_preview: None, last_timestamp: None },
+        ];
+        let tree = RoomListComponent::build_tree_items(&items);
+        // Should produce one root with one child
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].children().len(), 1);
     }
 }
