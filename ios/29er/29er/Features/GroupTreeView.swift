@@ -259,13 +259,19 @@ struct GroupTimelineView: View {
         isCurrentMember && !model.kernelIsDead
     }
 
+    // TODO(roster): `model.groupMembers` is fed by the `select_group_members`
+    // FFI call, which is a no-op in NMP v0.8 — there is no standalone
+    // group_members projection; membership/admin/metadata fold through the
+    // JoinedGroupsProjection. So this roster is currently always empty,
+    // degrading the member-list sheet and @-mention suggestions to "no roster".
+    // Membership/admin GATING no longer depends on it (see `isCurrentMember` /
+    // `isCurrentAdmin`, which read the JoinedGroupsProjection-backed
+    // `node.isMember` / `node.isAdmin`). When a typed 29er roster projection
+    // lands, source `currentMembers` from it; until then it stays empty and the
+    // build stays green. Do NOT reintroduce a roster scan for membership truth.
     private var currentMembers: [GroupMember] {
         guard model.groupMembers.groupId == groupId else { return [] }
         return model.groupMembers.members
-    }
-
-    private var membersProjectionMatchesGroup: Bool {
-        model.groupMembers.groupId == groupId
     }
 
     /// Viewer membership truth, read straight from the Rust group-tree
@@ -309,15 +315,15 @@ struct GroupTimelineView: View {
             }
     }
 
-    // Membership status reads ONLY the Rust-owned members projection +
-    // discovered-group node (admin/member truth, open/closed). In-flight
-    // join/leave transient states are NOT reconstructed in the shell from raw
+    // Membership status derives ONLY from the JoinedGroupsProjection-backed
+    // group-tree node (`node.isMember` / `node.isAdmin` / `node.isOpen`). It
+    // does NOT wait on a group_members roster snapshot — that projection does
+    // not exist in NMP v0.8, so any "Checking until roster arrives" gate would
+    // hang forever (this was the Join-button regression). In-flight join/leave
+    // transient states are NOT reconstructed in the shell from raw
     // publish-outbox kinds/tags — that pending state must be surfaced as a
     // typed 29er domain projection over FFI (deferred; see commit notes).
     private var membershipStatusLabel: String {
-        if !membersProjectionMatchesGroup {
-            return "Checking"
-        }
         if isCurrentAdmin {
             return "Admin"
         }
@@ -331,9 +337,6 @@ struct GroupTimelineView: View {
     }
 
     private var membershipStatusIcon: String {
-        if !membersProjectionMatchesGroup {
-            return "clock"
-        }
         if isCurrentAdmin {
             return "shield.fill"
         }
@@ -532,7 +535,7 @@ struct GroupTimelineView: View {
     }
 
     private var shouldShowMembershipBar: Bool {
-        !membersProjectionMatchesGroup || !isCurrentMember
+        !isCurrentMember
     }
 
     private var membershipBar: some View {
@@ -554,11 +557,7 @@ struct GroupTimelineView: View {
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
                 .accessibilityIdentifier("join-button-\(groupId)")
-                .disabled(
-                    !membersProjectionMatchesGroup ||
-                        node == nil ||
-                        model.kernelIsDead
-                )
+                .disabled(node == nil || model.kernelIsDead)
             }
         }
         .padding(.horizontal, 12)
@@ -672,17 +671,11 @@ struct GroupTimelineView: View {
     }
 
     private var composerPromptIcon: String {
-        if !membersProjectionMatchesGroup {
-            return "clock"
-        }
-        return node?.isOpen == true ? "person.crop.circle.badge.plus" : "lock.fill"
+        node?.isOpen == true ? "person.crop.circle.badge.plus" : "lock.fill"
     }
 
     private var composerPromptText: String {
-        if !membersProjectionMatchesGroup {
-            return "Checking room access"
-        }
-        return node?.isOpen == true ? "Join to send messages" : "Invite required to send messages"
+        node?.isOpen == true ? "Join to send messages" : "Invite required to send messages"
     }
 
     private var mentionSuggestionBar: some View {
