@@ -8,12 +8,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use nmp_core::dispatch_envelope::{encode_dispatch_envelope, DISPATCH_ENVELOPE_SCHEMA_VERSION};
-use nmp_core::substrate::ActionPayload;
+use nmp_core::substrate::{ActionPayload, ObservedProjection, ObservedProjectionRegistrar};
 use nmp_core::{KernelEventObserver, KernelEventObserverId, TypedProjectionData};
 use nmp_ffi::{nmp_app_dispatch_action_bytes, NmpApp};
 use nmp_nip29::group_id::GroupId;
 use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
-use nmp_nip29::projection::{DiscoveredGroupsProjection, JoinedGroupsProjection};
 
 use crate::group_tree::{
     encode_group_tree_snapshot, membership_from_joined, GroupMembershipMap, GroupTreeProjection,
@@ -27,9 +26,18 @@ pub struct TwentyNinerHandle {
 }
 
 pub struct TwentyNinerGroupDiscoveryHandle {
-    observer_ids: Vec<KernelEventObserverId>,
+    /// Kernel observer id of the 29er-owned kind:9 group-tree observed
+    /// projection (the only tap 29er opens directly; the discovered/joined
+    /// catalogs are owned by the NMP doors). Recorded for symmetry/introspection;
+    /// the `teardown_fn` closure captures its own copy to close it, so the field
+    /// itself is not read back.
+    #[allow(dead_code)]
+    tree_observer_id: KernelEventObserverId,
+    /// The 29er kind:9 reader Arc — kept reachable so
+    /// [`nmp_app_29er_mark_group_read`] can fold read state into the next tree
+    /// snapshot.
     tree_projection: Arc<GroupTreeProjection>,
-    teardown_fn: Box<dyn FnOnce(Vec<KernelEventObserverId>) + Send>,
+    teardown_fn: Box<dyn FnOnce() + Send>,
 }
 
 unsafe impl Send for TwentyNinerGroupDiscoveryHandle {}
@@ -321,16 +329,19 @@ mod tests {
 
 /// Open a NIP-29 group-discovery session for one host relay.
 ///
-/// The **read side** of the NIP-29 group-discovery flow. Constructs a
-/// [`nmp_nip29::projection::DiscoveredGroupsProjection`] scoped to the
-/// supplied relay URL, plugs it in as a `KernelEventObserver` (ingest), and
-/// registers its snapshot read under `"nmp.nip29.discovered_groups"` (output).
-/// Kind:39000/39001/39002 events for that relay then surface on every snapshot
-/// tick under that key.
+/// The **read side** of the NIP-29 group-discovery flow. Opens NMP's canonical
+/// hydrating doors — `open_group_discovery` (owns `DiscoveredGroupsProjection` +
+/// the `"nmp.nip29.discovered_groups"` sidecar + relay-pinned interest + #2088
+/// replay) and `open_joined_groups` (account-scoped `is_member`/`is_admin`
+/// truth) — and layers ONE 29er-owned read on top: a hydrating, relay-pinned
+/// kind:9 observed projection feeding the `GroupTreeProjection` (per-group
+/// unread + last-message preview). It composes those canonical snapshots into
+/// the app-owned `"nmp.29er.group_tree"` typed projection on every tick.
 ///
 /// Returns a heap-allocated opaque handle the caller MUST free via
 /// [`nmp_app_29er_close_group_discovery`]. A null `app`, null/non-UTF-8/empty
-/// `host_relay_url`, or poisoned observer slot returns NULL (D6).
+/// `host_relay_url`, or a kernel that refuses the kind:9 observed projection
+/// returns NULL (D6).
 ///
 /// # Safety
 ///
@@ -360,79 +371,91 @@ pub extern "C" fn nmp_app_29er_open_group_discovery(
     }
 }
 
+/// Bounded read-cache replay budget for the 29er kind:9 group-tree observed
+/// projection. Mirrors `nmp_feed::DEFAULT_FEED_WINDOW_LIMIT` (80) — kept as a
+/// local const so this crate does not take an `nmp-feed` dependency just for
+/// one number. The cap bounds how many cached kind:9 events are replayed into
+/// the muted observer before it activates live (the #2088 hydration sequence).
+const GROUP_TREE_REPLAY_LIMIT: usize = 80;
+
 fn open_group_discovery_with_tree(
     app: &NmpApp,
     relay_url: String,
 ) -> Option<TwentyNinerGroupDiscoveryHandle> {
-    let projection = Arc::new(DiscoveredGroupsProjection::new(relay_url.clone()));
-    let observer_id =
-        app.register_live_event_tap(Arc::clone(&projection) as Arc<dyn KernelEventObserver>);
-    if observer_id.0 == 0 {
-        return None;
-    }
-    let tree_messages = Arc::new(GroupTreeProjection::new());
-    let tree_observer_id =
-        app.register_live_event_tap(Arc::clone(&tree_messages) as Arc<dyn KernelEventObserver>);
-    if tree_observer_id.0 == 0 {
-        app.unregister_event_observer(observer_id);
-        return None;
-    }
+    // 1. Canonical discovery door — NMP owns `DiscoveredGroupsProjection`, the
+    //    `nmp.nip29.discovered_groups` sidecar, the relay-pinned interest, and
+    //    the #2088 hydrating replay. We retain the returned snapshot reader
+    //    (Arc) to compose the 29er tree.
+    let (_discovery_handle, discovered) = app.open_group_discovery(relay_url.clone());
 
-    // Fix #3 / #4: viewer membership/admin truth comes from the account-scoped
-    // `JoinedGroupsProjection`, NOT a Swift roster scan (D11 — the app crate
-    // owns membership/admin derivation). The projection accumulates relay-signed
-    // kind:39000/39001/39002 snapshots and keys `is_member`/`is_admin` on the
-    // active pubkey. We bake the pubkey at open time (discovery is opened
-    // post-sign-in, so the active account is known) and scope the projection to
-    // this discovery host relay. The `active_account` slot is read again at
-    // snapshot time so a later account switch fails safe (see
-    // `membership_from_joined`): membership is only surfaced while the live
-    // active pubkey still matches the snapshot's. Reopening discovery rebuilds
-    // this projection for the new account.
+    // 2. Viewer membership/admin truth comes from the account-scoped joined-
+    //    groups door (D11 — the app crate owns membership/admin derivation, not
+    //    a Swift roster scan). The door bakes the active pubkey + relay pin and
+    //    is `ActiveAccount`-scoped(0). An empty active pubkey skips the open
+    //    (the door itself also no-ops on empty), yielding `None` — membership is
+    //    simply not surfaced until an account is active. The active_account slot
+    //    is re-read at snapshot time so a later account switch fails safe (see
+    //    `membership_from_joined`).
     let active_account = app.active_account_handle();
     let active_pubkey = active_account
         .lock()
         .ok()
         .and_then(|slot| slot.clone())
         .unwrap_or_default();
-    let joined = Arc::new(JoinedGroupsProjection::new_for_host(
-        active_pubkey,
-        relay_url.clone(),
-    ));
-    let joined_observer_id =
-        app.register_live_event_tap(Arc::clone(&joined) as Arc<dyn KernelEventObserver>);
-    if joined_observer_id.0 == 0 {
-        app.unregister_event_observer(observer_id);
-        app.unregister_event_observer(tree_observer_id);
+    let joined = if active_pubkey.is_empty() {
+        None
+    } else {
+        app.open_joined_groups(active_pubkey, relay_url.clone())
+    };
+
+    // 3. 29er-owned kind:9 unread/preview reader — folding kind:9 into per-group
+    //    unread + last-message preview is legitimate per-app composition. It is
+    //    sourced the doctrine-correct way: a hydrating, relay-pinned observed
+    //    projection (NOT `register_live_event_tap`, NOT a raw unhydrated/never-
+    //    closed `open_interest`). This gives the same muted -> replay-cached ->
+    //    activate-live sequence the NMP doors use, so a tree opened after kind:9
+    //    was already cached hydrates correctly (#2088), and it is torn down via
+    //    `close_observed_projection`. Tighter `#h` filtering is impossible at
+    //    discovery-open time (group ids are unknown until the catalog arrives),
+    //    so kinds:[9] pinned to the host relay is the correct shape.
+    let tree_messages = Arc::new(GroupTreeProjection::new());
+    let filter_json = format!(r#"{{"kinds":[{KIND_CHAT_MESSAGE}]}}"#);
+    let replay_shapes: Vec<nmp_planner::InterestShape> =
+        nmp_planner::InterestShape::from_filter_json(&filter_json)
+            .map(|mut shape| {
+                shape.relay_pin = Some(relay_url.clone());
+                shape
+            })
+            .into_iter()
+            .collect();
+    let tree_observer_id = app.open_observed_projection(ObservedProjection {
+        observer: Arc::clone(&tree_messages) as Arc<dyn KernelEventObserver>,
+        filter_json,
+        consumer_id: format!("29er.nip29.group_tree.kind9:{relay_url}"),
+        // Global, relay-pinned — matches the discovery door's SCOPE_GLOBAL.
+        scope: 1,
+        relay_pin: Some(relay_url.clone()),
+        replay_shapes,
+        replay_limit: GROUP_TREE_REPLAY_LIMIT,
+    });
+    if tree_observer_id.0 == 0 {
+        // Roll back the doors we already opened (D6 fail-closed).
+        app.close_group_discovery();
+        app.close_joined_groups();
         return None;
     }
 
-    let discovered_projection = Arc::clone(&projection);
-    app.register_typed_snapshot_projection("nmp.nip29.discovered_groups", move || {
-        let snapshot = discovered_projection.snapshot();
-        Some(TypedProjectionData {
-            key: "nmp.nip29.discovered_groups".to_string(),
-            schema_id: nmp_nip29::wire::discovered_groups_fb::DISCOVERED_GROUPS_SCHEMA_ID
-                .to_string(),
-            schema_version: nmp_nip29::wire::discovered_groups_fb::DISCOVERED_GROUPS_SCHEMA_VERSION,
-            file_identifier: String::from_utf8_lossy(
-                nmp_nip29::wire::discovered_groups_fb::DISCOVERED_GROUPS_FILE_IDENTIFIER,
-            )
-            .into_owned(),
-            payload: nmp_nip29::wire::discovered_groups_fb::encode_discovered_groups_snapshot(
-                &snapshot,
-            ),
-            ..Default::default()
-        })
-    });
-
-    let tree_projection = Arc::clone(&projection);
-    let tree_messages_projection = Arc::clone(&tree_messages);
-    let joined_projection = Arc::clone(&joined);
+    // 4. 29er composite — derive `nmp.29er.group_tree` from the canonical
+    //    discovered/joined door snapshots + the app-owned kind:9 summaries. This
+    //    is app composition over canonical NMP outputs (allowed); it registers
+    //    no kernel taps and re-uses no NMP-owned keys.
+    let tree_discovered = Arc::clone(&discovered);
+    let tree_joined = joined.clone();
+    let tree_messages_for_sidecar = Arc::clone(&tree_messages);
     let active_account_for_tree = Arc::clone(&active_account);
     app.register_typed_snapshot_projection("nmp.29er.group_tree", move || {
-        let snapshot = tree_projection.snapshot();
-        let messages = tree_messages_projection.snapshot();
+        let snapshot = tree_discovered.snapshot();
+        let messages = tree_messages_for_sidecar.snapshot();
         // Re-read the live active pubkey every tick so membership is recomputed
         // on an account switch and never leaks a previous account's truth.
         let active_pubkey = active_account_for_tree
@@ -440,8 +463,12 @@ fn open_group_discovery_with_tree(
             .ok()
             .and_then(|slot| slot.clone())
             .unwrap_or_default();
+        let joined_snapshot = tree_joined
+            .as_ref()
+            .map(|projection| projection.snapshot())
+            .unwrap_or_default();
         let membership: GroupMembershipMap =
-            membership_from_joined(&joined_projection.snapshot(), &active_pubkey);
+            membership_from_joined(&joined_snapshot, &active_pubkey);
         Some(TypedProjectionData {
             key: "nmp.29er.group_tree".to_string(),
             schema_id: GROUP_TREE_SCHEMA_ID.to_string(),
@@ -452,24 +479,21 @@ fn open_group_discovery_with_tree(
         })
     });
 
-    // v0.8.0: `push_interest`/`LogicalInterest` is gone from the FFI; express
-    // the relay's kind:9 chat-summary tail as a NIP-01 filter through the
-    // refcounted `open_interest` door (scope 1 = Global).
-    let chat_summary_filter = format!(r#"{{"kinds":[{KIND_CHAT_MESSAGE}]}}"#);
-    let chat_summary_consumer = format!("29er.nip29.group_tree.chat_summary:{relay_url}");
-    app.open_interest(chat_summary_filter, chat_summary_consumer, 1);
-
     let app_addr = (app as *const NmpApp) as usize;
     Some(TwentyNinerGroupDiscoveryHandle {
-        observer_ids: vec![observer_id, tree_observer_id, joined_observer_id],
+        tree_observer_id,
         tree_projection: tree_messages,
-        teardown_fn: Box::new(move |ids| {
+        teardown_fn: Box::new(move || {
+            // SAFETY: `app_addr` is the address of the live `NmpApp` the open
+            // borrowed; the handle's contract requires `app` to outlive it.
             let app = unsafe { &*(app_addr as *const NmpApp) };
-            for id in ids {
-                app.unregister_event_observer(id);
-            }
-            app.remove_snapshot_projection("nmp.nip29.discovered_groups");
+            app.close_observed_projection(tree_observer_id);
             app.remove_snapshot_projection("nmp.29er.group_tree");
+            // The NMP doors own `nmp.nip29.discovered_groups` / `…joined_groups`
+            // + their interests; close reclaims them. 29er must NOT remove those
+            // keys itself (it would race/clobber the door session).
+            app.close_group_discovery();
+            app.close_joined_groups();
         }),
     })
 }
@@ -477,10 +501,12 @@ fn open_group_discovery_with_tree(
 /// Close a NIP-29 group-discovery session opened by
 /// [`nmp_app_29er_open_group_discovery`].
 ///
-/// Unregisters the event observer and removes the
-/// `"nmp.nip29.discovered_groups"` typed snapshot projection so no stale group
-/// catalog is emitted after the discover screen is dismissed. The handle memory
-/// is reclaimed; the pointer MUST NOT be used after this call.
+/// Closes the 29er kind:9 observed projection + the `"nmp.29er.group_tree"`
+/// typed snapshot, then closes NMP's discovery + joined-groups doors (which own
+/// and reclaim `"nmp.nip29.discovered_groups"` / `"nmp.nip29.joined_groups"` +
+/// their interests) so no stale group catalog is emitted after the discover
+/// screen is dismissed. The handle memory is reclaimed; the pointer MUST NOT be
+/// used after this call.
 ///
 /// D6 — a null `handle` is a silent no-op.
 ///
@@ -499,7 +525,7 @@ pub extern "C" fn nmp_app_29er_close_group_discovery(handle: *mut TwentyNinerGro
     // call. `Box::from_raw` takes ownership; `close_group_discovery` tears
     // down the observer + projection before the box is dropped.
     let handle = unsafe { *Box::from_raw(handle) };
-    (handle.teardown_fn)(handle.observer_ids);
+    (handle.teardown_fn)();
 }
 
 /// Mark a group's direct kind:9 messages read inside the open group-tree
