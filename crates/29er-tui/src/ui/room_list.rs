@@ -112,4 +112,22 @@ mod tests {
         c.selected = 0;
         assert!(matches!(c.handle_event(&key(KeyCode::Enter)), Some(Action::SelectChannel(_))));
     }
+
+    /// Down arrow, PageDown, and 'j' all emit NavigateDown.
+    #[test]
+    fn test_navigation_down() {
+        let mut c = RoomListComponent::new();
+        assert!(matches!(c.handle_event(&key(KeyCode::Down)), Some(Action::NavigateDown)));
+        assert!(matches!(c.handle_event(&key(KeyCode::PageDown)), Some(Action::NavigateDown)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Char('j'))), Some(Action::NavigateDown)));
+    }
+
+    /// Up arrow, PageUp, and 'k' all emit NavigateUp.
+    #[test]
+    fn test_navigation_up() {
+        let mut c = RoomListComponent::new();
+        assert!(matches!(c.handle_event(&key(KeyCode::Up)), Some(Action::NavigateUp)));
+        assert!(matches!(c.handle_event(&key(KeyCode::PageUp)), Some(Action::NavigateUp)));
+        assert!(matches!(c.handle_event(&key(KeyCode::Char('k'))), Some(Action::NavigateUp)));
+    }
 }

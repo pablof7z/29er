@@ -290,4 +290,65 @@ mod tests {
         let ev = Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(matches!(p.handle_event(&ev), Some(Action::ClosePalette)));
     }
+
+    /// Channel entries produce a SelectChannel action when confirmed with Enter.
+    #[test]
+    fn test_palette_channel_result() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        use nmp_nip29::GroupId;
+        let mut p = Palette::new();
+        let gid = GroupId::new("wss://h", "chan");
+        p.entries = vec![Entry {
+            label: "general".into(),
+            subtitle: "channel".into(),
+            action: Action::SelectChannel(gid.clone()),
+        }];
+        p.recompute();
+        let ev = Event::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        match p.handle_event(&ev) {
+            Some(Action::SelectChannel(g)) => assert_eq!(g.local_id, "chan"),
+            other => panic!("expected SelectChannel, got {other:?}"),
+        }
+    }
+
+    /// Admin-only palette entries are hidden for non-admin users and visible for admins.
+    #[test]
+    fn test_palette_admin_gating() {
+        use nmp_nip29::GroupId;
+        use crate::app::{IdentityState, RelayState, Screen};
+        let gid = GroupId::new("wss://h", "room");
+        let base_snap = TuiSnapshot {
+            channel_tree: vec![],
+            selected_channel_id: Some(gid.clone()),
+            selected_messages: vec![],
+            selected_members: vec![],
+            is_admin: false,
+            my_pubkey: None,
+            publish_outbox: vec![],
+            identity_state: IdentityState::LoggedOut,
+            relay_state: RelayState::Connected,
+            errors: vec![],
+            selected_index: 0,
+            focus: Focus::ChannelList,
+            message_scroll: 0,
+            palette_open: false,
+            active_form: None,
+            login_error: None,
+            screen: Screen::App,
+        };
+        let mut p = Palette::new();
+        p.update(&base_snap);
+        assert!(
+            !p.entries.iter().any(|e| e.subtitle == "admin"),
+            "non-admin should not see admin-only entries"
+        );
+        // Verify admin entries appear when the user is promoted to admin.
+        let mut admin_snap = base_snap.clone();
+        admin_snap.is_admin = true;
+        p.update(&admin_snap);
+        assert!(
+            p.entries.iter().any(|e| e.subtitle == "admin"),
+            "admin should see admin-only entries"
+        );
+    }
 }
