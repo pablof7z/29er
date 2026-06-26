@@ -227,21 +227,16 @@ struct GroupTimelineView: View {
     }
 
     private var visibleMessages: [GroupChatMessage] {
-        // Projection owns the newest-first data contract. Chat presentation
-        // reads chronologically so the newest item anchors above the composer.
+        // The Rust-owned `group_chat` projection is the SINGLE ordered, deduped
+        // message list — it already folds in the active account's own sends
+        // (V-83 event-store publish-back hydrates them into the projection), so
+        // the shell no longer joins `publish_outbox` against chat, walks raw
+        // `["h", groupId]` tags, dedups by event id, or reorders. The projection
+        // is newest-first; chat presentation reads chronologically so the newest
+        // item anchors above the composer. Per-message delivery status is a thin
+        // eventId-keyed decoration via `outboxItem(for:)` (the kernel owns the
+        // status token + retry decision), not a tag/kind policy join.
         Array(model.groupChat.messages.reversed())
-    }
-
-    private var outboxMessages: [PublishOutboxItem] {
-        let deliveredIds = Set(model.groupChat.messages.map(\.id))
-        let filtered = model.publishOutbox.filter { item in
-            item.kind == 9 &&
-                !deliveredIds.contains(item.eventId) &&
-                item.tags.contains { tag in
-                    tag.count >= 2 && tag[0] == "h" && tag[1] == groupId
-                }
-        }
-        return Array(filtered.reversed())
     }
 
     private var trimmedDraft: String {
@@ -282,41 +277,6 @@ struct GroupTimelineView: View {
         node?.isAdmin == true
     }
 
-    private var membershipOutboxItems: [PublishOutboxItem] {
-        model.publishOutbox.filter { item in
-            (item.kind == 9021 || item.kind == 9022) &&
-                item.tags.contains { tag in
-                    tag.count >= 2 && tag[0] == "h" && tag[1] == groupId
-                }
-        }
-    }
-
-    private var latestMembershipOutboxItem: PublishOutboxItem? {
-        membershipOutboxItems.sorted { $0.createdAt > $1.createdAt }.first
-    }
-
-    private var adminOutboxItems: [PublishOutboxItem] {
-        model.publishOutbox.filter { item in
-            let hasCurrentGroupH = item.tags.contains { tag in
-                tag.count >= 2 && tag[0] == "h" && tag[1] == groupId
-            }
-            let hasCurrentGroupParent = item.tags.contains { tag in
-                tag.count >= 2 && tag[0] == "parent" && tag[1] == groupId
-            }
-            switch item.kind {
-            case 9000, 9009:
-                return hasCurrentGroupH
-            case 9002:
-                return hasCurrentGroupH || hasCurrentGroupParent
-            case 9007:
-                return true
-            default:
-                return false
-            }
-        }
-        .sorted { $0.createdAt > $1.createdAt }
-    }
-
     private var descendantGroupIds: Set<String> {
         func collect(from id: String, into result: inout Set<String>) {
             guard let node = model.groupTree.allNodes[id] else { return }
@@ -344,17 +304,12 @@ struct GroupTimelineView: View {
             }
     }
 
+    // Membership status reads ONLY the Rust-owned members projection +
+    // discovered-group node (admin/member truth, open/closed). In-flight
+    // join/leave transient states are NOT reconstructed in the shell from raw
+    // publish-outbox kinds/tags — that pending state must be surfaced as a
+    // typed 29er domain projection over FFI (deferred; see commit notes).
     private var membershipStatusLabel: String {
-        if let item = latestMembershipOutboxItem {
-            switch item.kind {
-            case 9021:
-                return item.status == "failed" ? "Join failed" : "Joining"
-            case 9022:
-                return item.status == "failed" ? "Leave failed" : "Leaving"
-            default:
-                break
-            }
-        }
         if !membersProjectionMatchesGroup {
             return "Checking"
         }
@@ -371,9 +326,6 @@ struct GroupTimelineView: View {
     }
 
     private var membershipStatusIcon: String {
-        if let item = latestMembershipOutboxItem {
-            return item.kind == 9022 ? "person.badge.minus" : "person.badge.plus"
-        }
         if !membersProjectionMatchesGroup {
             return "clock"
         }
@@ -384,10 +336,6 @@ struct GroupTimelineView: View {
             return "checkmark.circle.fill"
         }
         return node?.isOpen == true ? "person.crop.circle.badge.plus" : "lock.fill"
-    }
-
-    private var hasPendingMembershipAction: Bool {
-        latestMembershipOutboxItem != nil
     }
 
     private var mentionSuggestions: [GroupMember] {
@@ -412,7 +360,7 @@ struct GroupTimelineView: View {
                     ErrorStateView(
                         message: "The background service stopped. Relaunch the app to recover."
                     )
-                } else if visibleMessages.isEmpty && outboxMessages.isEmpty {
+                } else if visibleMessages.isEmpty {
                     emptyChat
                 } else {
                     messageStream(proxy: proxy)
@@ -484,7 +432,6 @@ struct GroupTimelineView: View {
             .sheet(isPresented: $showingAdminSheet) {
                 AdminActionsSheet(
                     title: title,
-                    pendingItems: adminOutboxItems,
                     onCreateInvite: { codes in
                         model.createInvite(groupId: groupId, codes: codes)
                     },
@@ -510,9 +457,6 @@ struct GroupTimelineView: View {
                     currentParentId: node?.parentId,
                     onSetParent: { parent in
                         model.setParent(groupId: groupId, parent: parent)
-                    },
-                    onRetry: { item in
-                        model.retryPublish(item)
                     }
                 )
                 .presentationDetents([.large])
@@ -521,9 +465,6 @@ struct GroupTimelineView: View {
                 model.openGroupTimeline(groupId)
             }
             .onChange(of: model.groupChat.messages) { _, _ in
-                scrollToBottom(proxy)
-            }
-            .onChange(of: outboxMessages.count) { _, _ in
                 scrollToBottom(proxy)
             }
         }
@@ -581,13 +522,12 @@ struct GroupTimelineView: View {
                 .labelStyle(.iconOnly)
                 .accessibilityIdentifier("leave-button-\(groupId)")
                 .accessibilityLabel("Leave Group")
-                .disabled(hasPendingMembershipAction)
             }
         }
     }
 
     private var shouldShowMembershipBar: Bool {
-        hasPendingMembershipAction || !membersProjectionMatchesGroup || !isCurrentMember
+        !membersProjectionMatchesGroup || !isCurrentMember
     }
 
     private var membershipBar: some View {
@@ -597,23 +537,6 @@ struct GroupTimelineView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .accessibilityIdentifier("membership-status-\(groupId)")
-
-            if let item = latestMembershipOutboxItem {
-                if item.canRetry {
-                    Button {
-                        model.retryPublish(item)
-                    } label: {
-                        Image(systemName: "arrow.clockwise.circle.fill")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Retry membership action")
-                }
-
-                Text(item.status.pendingDisplayLabel)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.tertiary)
-            }
 
             Spacer(minLength: 8)
 
@@ -627,8 +550,7 @@ struct GroupTimelineView: View {
                 .controlSize(.small)
                 .accessibilityIdentifier("join-button-\(groupId)")
                 .disabled(
-                    hasPendingMembershipAction ||
-                        !membersProjectionMatchesGroup ||
+                    !membersProjectionMatchesGroup ||
                         node == nil ||
                         model.kernelIsDead
                 )
@@ -663,14 +585,6 @@ struct GroupTimelineView: View {
                                 eventAuthorPubkey: message.pubkey
                             )
                         }
-                    )
-                    .id(message.id)
-                }
-
-                ForEach(outboxMessages) { message in
-                    PendingMessageRow(
-                        message: message,
-                        onRetry: { model.retryPublish(message) }
                     )
                     .id(message.id)
                 }
@@ -1036,14 +950,12 @@ private struct LeaveGroupSheet: View {
 
 private struct AdminActionsSheet: View {
     let title: String
-    let pendingItems: [PublishOutboxItem]
     let onCreateInvite: ([String]) -> Bool
     let onPutUser: (String, String?, String?) -> Bool
     let onCreateChild: (String, String, String?, String, String) -> Bool
     let parentCandidates: [GroupParentCandidate]
     let currentParentId: String?
     let onSetParent: (String?) -> Bool
-    let onRetry: (PublishOutboxItem) -> Void
 
     private let rootParentSelection = "__root__"
 
@@ -1116,34 +1028,6 @@ private struct AdminActionsSheet: View {
                     roomSection
                 case .hierarchy:
                     hierarchySection
-                }
-
-                if !pendingItems.isEmpty {
-                    Section("Pending") {
-                        ForEach(pendingItems) { item in
-                            HStack(spacing: 8) {
-                                Image(systemName: pendingIcon(for: item.kind))
-                                    .foregroundStyle(.secondary)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(pendingTitle(for: item.kind))
-                                        .font(.subheadline.weight(.medium))
-                                    Text(item.status.pendingDisplayLabel)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if item.canRetry {
-                                    Button {
-                                        onRetry(item)
-                                    } label: {
-                                        Image(systemName: "arrow.clockwise.circle.fill")
-                                    }
-                                    .buttonStyle(.plain)
-                                    .accessibilityLabel("Retry admin action")
-                                }
-                            }
-                        }
-                    }
                 }
 
                 if let error {
@@ -1362,36 +1246,6 @@ private struct AdminActionsSheet: View {
     private func generatedInviteCode() -> String {
         UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(12).description
     }
-
-    private func pendingTitle(for kind: UInt32) -> String {
-        switch kind {
-        case 9000:
-            return "Put User"
-        case 9002:
-            return "Metadata"
-        case 9007:
-            return "Create Group"
-        case 9009:
-            return "Invite"
-        default:
-            return "Admin Action"
-        }
-    }
-
-    private func pendingIcon(for kind: UInt32) -> String {
-        switch kind {
-        case 9000:
-            return "person.badge.plus"
-        case 9002:
-            return "tag"
-        case 9007:
-            return "folder.badge.plus"
-        case 9009:
-            return "ticket"
-        default:
-            return "clock"
-        }
-    }
 }
 
 private struct MemberListSheet: View {
@@ -1527,47 +1381,6 @@ private struct GroupMessageRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("group-chat-message-\(message.id)")
-    }
-}
-
-private struct PendingMessageRow: View {
-    let message: PublishOutboxItem
-    let onRetry: () -> Void
-
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            Spacer(minLength: 42)
-
-            VStack(alignment: .trailing, spacing: 4) {
-                HStack(spacing: 6) {
-                    if message.canRetry {
-                        Button(action: onRetry) {
-                            Image(systemName: "arrow.clockwise.circle.fill")
-                                .font(.caption.weight(.semibold))
-                                .symbolRenderingMode(.hierarchical)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Retry message")
-                    }
-
-                    Text(message.status.pendingDisplayLabel)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-
-                Text(message.content)
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(Color.accentColor.opacity(0.72))
-                    )
-            }
-        }
-        .accessibilityIdentifier("group-chat-pending-message-\(message.id)")
     }
 }
 

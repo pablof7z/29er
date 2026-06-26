@@ -64,9 +64,6 @@ enum TypedProjectionGlue {
                 eventId: item.eventId ?? "",
                 kind: item.kind,
                 content: item.content ?? "",
-                tags: item.tags.map { tag in
-                    tag.values.map { $0 ?? "" }
-                },
                 createdAt: item.createdAt,
                 status: item.status ?? "",
                 canRetry: item.canRetry,

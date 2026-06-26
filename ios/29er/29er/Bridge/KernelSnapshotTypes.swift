@@ -91,12 +91,20 @@ struct PublishOutboxRelay: Decodable, Identifiable, Equatable {
 }
 
 /// One in-flight publish row from the kernel-owned publish engine.
+///
+/// A generic outbox/rendering DTO — it mirrors the canonical kernel
+/// `publish_outbox` (`KPBO`) schema field-for-field. `kind` is canonical and
+/// retained for rendering, but the shell MUST NOT branch group policy on it.
+/// The previously-decoded `tags` field was stale Swift/generated drift (the
+/// pinned `publish_outbox.fbs` carries no `tags`, so it always decoded empty);
+/// it is dropped. Group-scoped pending state (chat delivery status, membership
+/// / admin actions) is owned by Rust projections, never reconstructed here from
+/// raw outbox tags.
 struct PublishOutboxItem: Decodable, Identifiable, Equatable {
     let handle: String
     let eventId: String
     let kind: UInt32
     let content: String
-    let tags: [[String]]
     let createdAt: UInt64
     let status: String
     let canRetry: Bool
