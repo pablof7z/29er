@@ -4,6 +4,12 @@
 
 Last updated: 2026-06-27
 
+## git-configuration (1 guide)
+
+| Slug | Title | Summary | Tags | Volatility | Verified | Topic |
+|------|-------|---------|------|------------|----------|-------|
+| [claude-directory-gitignore](guides/claude-directory-gitignore.md) | Excluding .claude/ from Version Control | The `.claude/` directory contains local Claude-related state and configuration and should not be committed to version control. | capture | warm | 2026-06-27 | git-configuration |
+
 ## Research Records (2 records)
 
 | Record | Date | Finding | Agent |
@@ -19,11 +25,12 @@ Last updated: 2026-06-27
 | [2026-06-26-2-enforce-nmp-doctrine-eliminate-protocol-logic](episodes/2026-06-26-2-enforce-nmp-doctrine-eliminate-protocol-logic.md) | 2026-06-26 | Enforce NMP doctrine: eliminate protocol logic from shells and app layer, establish clear boundary (shell=renderer, app=router+composer, NMP=protocol owner) | architecture | active |
 | [2026-06-27-1-chat-ui-implementation-adopt-nmp-content](episodes/2026-06-27-1-chat-ui-implementation-adopt-nmp-content.md) | 2026-06-27 | Chat UI implementation — adopt NMP content renderer and registry components | architecture | active |
 
-## Nouns (19 entities)
+## Nouns (21 entities)
 
 | Noun | Name | Origin | Definition |
 |------|------|--------|------------|
 | [29er](nouns/29er.md) | 29er | extracted | Nostr group chat TUI using Ratatui (0.30+), running on Rust 2021, consuming NMP v0.8 as a git dependency, with iOS sibling shell sharing nmp-app-29er core composition |
+| [chat-renderer](nouns/chat-renderer.md) | chat renderer | extracted | Slack-style grouped layout where consecutive messages from one author collapse under a single header (avatar dot + name + time), with left gutter, day dividers between calendar days, read-marker separator, auto-scroll, and new-message indicator |
 | [compose-chat-message](nouns/compose-chat-message.md) | compose_chat_message | extracted | shared Rust function in nmp-app-29er that transforms raw text + mention pubkeys into kind:9 content with NIP-21 (nostr:npub1...) formatting + p-tags, called by both TUI and iOS before dispatch |
 | [contenttreewire](nouns/contenttreewire.md) | ContentTreeWire | extracted | serde-serializable FFI wire projection of ContentTree; flat index arena with u32 indices instead of recursive references |
 | [groupchatmessage](nouns/groupchatmessage.md) | GroupChatMessage | extracted | flat carrier where threading/reply nesting is deliberately not modeled; minimum fields needed for shell to draw a row |
@@ -34,6 +41,7 @@ Last updated: 2026-06-27
 | [nmp-content-tokenize-text](nouns/nmp-content-tokenize-text.md) | nmp_content_tokenize_text | extracted | pure content-tokenizer C-ABI; FFI wrapper around nmp-content's tokenizer; does not resolve entities |
 | [nmp-doctrine](nouns/nmp-doctrine.md) | NMP doctrine | extracted | kernel emits, per-app crate composes, shell only renders |
 | [nmp-nip29](nouns/nmp-nip29.md) | nmp-nip29 | extracted | NIP-29 relay groups (chat rooms/channels), the core domain crate |
+| [nostr-content](nouns/nostr-content.md) | nostr_content | extracted | App-owned native components vendored from the NMP registry |
 | [nostrcontentview](nouns/nostrcontentview.md) | NostrContentView | extracted | SwiftUI renderer for ContentTreeWire that walks tree.roots and flattens the arena into block-level groups with inline text concatenation |
 | [publish-group-event](nouns/publish-group-event.md) | publish_group_event | extracted | the canonical NMP action surface (nmp.nip29.publish_group_event): app says 'publish (kind, content, tags) to group X', NMP injects envelope (h, previous, routing) and signs |
 | [rich-content-rendering](nouns/rich-content-rendering.md) | rich content rendering | extracted | replace raw-content Text with NMP content renderer so mentions/embeds/media/hashtags/markdown render properly |
