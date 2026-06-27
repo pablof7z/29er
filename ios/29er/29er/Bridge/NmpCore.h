@@ -170,8 +170,8 @@ void nmp_app_29er_declare_consumed_projections(void *app);
 //   • `group_id_json` is a JSON object naming the target group:
 //       {"host_relay_url":"wss://groups.example.com","local_id":"room"}
 //   • Returns void — registers no handle and exports no companion
-//     `unregister`. The group's chat messages surface on every kernel
-//     snapshot tick under the `projections` key `"nmp.nip29.group_chat"`.
+//     `unregister`. The group's timeline events surface on every kernel
+//     snapshot tick under the `projections` key `"nmp.nip29.group_timeline"`.
 //   • Fire-and-forget (D6): a null `app`, null / invalid-UTF-8
 //     `group_id_json`, or a JSON shape that does not deserialize to a
 //     `GroupId` all degrade to a silent no-op.

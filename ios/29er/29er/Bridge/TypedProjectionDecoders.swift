@@ -1,12 +1,11 @@
 import FlatBuffers
 import Foundation
 
-/// Hand-written typed-projection decoders for 29er's S01 surface. Mirrors the
-/// shape of Chirp's generated `TypedProjectionDecoders.generated.swift` but
-/// holds only the two sidecars 29er consumes: `active_account` (`KACT`) and
-/// `nmp.nip29.discovered_groups` (`NDGS`). When 29er grows to consume more
-/// kernel projections, copy the matching decoder from Chirp's generated file
-/// (or regenerate via `cargo run -p nmp-codegen -- gen swift …`).
+/// Hand-written typed-projection decoders for 29er's current Swift surface.
+/// Mirrors the shape of Chirp's generated
+/// `TypedProjectionDecoders.generated.swift` but only includes the sidecars
+/// 29er consumes. When 29er grows to consume more kernel projections, copy the
+/// matching decoder from Chirp's generated file or regenerate this surface.
 enum TypedActiveAccountDecoder {
     /// `TypedProjection.key` the producer publishes for this projection.
     static let key = "active_account"
@@ -67,10 +66,10 @@ enum TypedDiscoveredGroupsDecoder {
     }
 }
 
-enum TypedGroupChatDecoder {
-    static let key = "nmp.nip29.group_chat"
-    static let schemaId = "nmp.nip29.group_chat"
-    static let fileIdentifier = "NGCS"
+enum TypedGroupTimelineDecoder {
+    static let key = "nmp.nip29.group_timeline"
+    static let schemaId = "nmp.nip29.group_timeline"
+    static let fileIdentifier = "NGTL"
 
     static func decode(from projections: [TypedProjectionEnvelope]) -> GroupChatSnapshot? {
         guard let projection = projections.first(where: {
@@ -84,8 +83,8 @@ enum TypedGroupChatDecoder {
     static func decode(bytes: Data) -> GroupChatSnapshot? {
         guard !bytes.isEmpty else { return nil }
         var buffer = ByteBuffer(data: bytes)
-        let reader: nmp_nip29_GroupChatSnapshot = getRoot(byteBuffer: &buffer)
-        return TypedProjectionGlue.groupChat(reader)
+        let reader: nmp_nip29_GroupTimelineSnapshot = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.groupTimeline(reader)
     }
 }
 

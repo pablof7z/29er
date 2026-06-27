@@ -232,7 +232,7 @@ struct GroupTimelineView: View {
     }
 
     private var visibleMessages: [GroupChatMessage] {
-        // The Rust-owned `group_chat` projection is the SINGLE ordered, deduped
+        // The Rust-owned `group_timeline` projection is the single ordered, deduped
         // message list — it already folds in the active account's own sends
         // (V-83 event-store publish-back hydrates them into the projection), so
         // the shell no longer joins `publish_outbox` against chat, walks raw

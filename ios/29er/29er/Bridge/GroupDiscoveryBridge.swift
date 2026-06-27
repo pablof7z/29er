@@ -23,8 +23,8 @@ private let gdLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupD
 // ── KernelHandle NIP-29 discovery + join extension (C-FFI surface) ────────
 
 extension KernelHandle {
-    /// Wire a NIP-29 `GroupChatProjection` for `groupId` into the kernel. Pure
-    /// consumption: messages surface under `nmp.nip29.group_chat` on snapshots.
+    /// Wire a NIP-29 `GroupTimelineProjection` for `groupId` into the kernel.
+    /// Pure consumption: messages surface under `nmp.nip29.group_timeline` on snapshots.
     func registerGroupChat(groupId: GroupId) {
         guard
             let data = try? JSONSerialization.data(withJSONObject: groupId.jsonObject),
@@ -34,7 +34,7 @@ extension KernelHandle {
             return
         }
         json.withCString { nmp_app_29er_register_group_chat(raw, $0) }
-        gdLog.info("registered NIP-29 group chat projection for \(groupId.localId, privacy: .public)")
+        gdLog.info("registered NIP-29 group timeline projection for \(groupId.localId, privacy: .public)")
     }
 
     /// Open a NIP-29 group-discovery session for `hostRelayUrl`.

@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 use tui_scrollview::{ScrollView, ScrollViewState};
-use nmp_nip29::projection::GroupChatMessage;
+use nmp_nip29::projection::GroupTimelineEvent as GroupChatMessage;
 use crate::actions::Action;
 use crate::app::{Focus, RelayState, TuiSnapshot};
 use crate::ui;

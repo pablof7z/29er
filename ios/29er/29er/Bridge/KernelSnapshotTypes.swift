@@ -31,8 +31,9 @@ struct GroupChatMessage: Decodable, Identifiable, Equatable {
     let kind: UInt32
 }
 
-/// The serialised read model a group timeline consumes. `messages` is ordered
-/// newest-first by `GroupChatProjection`; Swift does not re-sort.
+/// The serialised read model a group timeline consumes. `messages` is a local
+/// UI alias for the NMP `GroupTimelineSnapshot.events` vector and is ordered
+/// newest-first by Rust; Swift does not re-sort.
 struct GroupChatSnapshot: Decodable, Equatable {
     let messages: [GroupChatMessage]
 
