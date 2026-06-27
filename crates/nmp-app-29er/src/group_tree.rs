@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
 use nmp_core::substrate::{BoundedMessageMap, KernelEvent, MAX_PROJECTION_MESSAGES};
-use nmp_core::KernelEventObserver;
+use nmp_core::ObservedProjectionSink;
 use nmp_nip29::kinds::{h_tag_value, KIND_CHAT_MESSAGE};
 use nmp_nip29::projection::{DiscoveredGroup, DiscoveredGroupsSnapshot, JoinedGroupsSnapshot};
 
@@ -193,7 +193,7 @@ impl Default for GroupTreeProjection {
     }
 }
 
-impl KernelEventObserver for GroupTreeProjection {
+impl ObservedProjectionSink for GroupTreeProjection {
     fn on_kernel_event(&self, event: &KernelEvent) {
         if event.kind != KIND_CHAT_MESSAGE {
             return;
