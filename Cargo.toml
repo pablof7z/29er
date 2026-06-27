@@ -9,16 +9,16 @@ repository = "https://github.com/pablof7z/29er"
 version = "0.1.0"
 
 # NMP is consumed as an external git dependency — never vendored.
-# Pinned to the NMP v0.8.3 release train.
+# Pinned to the NMP v0.8.4 release train.
 [workspace.dependencies]
-nmp-core = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.3" }
-nmp-ffi = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.3" }
-nmp-defaults = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.3" }
-nmp-nip29 = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.3" }
-nmp-planner = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.3" }
-nmp-network = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.3" }
-nmp-signer-iface = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.3" }
-nmp-content = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.3" }
+nmp-core = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.4" }
+nmp-ffi = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.4" }
+nmp-defaults = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.4" }
+nmp-nip29 = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.4" }
+nmp-planner = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.4" }
+nmp-network = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.4" }
+nmp-signer-iface = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.4" }
+nmp-content = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", tag = "nmp-v0.8.4" }
 nmp-app-29er = { path = "crates/nmp-app-29er" }
 flatbuffers = "25.12.19"
 nostr = "0.44"
