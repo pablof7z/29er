@@ -37,6 +37,8 @@ extension KernelModel {
            ) {
             profileRefsRevision &+= 1
         }
+        typedRelaySelector = result.typedRelaySelector
+        typedRelayDiagnostics = result.typedRelayDiagnostics
 
         // S02 — derive `identityState` from the `active_account` typed
         // projection. The first tick with `rev > 0` collapses `unknown` to
@@ -68,10 +70,15 @@ extension KernelModel {
             // static snapshot registered at app init, so it is present on this
             // tick; if it has not landed yet the guard skips and the next tick
             // (or GroupTreeView's `.task`) retries.
-            let suggestedRelay = groupDefaults.suggestedRelayUrl
+            let suggestedRelay = relaySelector.activeRelayUrl
             if !wasSignedIn, case .signedIn = identityState,
                discoveredGroups.hostRelayUrl.isEmpty, !suggestedRelay.isEmpty {
                 openGroupDiscovery(hostRelayUrl: suggestedRelay)
+            }
+            if case .signedIn = identityState,
+               !relaySelector.activeRelayUrl.isEmpty,
+               discoveredGroups.hostRelayUrl != relaySelector.activeRelayUrl {
+                openGroupDiscovery(hostRelayUrl: relaySelector.activeRelayUrl)
             }
         }
 
@@ -117,6 +124,8 @@ extension KernelModel {
         typedGroupDefaults = nil
         profileRefs.reset()
         profileRefsRevision &+= 1
+        typedRelaySelector = nil
+        typedRelayDiagnostics = nil
     }
 
     /// Active account pubkey (`nil` ⇒ no active account). Read through the
@@ -153,6 +162,25 @@ extension KernelModel {
     /// shell reads it instead of hardcoding a relay URL (D7).
     var groupDefaults: GroupDefaultsSnapshot {
         typedGroupDefaults ?? .empty
+    }
+
+    var relaySelector: RelaySelectorSnapshot {
+        typedRelaySelector ?? .empty
+    }
+
+    var relayDiagnostics: RelayDiagnosticsSnapshot {
+        typedRelayDiagnostics ?? .empty
+    }
+
+    var activeRelayTitle: String {
+        relayDisplayName(for: relaySelector.activeRelayUrl)
+    }
+
+    func relayDisplayName(for relayUrl: String) -> String {
+        if let name = relayDiagnostics.relay(for: relayUrl)?.nip11Name, !name.isEmpty {
+            return name
+        }
+        return relayUrl.relayHostLabel.isEmpty ? "Relay" : relayUrl.relayHostLabel
     }
 }
 

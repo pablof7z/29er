@@ -175,3 +175,47 @@ enum TypedGroupTreeDecoder {
         return TypedProjectionGlue.groupTree(reader)
     }
 }
+
+enum TypedRelaySelectorDecoder {
+    static let key = "nmp.29er.relay_selector"
+    static let schemaId = "nmp.29er.relay_selector"
+    static let fileIdentifier = "N29R"
+
+    static func decode(from projections: [TypedProjectionEnvelope]) -> RelaySelectorSnapshot? {
+        guard let projection = projections.first(where: {
+            $0.key == key && $0.schemaId == schemaId
+        }), !projection.payload.isEmpty else {
+            return nil
+        }
+        return decode(bytes: projection.payload)
+    }
+
+    static func decode(bytes: Data) -> RelaySelectorSnapshot? {
+        guard !bytes.isEmpty else { return nil }
+        var buffer = ByteBuffer(data: bytes)
+        let reader: nmp_app_29er_RelaySelectorSnapshot = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.relaySelector(reader)
+    }
+}
+
+enum TypedRelayDiagnosticsDecoder {
+    static let key = "relay_diagnostics"
+    static let schemaId = "relay_diagnostics"
+    static let fileIdentifier = "KRDG"
+
+    static func decode(from projections: [TypedProjectionEnvelope]) -> RelayDiagnosticsSnapshot? {
+        guard let projection = projections.first(where: {
+            $0.key == key && $0.schemaId == schemaId
+        }), !projection.payload.isEmpty else {
+            return nil
+        }
+        return decode(bytes: projection.payload)
+    }
+
+    static func decode(bytes: Data) -> RelayDiagnosticsSnapshot? {
+        guard !bytes.isEmpty else { return nil }
+        var buffer = ByteBuffer(data: bytes)
+        let reader: nmp_kernel_RelayDiagnosticsSnapshot = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.relayDiagnostics(reader)
+    }
+}

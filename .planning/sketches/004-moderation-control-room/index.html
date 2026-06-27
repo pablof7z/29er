@@ -1,0 +1,1281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>29er TUI Sketch 004 - Moderation Control Room</title>
+  <link rel="stylesheet" href="../themes/default.css">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.35;
+      overflow-x: hidden;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .viewport-shell {
+      width: 100%;
+      min-height: 100vh;
+      margin: 0 auto;
+      transition: max-width 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .viewport-shell.constrained {
+      min-height: calc(100vh - 28px);
+      margin: 14px auto;
+      border: 1px solid var(--color-border-strong);
+      box-shadow: var(--shadow-md);
+    }
+
+    .terminal {
+      min-height: 100vh;
+      background: var(--color-bg);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(210px, 1fr) auto minmax(180px, 0.65fr);
+      gap: var(--space-3);
+      align-items: center;
+      padding: var(--space-2) var(--space-3);
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface);
+      min-width: 0;
+    }
+
+    .brand,
+    .session,
+    .relay {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .brand {
+      color: var(--color-primary);
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    .session {
+      color: var(--color-text-muted);
+      text-align: center;
+    }
+
+    .relay {
+      color: var(--color-success);
+      text-align: right;
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(230px, 0.86fr) minmax(320px, 1.36fr) minmax(330px, 1.18fr);
+      min-height: 0;
+    }
+
+    .pane {
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid var(--color-border);
+      background: rgba(24, 23, 19, 0.92);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .pane:last-child {
+      border-right: 0;
+    }
+
+    .pane-header {
+      padding: var(--space-2) var(--space-3);
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-2);
+      min-height: 37px;
+    }
+
+    .pane-title {
+      color: var(--color-accent);
+      font-weight: 800;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hint {
+      color: var(--color-text-faint);
+      font-size: var(--text-xs);
+      white-space: nowrap;
+    }
+
+    .room-tree {
+      overflow: auto;
+      padding: var(--space-2);
+      flex: 1;
+    }
+
+    .tree-row {
+      width: 100%;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--color-text);
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: var(--space-2);
+      padding: 6px var(--space-2);
+      border-radius: var(--radius-md);
+      text-align: left;
+      transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+      min-width: 0;
+    }
+
+    .tree-row:hover,
+    .tree-row:focus-visible {
+      outline: none;
+      border-color: var(--color-primary);
+      background: rgba(53, 208, 186, 0.08);
+    }
+
+    .tree-row.active {
+      border-color: var(--color-primary);
+      background: rgba(53, 208, 186, 0.13);
+      box-shadow: var(--shadow-glow);
+    }
+
+    .tree-indent-1 { padding-left: 22px; }
+    .tree-indent-2 { padding-left: 38px; }
+    .tree-indent-3 { padding-left: 54px; }
+
+    .tree-main {
+      min-width: 0;
+    }
+
+    .tree-name {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tree-meta {
+      display: block;
+      color: var(--color-text-faint);
+      font-size: var(--text-xs);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 20px;
+      max-width: 52px;
+      height: 20px;
+      padding: 0 6px;
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius-sm);
+      color: var(--color-accent);
+      background: var(--color-code-bg);
+      font-size: var(--text-xs);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .projection-box {
+      margin: var(--space-2);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-code-bg);
+      overflow: hidden;
+    }
+
+    .projection-box pre {
+      margin: 0;
+      padding: var(--space-2);
+      color: var(--color-text-muted);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      font-size: 11px;
+    }
+
+    .chat-body {
+      overflow: auto;
+      padding: var(--space-3);
+      flex: 1;
+      min-height: 0;
+    }
+
+    .message {
+      display: grid;
+      grid-template-columns: minmax(74px, 88px) 1fr;
+      gap: var(--space-2);
+      padding: 7px 0;
+      border-bottom: 1px solid rgba(74, 69, 57, 0.52);
+      min-width: 0;
+    }
+
+    .message:last-child {
+      border-bottom: 0;
+    }
+
+    .sender {
+      color: var(--color-link);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .message-text {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .mention {
+      color: var(--color-primary);
+      font-weight: 800;
+    }
+
+    .composer {
+      border-top: 1px solid var(--color-border);
+      padding: var(--space-2);
+      background: var(--color-surface-2);
+      display: grid;
+      gap: var(--space-2);
+    }
+
+    .textarea-shell {
+      min-height: 70px;
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius-md);
+      background: var(--color-code-bg);
+      color: var(--color-text-muted);
+      padding: var(--space-2);
+      overflow-wrap: anywhere;
+    }
+
+    .status-row,
+    .command-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-2);
+      min-width: 0;
+    }
+
+    .command-row button,
+    .form-actions button,
+    .retry-btn,
+    .tool-btn,
+    .tab-btn {
+      border: 1px solid var(--color-border-strong);
+      background: var(--color-surface-2);
+      color: var(--color-text);
+      border-radius: var(--radius-sm);
+      padding: 5px 8px;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+      min-width: 0;
+    }
+
+    .command-row button:hover,
+    .form-actions button:hover,
+    .retry-btn:hover,
+    .tool-btn:hover,
+    .tab-btn:hover {
+      border-color: var(--color-primary);
+      color: var(--color-primary-hover);
+    }
+
+    .command-row button:active,
+    .form-actions button:active,
+    .retry-btn:active,
+    .tool-btn:active,
+    .tab-btn:active {
+      transform: translateY(1px);
+    }
+
+    .admin-content {
+      display: grid;
+      grid-template-rows: auto auto minmax(178px, 1fr) minmax(150px, 0.86fr);
+      min-height: 0;
+      flex: 1;
+    }
+
+    .member-table-wrap {
+      border-bottom: 1px solid var(--color-border);
+      overflow: auto;
+      min-height: 146px;
+      max-height: 32vh;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      padding: 7px var(--space-2);
+      border-bottom: 1px solid rgba(74, 69, 57, 0.65);
+      text-align: left;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    th {
+      color: var(--color-text-faint);
+      font-weight: 700;
+      background: var(--color-surface);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    tr.member-row {
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    tr.member-row:hover,
+    tr.member-row.selected {
+      background: rgba(53, 208, 186, 0.1);
+      color: var(--color-primary-hover);
+    }
+
+    .admin-flag {
+      color: var(--color-accent);
+    }
+
+    .tabs {
+      display: flex;
+      gap: 1px;
+      padding: var(--space-2) var(--space-2) 0;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+      overflow-x: auto;
+    }
+
+    .tab-btn {
+      flex: 1 0 auto;
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+      max-width: 110px;
+      white-space: nowrap;
+    }
+
+    .tab-btn.active {
+      color: var(--color-primary);
+      border-color: var(--color-primary);
+      background: var(--color-code-bg);
+    }
+
+    .form-panel {
+      display: none;
+      padding: var(--space-3);
+      overflow: auto;
+      min-height: 0;
+    }
+
+    .form-panel.active {
+      display: block;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--space-3);
+    }
+
+    .field {
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+    }
+
+    .field.full {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      color: var(--color-text-muted);
+      font-size: var(--text-xs);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius-sm);
+      background: var(--color-code-bg);
+      color: var(--color-text);
+      padding: 7px 8px;
+      min-width: 0;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    textarea {
+      min-height: 78px;
+      resize: vertical;
+      overflow-wrap: anywhere;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: var(--shadow-glow);
+    }
+
+    .field.invalid input,
+    .field.invalid select,
+    .field.invalid textarea {
+      border-color: var(--color-danger);
+    }
+
+    .error {
+      min-height: 14px;
+      color: var(--color-danger);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+
+    .form-actions {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+      align-items: center;
+      justify-content: space-between;
+      min-width: 0;
+    }
+
+    .primary {
+      color: var(--color-code-bg) !important;
+      background: var(--color-primary) !important;
+      border-color: var(--color-primary) !important;
+      font-weight: 800;
+    }
+
+    .result-code {
+      color: var(--color-accent);
+      overflow-wrap: anywhere;
+    }
+
+    .outbox {
+      border-top: 1px solid var(--color-border);
+      overflow: auto;
+      background: var(--color-code-bg);
+    }
+
+    .outbox-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-3);
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface);
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    .outbox-row {
+      display: grid;
+      grid-template-columns: 78px minmax(120px, 1fr) 72px auto;
+      gap: var(--space-2);
+      align-items: center;
+      padding: 7px var(--space-3);
+      border-bottom: 1px solid rgba(74, 69, 57, 0.65);
+      min-width: 0;
+    }
+
+    .outbox-row > span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .status-pending {
+      color: var(--color-warning);
+    }
+
+    .status-confirmed {
+      color: var(--color-success);
+    }
+
+    .status-failed {
+      color: var(--color-danger);
+    }
+
+    .throbber::after {
+      content: "";
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      margin-left: 5px;
+      border: 1px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .move-preview {
+      margin-top: var(--space-3);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-code-bg);
+      padding: var(--space-2);
+      color: var(--color-text-muted);
+      overflow-wrap: anywhere;
+    }
+
+    .footer {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: var(--space-3);
+      padding: var(--space-2) var(--space-3);
+      border-top: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text-faint);
+      min-width: 0;
+    }
+
+    .footer span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 20px;
+      transform: translateX(-50%) translateY(20px);
+      opacity: 0;
+      z-index: 9998;
+      max-width: min(520px, calc(100vw - 24px));
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius-md);
+      background: var(--color-code-bg);
+      color: var(--color-text);
+      padding: var(--space-2) var(--space-3);
+      box-shadow: var(--shadow-md);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+      overflow-wrap: anywhere;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    #sketch-tools {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 9999;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      max-width: min(360px, calc(100vw - 24px));
+      padding: 8px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.74);
+      color: #fff;
+      font-family: system-ui, sans-serif;
+      font-size: 12px;
+      opacity: 0.46;
+      transition: opacity 0.2s ease;
+    }
+
+    #sketch-tools:hover {
+      opacity: 1;
+    }
+
+    #sketch-tools button,
+    #sketch-tools select {
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+      padding: 4px 6px;
+      font-size: 12px;
+    }
+
+    #sketch-tools select option {
+      color: #111;
+    }
+
+    .annotation-tooltip {
+      position: fixed;
+      z-index: 10000;
+      pointer-events: none;
+      display: none;
+      max-width: 260px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: rgba(0, 0, 0, 0.86);
+      color: #fff;
+      font: 12px system-ui, sans-serif;
+    }
+
+    .annotating *:hover {
+      outline: 1px dashed rgba(53, 208, 186, 0.75);
+      outline-offset: -1px;
+    }
+
+    @media (max-width: 1000px) {
+      .main-grid {
+        grid-template-columns: minmax(190px, 0.8fr) minmax(300px, 1.2fr);
+        grid-template-rows: minmax(360px, 1fr) minmax(480px, 1fr);
+      }
+
+      .admin-pane {
+        grid-column: 1 / -1;
+        border-top: 1px solid var(--color-border);
+      }
+    }
+
+    @media (max-width: 680px) {
+      body {
+        font-size: 12px;
+      }
+
+      .topbar,
+      .footer {
+        grid-template-columns: 1fr;
+      }
+
+      .session,
+      .relay {
+        text-align: left;
+      }
+
+      .main-grid {
+        display: block;
+      }
+
+      .pane {
+        min-height: 460px;
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border);
+      }
+
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .message {
+        grid-template-columns: 1fr;
+      }
+
+      .outbox-row {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+
+      .tabs {
+        flex-wrap: wrap;
+      }
+
+      .tab-btn {
+        max-width: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="viewportShell" class="viewport-shell">
+    <main class="terminal" aria-label="29er moderation control room TUI wireframe">
+      <header class="topbar">
+        <div class="brand">29er::moderation-control-room</div>
+        <div class="session">signed in as npub1pablo...e2a | active relay wss://nip29.f7z.io</div>
+        <div class="relay">NMP projection live | 4 typed actions ready</div>
+      </header>
+
+      <section class="main-grid">
+        <aside class="pane">
+          <div class="pane-header">
+            <span class="pane-title">GroupTreeNode</span>
+            <span class="hint">Layout::List</span>
+          </div>
+          <div class="room-tree" id="roomTree"></div>
+          <div class="projection-box">
+            <pre id="projectionDump"></pre>
+          </div>
+        </aside>
+
+        <section class="pane">
+          <div class="pane-header">
+            <span class="pane-title" id="timelineTitle">kind:9 timeline</span>
+            <span class="hint">Paragraph + Scrollbar</span>
+          </div>
+          <div class="chat-body" id="chatBody"></div>
+          <div class="composer">
+            <div class="textarea-shell" contenteditable="true" spellcheck="false" aria-label="Message composer">Heads up @moderators, invite window is open for two new contributors.</div>
+            <div class="command-row">
+              <span class="hint">dispatch: SendGroupMessage { groupId, content, mentions }</span>
+              <button id="sendMessageBtn" type="button">send kind:9</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="pane admin-pane">
+          <div class="pane-header">
+            <span class="pane-title">Admin Operation Console</span>
+            <span class="hint">Tabs + Table + TextArea</span>
+          </div>
+          <div class="admin-content">
+            <div class="member-table-wrap">
+              <table aria-label="Group members">
+                <thead>
+                  <tr>
+                    <th style="width:32%">displayName</th>
+                    <th style="width:36%">pubkey</th>
+                    <th style="width:16%">role</th>
+                    <th style="width:16%">admin</th>
+                  </tr>
+                </thead>
+                <tbody id="memberRows"></tbody>
+              </table>
+            </div>
+
+            <nav class="tabs" aria-label="Action tabs">
+              <button class="tab-btn active" type="button" data-tab="invites">Invites</button>
+              <button class="tab-btn" type="button" data-tab="people">People</button>
+              <button class="tab-btn" type="button" data-tab="room">Room</button>
+              <button class="tab-btn" type="button" data-tab="move">Move</button>
+            </nav>
+
+            <div>
+              <form class="form-panel active" data-panel="invites" novalidate>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="inviteRoom">groupId</label>
+                    <input id="inviteRoom" name="inviteRoom" value="ops" data-required="true">
+                    <span class="error"></span>
+                  </div>
+                  <div class="field">
+                    <label for="inviteUses">max uses</label>
+                    <input id="inviteUses" name="inviteUses" type="number" min="1" max="50" value="8" data-required="true">
+                    <span class="error"></span>
+                  </div>
+                  <div class="field full">
+                    <label for="inviteNote">note</label>
+                    <textarea id="inviteNote" name="inviteNote" data-required="true">Access for June relay testing crew.</textarea>
+                    <span class="error"></span>
+                  </div>
+                  <div class="form-actions">
+                    <span class="result-code" id="inviteCode">invite code: not generated</span>
+                    <button class="primary" type="submit">create invite code</button>
+                  </div>
+                </div>
+              </form>
+
+              <form class="form-panel" data-panel="people" novalidate>
+                <div class="form-grid">
+                  <div class="field full">
+                    <label for="personPubkey">pubkey</label>
+                    <input id="personPubkey" name="personPubkey" value="npub1sara7k9v...4wq" data-required="true">
+                    <span class="error"></span>
+                  </div>
+                  <div class="field">
+                    <label for="personRole">role</label>
+                    <select id="personRole" name="personRole" data-required="true">
+                      <option>member</option>
+                      <option selected>moderator</option>
+                      <option>admin</option>
+                      <option>observer</option>
+                    </select>
+                    <span class="error"></span>
+                  </div>
+                  <div class="field">
+                    <label for="personAdmin">admin flag</label>
+                    <select id="personAdmin" name="personAdmin" data-required="true">
+                      <option value="false">false</option>
+                      <option value="true" selected>true</option>
+                    </select>
+                    <span class="error"></span>
+                  </div>
+                  <div class="form-actions">
+                    <span class="hint" id="selectedMemberHint">selected: sara</span>
+                    <button class="primary" type="submit">put user / add role</button>
+                  </div>
+                </div>
+              </form>
+
+              <form class="form-panel" data-panel="room" novalidate>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="childParent">parent groupId</label>
+                    <input id="childParent" name="childParent" value="ops" data-required="true">
+                    <span class="error"></span>
+                  </div>
+                  <div class="field">
+                    <label for="childGroup">new groupId</label>
+                    <input id="childGroup" name="childGroup" value="triage" data-required="true">
+                    <span class="error"></span>
+                  </div>
+                  <div class="field full">
+                    <label for="childName">display name</label>
+                    <input id="childName" name="childName" value="Triage Desk" data-required="true">
+                    <span class="error"></span>
+                  </div>
+                  <div class="form-actions">
+                    <span class="hint">dispatch: CreateChildRoom { parentId, groupId, name }</span>
+                    <button class="primary" type="submit">create child room</button>
+                  </div>
+                </div>
+              </form>
+
+              <form class="form-panel" data-panel="move" novalidate>
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="moveRoom">room to move</label>
+                    <select id="moveRoom" name="moveRoom" data-required="true"></select>
+                    <span class="error"></span>
+                  </div>
+                  <div class="field">
+                    <label for="moveParent">new parent</label>
+                    <select id="moveParent" name="moveParent" data-required="true"></select>
+                    <span class="error"></span>
+                  </div>
+                  <div class="field full">
+                    <label for="moveReason">reason</label>
+                    <input id="moveReason" name="moveReason" value="Move moderation queue under active ops branch." data-required="true">
+                    <span class="error"></span>
+                  </div>
+                  <div class="form-actions">
+                    <span class="hint">dispatch: SetParentRoom { groupId, parentId }</span>
+                    <button class="primary" type="submit">move room</button>
+                  </div>
+                </div>
+                <div class="move-preview" id="movePreview"></div>
+              </form>
+            </div>
+
+            <div class="outbox" aria-label="Publish outbox">
+              <div class="outbox-header">
+                <span class="pane-title">PublishOutboxItem</span>
+                <span class="hint">Gauge/Sparkline + throbber</span>
+              </div>
+              <div id="outboxRows"></div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <footer class="footer">
+        <span id="footerStatus">focus: ops | shortcuts: j/k tree, tab actions, enter dispatch, r retry failed</span>
+        <span>shell renders projections; Rust/NMP owns truth</span>
+      </footer>
+    </main>
+  </div>
+
+  <div id="sketch-tools" aria-label="Sketch toolbar">
+    <select aria-label="Theme switcher" onchange="document.querySelector('link[href*=themes]').href='../themes/'+this.value+'.css'">
+      <option value="default">Default</option>
+    </select>
+    <button type="button" data-width="375">Phone</button>
+    <button type="button" data-width="768">Tablet</button>
+    <button type="button" data-width="1280">Desktop</button>
+    <button type="button" data-width="full">Full</button>
+    <button type="button" id="annotateBtn">Annotate</button>
+  </div>
+  <div class="annotation-tooltip" id="annotationTooltip"></div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const rooms = [
+      { groupId: "root", displayName: "29er Commons", parentId: null, childIds: ["ops", "dev", "events"], memberCount: 482, adminCount: 8, isPublic: true, isOpen: true, isBranch: true, lastMessagePreview: "weekly maintainer sync", unreadCount: 2 },
+      { groupId: "ops", displayName: "Operations", parentId: "root", childIds: ["moderation", "triage"], memberCount: 64, adminCount: 6, isPublic: false, isOpen: true, isBranch: true, lastMessagePreview: "invite window is open", unreadCount: 7 },
+      { groupId: "moderation", displayName: "Moderation Queue", parentId: "ops", childIds: [], memberCount: 18, adminCount: 5, isPublic: false, isOpen: false, isBranch: false, lastMessagePreview: "review @sara escalation", unreadCount: 12 },
+      { groupId: "triage", displayName: "Triage Desk", parentId: "ops", childIds: [], memberCount: 11, adminCount: 3, isPublic: false, isOpen: true, isBranch: false, lastMessagePreview: "new report batch", unreadCount: 4 },
+      { groupId: "dev", displayName: "Protocol Dev", parentId: "root", childIds: ["relay"], memberCount: 142, adminCount: 4, isPublic: true, isOpen: true, isBranch: true, lastMessagePreview: "kind:9 mention parser", unreadCount: 1 },
+      { groupId: "relay", displayName: "Relay Ops", parentId: "dev", childIds: [], memberCount: 28, adminCount: 4, isPublic: false, isOpen: true, isBranch: false, lastMessagePreview: "nip29.f7z.io recovered", unreadCount: 0 },
+      { groupId: "events", displayName: "Events", parentId: "root", childIds: [], memberCount: 95, adminCount: 2, isPublic: true, isOpen: true, isBranch: false, lastMessagePreview: "Athens meetup planning", unreadCount: 0 }
+    ];
+
+    const messages = [
+      { id: "m11", pubkey: "npub1sara7...", content: "I can take the new @reports queue if the child room lands today.", createdAt: "10:14", kind: 9 },
+      { id: "m12", pubkey: "npub1pablo...", content: "Create invite code first, then promote Sara to moderator for ops and triage.", createdAt: "10:16", kind: 9 },
+      { id: "m13", pubkey: "npub1milo8...", content: "Relay ack is slower than usual, keep failed publish rows visible for retry.", createdAt: "10:18", kind: 9 },
+      { id: "m14", pubkey: "npub1lina5...", content: "@moderators please keep hierarchy moves explicit so clients can project the tree.", createdAt: "10:22", kind: 9 }
+    ];
+
+    const members = [
+      { pubkey: "npub1pablo...e2a", displayName: "pablo", admin: true, role: "owner" },
+      { pubkey: "npub1sara7k9v...4wq", displayName: "sara", admin: true, role: "moderator" },
+      { pubkey: "npub1milo8s2p...9fh", displayName: "milo", admin: false, role: "member" },
+      { pubkey: "npub1lina5h0m...2kd", displayName: "lina", admin: true, role: "admin" },
+      { pubkey: "npub1omar0t4q...7pz", displayName: "omar", admin: false, role: "observer" }
+    ];
+
+    let selectedRoom = "ops";
+    let selectedMember = members[1].pubkey;
+    let moveListenersBound = false;
+    let outbox = [
+      { handle: "pub-218", eventId: "evt9a21", kind: "kind:9002", content: "PutUser sara moderator", status: "confirmed", canRetry: false, relays: ["wss://nip29.f7z.io"] },
+      { handle: "pub-219", eventId: "evt9a22", kind: "kind:9007", content: "Move triage under ops", status: "failed", canRetry: true, relays: ["wss://nip29.f7z.io"] },
+      { handle: "pub-220", eventId: "pending", kind: "kind:9005", content: "Create invite for ops", status: "pending", canRetry: false, relays: ["wss://nip29.f7z.io"] }
+    ];
+
+    const $ = (selector) => document.querySelector(selector);
+    const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+
+    function roomDepth(room) {
+      let depth = 0;
+      let cursor = room;
+      while (cursor.parentId) {
+        depth += 1;
+        cursor = rooms.find((candidate) => candidate.groupId === cursor.parentId);
+        if (!cursor) break;
+      }
+      return Math.min(depth, 3);
+    }
+
+    function renderTree() {
+      const tree = $("#roomTree");
+      tree.innerHTML = "";
+      rooms.forEach((room) => {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = `tree-row tree-indent-${roomDepth(room)}${room.groupId === selectedRoom ? " active" : ""}`;
+        row.innerHTML = `
+          <span>${room.isBranch ? "▾" : "•"}</span>
+          <span class="tree-main">
+            <span class="tree-name">${room.displayName}</span>
+            <span class="tree-meta">${room.groupId} · ${room.memberCount} mem · ${room.adminCount} admin · ${room.isPublic ? "public" : "private"}</span>
+          </span>
+          <span class="badge">${room.unreadCount}</span>
+        `;
+        row.addEventListener("click", () => {
+          selectedRoom = room.groupId;
+          $("#inviteRoom").value = room.groupId;
+          $("#childParent").value = room.groupId;
+          renderAll();
+          showToast(`selected ${room.displayName}`);
+        });
+        tree.appendChild(row);
+      });
+    }
+
+    function renderProjection() {
+      const room = rooms.find((candidate) => candidate.groupId === selectedRoom);
+      $("#projectionDump").textContent = JSON.stringify({
+        groupId: room.groupId,
+        parentId: room.parentId,
+        childIds: room.childIds,
+        memberCount: room.memberCount,
+        adminCount: room.adminCount,
+        unreadCount: room.unreadCount
+      }, null, 2);
+      $("#timelineTitle").textContent = `${room.displayName} · kind:9 timeline`;
+      $("#footerStatus").textContent = `focus: ${room.groupId} | shortcuts: j/k tree, tab actions, enter dispatch, r retry failed`;
+    }
+
+    function renderMessages() {
+      $("#chatBody").innerHTML = messages.map((message) => `
+        <article class="message">
+          <div class="sender">${message.createdAt}<br>${message.pubkey}</div>
+          <div class="message-text">${message.content.replace(/(@[a-z]+)/g, '<span class="mention">$1</span>')}</div>
+        </article>
+      `).join("");
+    }
+
+    function renderMembers() {
+      $("#memberRows").innerHTML = members.map((member) => `
+        <tr class="member-row${member.pubkey === selectedMember ? " selected" : ""}" data-pubkey="${member.pubkey}">
+          <td>${member.displayName}</td>
+          <td>${member.pubkey}</td>
+          <td>${member.role}</td>
+          <td class="${member.admin ? "admin-flag" : ""}">${member.admin ? "true" : "false"}</td>
+        </tr>
+      `).join("");
+      $$(".member-row").forEach((row) => {
+        row.addEventListener("click", () => {
+          selectedMember = row.dataset.pubkey;
+          const member = members.find((candidate) => candidate.pubkey === selectedMember);
+          $("#personPubkey").value = member.pubkey;
+          $("#personRole").value = member.role === "owner" ? "admin" : member.role;
+          $("#personAdmin").value = String(member.admin);
+          $("#selectedMemberHint").textContent = `selected: ${member.displayName}`;
+          renderMembers();
+          showTab("people");
+        });
+      });
+    }
+
+    function renderMoveOptions() {
+      const roomSelect = $("#moveRoom");
+      const parentSelect = $("#moveParent");
+      const previousRoom = roomSelect.value || "moderation";
+      const previousParent = parentSelect.value;
+      roomSelect.innerHTML = rooms.filter((room) => room.groupId !== "root").map((room) => `
+        <option value="${room.groupId}">${room.displayName} (${room.groupId})</option>
+      `).join("");
+      parentSelect.innerHTML = `<option value="">root</option>` + rooms.filter((room) => room.isBranch).map((room) => `
+        <option value="${room.groupId}">${room.displayName} (${room.groupId})</option>
+      `).join("");
+      roomSelect.value = rooms.some((room) => room.groupId === previousRoom) ? previousRoom : "moderation";
+      parentSelect.value = rooms.some((room) => room.groupId === previousParent) ? previousParent : "";
+      if (!moveListenersBound) {
+        roomSelect.addEventListener("change", updateMovePreview);
+        parentSelect.addEventListener("change", updateMovePreview);
+        moveListenersBound = true;
+      }
+      updateMovePreview();
+    }
+
+    function updateMovePreview() {
+      const groupId = $("#moveRoom").value;
+      const parentId = $("#moveParent").value || null;
+      const room = rooms.find((candidate) => candidate.groupId === groupId);
+      const parent = parentId ? rooms.find((candidate) => candidate.groupId === parentId) : null;
+      $("#movePreview").textContent = `${room.displayName} moves from ${room.parentId || "root"} to ${parent ? parent.groupId : "root"}. Tree preview will update after publish confirmation.`;
+    }
+
+    function renderOutbox() {
+      $("#outboxRows").innerHTML = outbox.map((item) => `
+        <div class="outbox-row">
+          <span class="${item.status === "pending" ? "status-pending throbber" : `status-${item.status}`}">${item.status}</span>
+          <span title="${item.content}">${item.content}</span>
+          <span>${item.kind}</span>
+          <span>${item.canRetry ? `<button class="retry-btn" type="button" data-handle="${item.handle}">retry</button>` : item.handle}</span>
+        </div>
+      `).join("");
+      $$(".retry-btn").forEach((button) => {
+        button.addEventListener("click", () => retryItem(button.dataset.handle));
+      });
+    }
+
+    function validateField(field) {
+      const control = field.querySelector("input, select, textarea");
+      const error = field.querySelector(".error");
+      const value = (control.value || "").trim();
+      let message = "";
+      if (control.dataset.required && !value) message = "required";
+      if (control.type === "number") {
+        const min = Number(control.min || 0);
+        const max = Number(control.max || 999999);
+        const current = Number(control.value);
+        if (Number.isNaN(current) || current < min || current > max) message = `range ${min}-${max}`;
+      }
+      field.classList.toggle("invalid", Boolean(message));
+      if (error) error.textContent = message;
+      return !message;
+    }
+
+    function validateForm(form) {
+      return Array.from(form.querySelectorAll(".field")).every(validateField);
+    }
+
+    function enqueue(content, kind, onConfirm) {
+      const handle = `pub-${Math.floor(300 + Math.random() * 700)}`;
+      const item = { handle, eventId: "pending", kind, content, status: "pending", canRetry: false, relays: ["wss://nip29.f7z.io"] };
+      outbox.unshift(item);
+      renderOutbox();
+      showToast(`queued ${content}`);
+      setTimeout(() => {
+        const shouldFail = content.includes("Move") ? Math.random() < 0.45 : Math.random() < 0.18;
+        item.status = shouldFail ? "failed" : "confirmed";
+        item.canRetry = shouldFail;
+        item.eventId = shouldFail ? "n/a" : `evt${Math.random().toString(16).slice(2, 8)}`;
+        if (!shouldFail && onConfirm) onConfirm();
+        renderAll();
+        showToast(`${item.status}: ${content}`);
+      }, 900);
+    }
+
+    function retryItem(handle) {
+      const item = outbox.find((candidate) => candidate.handle === handle);
+      if (!item) return;
+      item.status = "pending";
+      item.canRetry = false;
+      renderOutbox();
+      showToast(`retrying ${item.content}`);
+      setTimeout(() => {
+        item.status = "confirmed";
+        item.eventId = `evt${Math.random().toString(16).slice(2, 8)}`;
+        renderOutbox();
+        showToast(`confirmed: ${item.content}`);
+      }, 800);
+    }
+
+    function showTab(tab) {
+      $$(".tab-btn").forEach((button) => button.classList.toggle("active", button.dataset.tab === tab));
+      $$(".form-panel").forEach((panel) => panel.classList.toggle("active", panel.dataset.panel === tab));
+    }
+
+    function showToast(message) {
+      const toast = $("#toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(showToast.timer);
+      showToast.timer = setTimeout(() => toast.classList.remove("show"), 1800);
+    }
+
+    function renderAll() {
+      renderTree();
+      renderProjection();
+      renderMessages();
+      renderMembers();
+      renderOutbox();
+    }
+
+    $$(".tab-btn").forEach((button) => {
+      button.addEventListener("click", () => showTab(button.dataset.tab));
+    });
+
+    $$(".field").forEach((field) => {
+      const control = field.querySelector("input, select, textarea");
+      control.addEventListener("blur", () => validateField(field));
+    });
+
+    $("form[data-panel='invites']").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!validateForm(form)) return showToast("fix invite fields");
+      const code = `29ER-${$("#inviteRoom").value.toUpperCase()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+      $("#inviteCode").textContent = `invite code: ${code}`;
+      enqueue(`Create invite ${code}`, "kind:9005");
+    });
+
+    $("form[data-panel='people']").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!validateForm(form)) return showToast("fix people fields");
+      const pubkey = $("#personPubkey").value.trim();
+      const role = $("#personRole").value;
+      const admin = $("#personAdmin").value === "true";
+      const member = members.find((candidate) => candidate.pubkey === pubkey);
+      enqueue(`PutUser ${pubkey} ${role}`, "kind:9002", () => {
+        if (member) {
+          member.role = role;
+          member.admin = admin;
+        } else {
+          members.push({ pubkey, displayName: pubkey.slice(0, 10), admin, role });
+        }
+      });
+    });
+
+    $("form[data-panel='room']").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!validateForm(form)) return showToast("fix room fields");
+      const parentId = $("#childParent").value.trim();
+      const groupId = $("#childGroup").value.trim();
+      const displayName = $("#childName").value.trim();
+      enqueue(`CreateChildRoom ${groupId}`, "kind:9004", () => {
+        if (!rooms.find((room) => room.groupId === groupId)) {
+          rooms.push({ groupId, displayName, parentId, childIds: [], memberCount: 1, adminCount: 1, isPublic: false, isOpen: true, isBranch: false, lastMessagePreview: "new child room", unreadCount: 0 });
+          const parent = rooms.find((room) => room.groupId === parentId);
+          if (parent && !parent.childIds.includes(groupId)) {
+            parent.childIds.push(groupId);
+            parent.isBranch = true;
+          }
+          renderMoveOptions();
+        }
+      });
+    });
+
+    $("form[data-panel='move']").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      if (!validateForm(form)) return showToast("fix move fields");
+      const groupId = $("#moveRoom").value;
+      const parentId = $("#moveParent").value || null;
+      enqueue(`Move ${groupId} to ${parentId || "root"}`, "kind:9007", () => {
+        const room = rooms.find((candidate) => candidate.groupId === groupId);
+        const oldParent = rooms.find((candidate) => candidate.groupId === room.parentId);
+        if (oldParent) oldParent.childIds = oldParent.childIds.filter((id) => id !== groupId);
+        const newParent = rooms.find((candidate) => candidate.groupId === parentId);
+        if (newParent && !newParent.childIds.includes(groupId)) newParent.childIds.push(groupId);
+        room.parentId = parentId;
+      });
+    });
+
+    $("#sendMessageBtn").addEventListener("click", () => {
+      const text = $(".textarea-shell").innerText.trim();
+      if (!text) return showToast("message is empty");
+      messages.push({ id: `m${messages.length + 20}`, pubkey: "npub1pablo...", content: text, createdAt: "now", kind: 9 });
+      enqueue(`Send kind:9 to ${selectedRoom}`, "kind:9");
+      $(".textarea-shell").innerText = "";
+      renderMessages();
+    });
+
+    $$("#sketch-tools button[data-width]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const shell = $("#viewportShell");
+        const width = button.dataset.width;
+        shell.classList.toggle("constrained", width !== "full");
+        shell.style.maxWidth = width === "full" ? "none" : `${width}px`;
+      });
+    });
+
+    $("#annotateBtn").addEventListener("click", () => {
+      document.body.classList.toggle("annotating");
+      showToast(document.body.classList.contains("annotating") ? "annotation mode on" : "annotation mode off");
+    });
+
+    document.addEventListener("mousemove", (event) => {
+      const tooltip = $("#annotationTooltip");
+      if (!document.body.classList.contains("annotating") || event.target.closest("#sketch-tools")) {
+        tooltip.style.display = "none";
+        return;
+      }
+      const styles = getComputedStyle(event.target);
+      tooltip.style.display = "block";
+      tooltip.style.left = `${Math.min(event.clientX + 12, window.innerWidth - 270)}px`;
+      tooltip.style.top = `${Math.min(event.clientY + 12, window.innerHeight - 72)}px`;
+      tooltip.textContent = `font ${styles.fontSize} · bg ${styles.backgroundColor} · color ${styles.color} · pad ${styles.paddingTop}`;
+    });
+
+    renderMoveOptions();
+    renderAll();
+  </script>
+</body>
+</html>

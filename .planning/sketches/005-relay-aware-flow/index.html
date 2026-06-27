@@ -1,0 +1,1317 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>29er TUI Sketch 005 - Relay Aware Flow</title>
+  <link rel="stylesheet" href="../themes/default.css">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      min-height: 100%;
+      margin: 0;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-sans);
+      letter-spacing: 0;
+    }
+
+    body {
+      overflow-x: hidden;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    .stage {
+      min-height: 100vh;
+      padding: clamp(8px, 1.8vw, 20px);
+      display: grid;
+      place-items: stretch;
+    }
+
+    .terminal {
+      width: min(1680px, 100%);
+      min-height: calc(100vh - clamp(16px, 3.6vw, 40px));
+      margin: 0 auto;
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius-lg);
+      background: var(--color-code-bg);
+      box-shadow: var(--shadow-md);
+      display: grid;
+      grid-template-rows: auto 1fr minmax(150px, 23vh);
+      overflow: hidden;
+      font-family: var(--font-mono);
+    }
+
+    .topbar {
+      min-height: 44px;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+    }
+
+    .brandline {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      gap: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    .brand {
+      color: var(--color-primary);
+      font-weight: 800;
+    }
+
+    .server {
+      color: var(--color-text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .tab {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: 4px 8px;
+      color: var(--color-text-muted);
+      background: var(--color-surface-2);
+      white-space: nowrap;
+    }
+
+    .tab.active {
+      color: var(--color-code-bg);
+      border-color: var(--color-primary);
+      background: var(--color-primary);
+    }
+
+    .workspace {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(220px, 24%) minmax(360px, 1fr) minmax(260px, 22%);
+      background: var(--color-code-bg);
+    }
+
+    .pane {
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid var(--color-border);
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+    }
+
+    .pane:last-child {
+      border-right: 0;
+    }
+
+    .pane-header {
+      min-height: 39px;
+      border-bottom: 1px solid var(--color-border);
+      background: rgba(24, 23, 19, 0.94);
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--color-text-muted);
+      font-size: var(--text-xs);
+      text-transform: uppercase;
+    }
+
+    .pane-title {
+      color: var(--color-text);
+      font-weight: 800;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .keyhint {
+      color: var(--color-text-faint);
+      white-space: nowrap;
+    }
+
+    .tree-list,
+    .chat-scroll,
+    .side-scroll,
+    .console-scroll {
+      min-height: 0;
+      overflow: auto;
+      scrollbar-color: var(--color-border-strong) var(--color-code-bg);
+      scrollbar-width: thin;
+    }
+
+    .tree-list {
+      padding: 8px;
+    }
+
+    .room {
+      border: 1px solid transparent;
+      border-radius: var(--radius-sm);
+      margin-bottom: 5px;
+      padding: 7px 8px;
+      display: grid;
+      gap: 4px;
+      color: var(--color-text-muted);
+      background: transparent;
+      width: 100%;
+      text-align: left;
+    }
+
+    .room.active {
+      border-color: var(--color-primary);
+      background: rgba(53, 208, 186, 0.08);
+      color: var(--color-text);
+    }
+
+    .room:hover {
+      border-color: var(--color-border-strong);
+    }
+
+    .room-line {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .twisty {
+      color: var(--color-accent);
+      width: 14px;
+    }
+
+    .room-name,
+    .message-content,
+    .clip {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .room-meta {
+      color: var(--color-text-faint);
+      font-size: var(--text-xs);
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+      padding-left: 20px;
+    }
+
+    .badge {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: 1px 5px;
+      color: var(--color-text-muted);
+      background: var(--color-surface);
+      white-space: nowrap;
+      font-size: var(--text-xs);
+    }
+
+    .badge.hot {
+      color: var(--color-code-bg);
+      background: var(--color-accent);
+      border-color: var(--color-accent);
+    }
+
+    .badge.ok {
+      color: var(--color-code-bg);
+      background: var(--color-success);
+      border-color: var(--color-success);
+    }
+
+    .badge.warn {
+      color: var(--color-code-bg);
+      background: var(--color-warning);
+      border-color: var(--color-warning);
+    }
+
+    .badge.bad {
+      color: var(--color-text);
+      background: var(--color-danger);
+      border-color: var(--color-danger);
+    }
+
+    .chat-pane {
+      grid-template-rows: auto 1fr auto;
+    }
+
+    .room-context {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--color-border);
+      background: rgba(33, 31, 25, 0.86);
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .path {
+      color: var(--color-text-muted);
+      font-size: var(--text-xs);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .action {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-surface-2);
+      color: var(--color-text-muted);
+      padding: 4px 7px;
+      white-space: nowrap;
+      font-size: var(--text-xs);
+    }
+
+    .action:hover,
+    .toolbar button:hover {
+      border-color: var(--color-primary);
+      color: var(--color-text);
+    }
+
+    .chat-scroll {
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .message {
+      border-left: 2px solid var(--color-border);
+      padding: 6px 8px;
+      background: rgba(24, 23, 19, 0.5);
+      display: grid;
+      gap: 4px;
+    }
+
+    .message.own {
+      border-color: var(--color-primary);
+      background: rgba(53, 208, 186, 0.06);
+    }
+
+    .message.pending {
+      border-color: var(--color-warning);
+      background: rgba(245, 195, 107, 0.06);
+    }
+
+    .message-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: var(--color-text-faint);
+      font-size: var(--text-xs);
+    }
+
+    .author {
+      color: var(--color-link);
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .message-content {
+      color: var(--color-text);
+      white-space: normal;
+      overflow-wrap: anywhere;
+      line-height: 1.45;
+      font-size: var(--text-sm);
+    }
+
+    .mention {
+      color: var(--color-accent);
+    }
+
+    .composer {
+      border-top: 1px solid var(--color-border);
+      background: var(--color-surface);
+      padding: 9px 10px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .composer-input {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-code-bg);
+      color: var(--color-text);
+      min-height: 34px;
+      padding: 7px 9px;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .composer-input:focus {
+      outline: 1px solid var(--color-primary);
+      border-color: var(--color-primary);
+    }
+
+    .send {
+      border: 1px solid var(--color-primary);
+      border-radius: var(--radius-sm);
+      background: var(--color-primary);
+      color: var(--color-code-bg);
+      min-height: 34px;
+      padding: 0 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .side-scroll {
+      padding: 9px;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+    }
+
+    .panel {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: rgba(24, 23, 19, 0.72);
+      overflow: hidden;
+    }
+
+    .panel-title {
+      border-bottom: 1px solid var(--color-border);
+      color: var(--color-text-muted);
+      padding: 7px 8px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: var(--text-xs);
+      text-transform: uppercase;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--color-border);
+    }
+
+    .metric {
+      min-width: 0;
+      background: var(--color-code-bg);
+      padding: 8px;
+      display: grid;
+      gap: 3px;
+    }
+
+    .metric-label {
+      color: var(--color-text-faint);
+      font-size: var(--text-xs);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .metric-value {
+      color: var(--color-text);
+      font-size: var(--text-lg);
+      font-weight: 800;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .sub-list,
+    .outbox-list,
+    .detail-list {
+      display: grid;
+      gap: 0;
+    }
+
+    .row {
+      min-width: 0;
+      padding: 7px 8px;
+      border-top: 1px solid var(--color-border);
+      display: grid;
+      gap: 4px;
+    }
+
+    .row:first-child {
+      border-top: 0;
+    }
+
+    .row-top {
+      min-width: 0;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .row-name {
+      min-width: 0;
+      color: var(--color-text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: var(--text-sm);
+    }
+
+    .row-sub {
+      color: var(--color-text-faint);
+      font-size: var(--text-xs);
+      overflow-wrap: anywhere;
+    }
+
+    .bar {
+      height: 7px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      background: var(--color-code-bg);
+    }
+
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: var(--value, 50%);
+      background: var(--color-primary);
+    }
+
+    .console {
+      min-height: 0;
+      border-top: 1px solid var(--color-border-strong);
+      display: grid;
+      grid-template-columns: minmax(310px, 27%) 1fr minmax(280px, 26%);
+      background: var(--color-surface);
+    }
+
+    .console-section {
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid var(--color-border);
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .console-section:last-child {
+      border-right: 0;
+    }
+
+    .console-head {
+      min-height: 34px;
+      border-bottom: 1px solid var(--color-border);
+      padding: 7px 9px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      color: var(--color-text-muted);
+      font-size: var(--text-xs);
+      text-transform: uppercase;
+    }
+
+    .big-state {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      padding: 9px;
+      min-width: 0;
+    }
+
+    .state-glyph {
+      width: 52px;
+      height: 52px;
+      border: 1px solid var(--color-primary);
+      border-radius: var(--radius-sm);
+      display: grid;
+      place-items: center;
+      color: var(--color-primary);
+      font-weight: 900;
+      font-size: 20px;
+      background: rgba(53, 208, 186, 0.06);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+
+    .state-glyph.offline {
+      border-color: var(--color-danger);
+      color: var(--color-danger);
+      background: rgba(255, 107, 107, 0.06);
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(53, 208, 186, 0.3); }
+      50% { box-shadow: 0 0 0 5px rgba(53, 208, 186, 0); }
+    }
+
+    .state-copy {
+      min-width: 0;
+      display: grid;
+      gap: 4px;
+    }
+
+    .state-title {
+      font-size: clamp(18px, 2.5vw, 28px);
+      font-weight: 900;
+      line-height: 1;
+      color: var(--color-text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .state-sub {
+      color: var(--color-text-muted);
+      font-size: var(--text-xs);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .console-scroll {
+      padding: 7px;
+    }
+
+    .event-log {
+      display: grid;
+      gap: 4px;
+      font-size: var(--text-xs);
+    }
+
+    .event {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 52px minmax(0, 1fr);
+      gap: 8px;
+      color: var(--color-text-muted);
+    }
+
+    .event-time {
+      color: var(--color-text-faint);
+      white-space: nowrap;
+    }
+
+    .event-line {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .retry {
+      border: 1px solid var(--color-warning);
+      border-radius: var(--radius-sm);
+      color: var(--color-warning);
+      background: transparent;
+      padding: 2px 6px;
+      font-size: var(--text-xs);
+    }
+
+    .toolbar {
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      z-index: 10;
+      display: flex;
+      gap: 6px;
+      padding: 6px;
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius-md);
+      background: rgba(16, 16, 14, 0.95);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .toolbar button {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      color: var(--color-text-muted);
+      background: var(--color-surface-2);
+      min-width: 34px;
+      min-height: 30px;
+      padding: 3px 7px;
+      font-size: var(--text-xs);
+    }
+
+    .toolbar button.active {
+      border-color: var(--color-primary);
+      color: var(--color-code-bg);
+      background: var(--color-primary);
+    }
+
+    .annotations .note {
+      display: block;
+    }
+
+    .note {
+      display: none;
+      border-top: 1px dashed var(--color-border-strong);
+      color: var(--color-accent);
+      padding: 6px 8px;
+      font-size: var(--text-xs);
+      line-height: 1.35;
+      background: rgba(242, 185, 75, 0.06);
+    }
+
+    .compact .terminal {
+      max-width: 390px;
+      min-height: 820px;
+    }
+
+    .compact .topbar {
+      grid-template-columns: 1fr;
+    }
+
+    .compact .workspace {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto minmax(390px, 1fr) auto;
+    }
+
+    .compact .pane {
+      border-right: 0;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .compact .pane.tree-pane,
+    .compact .pane.ops-pane {
+      max-height: 250px;
+    }
+
+    .compact .console {
+      grid-template-columns: 1fr;
+      max-height: none;
+    }
+
+    .compact .console-section {
+      border-right: 0;
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .compact .console-section:last-child {
+      border-bottom: 0;
+    }
+
+    .compact .room-context,
+    .compact .composer {
+      grid-template-columns: 1fr;
+    }
+
+    .compact .actions {
+      justify-content: flex-start;
+    }
+
+    @media (max-width: 920px) {
+      .stage {
+        padding: 6px;
+      }
+
+      .terminal {
+        min-height: calc(100vh - 12px);
+        grid-template-rows: auto 1fr auto;
+      }
+
+      .topbar {
+        grid-template-columns: 1fr;
+      }
+
+      .workspace {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(430px, 1fr) auto;
+      }
+
+      .pane {
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border);
+      }
+
+      .tree-pane,
+      .ops-pane {
+        max-height: 245px;
+      }
+
+      .console {
+        grid-template-columns: 1fr;
+      }
+
+      .console-section {
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border);
+      }
+
+      .console-section:last-child {
+        border-bottom: 0;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .tabs {
+        overflow-x: auto;
+      }
+
+      .toolbar {
+        right: 8px;
+        bottom: 8px;
+      }
+
+      .state-title {
+        font-size: 18px;
+      }
+
+      .metric-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="stage" id="stage">
+    <section class="terminal" aria-label="29er relay aware terminal mock">
+      <header class="topbar">
+        <div class="brandline">
+          <span class="brand">29er</span>
+          <span class="server" id="relayUrl">wss://nip29.f7z.io</span>
+          <span class="badge ok" id="authBadge">AUTH OK</span>
+          <span class="badge" id="modeBadge">online</span>
+        </div>
+        <nav class="tabs" aria-label="Ratatui tabs">
+          <span class="tab active">Rooms</span>
+          <span class="tab">Mentions</span>
+          <span class="tab">Admin</span>
+          <span class="tab">Outbox</span>
+        </nav>
+      </header>
+
+      <section class="workspace">
+        <aside class="pane tree-pane">
+          <div class="pane-header">
+            <span class="pane-title">Group Tree</span>
+            <span class="keyhint">j/k open</span>
+          </div>
+          <div class="tree-list" id="treeList"></div>
+        </aside>
+
+        <section class="pane chat-pane">
+          <div class="pane-header">
+            <span class="pane-title">kind:9 Timeline</span>
+            <span class="keyhint">39000-39003 + kind:9 subscribed</span>
+          </div>
+          <div class="room-context">
+            <div class="path" id="roomPath">root / engineering / relay-ops</div>
+            <div class="actions">
+              <button class="action" type="button">Join</button>
+              <button class="action" type="button">Invite</button>
+              <button class="action" type="button">Add role</button>
+              <button class="action" type="button">Child room</button>
+              <button class="action" type="button">Move</button>
+            </div>
+          </div>
+          <div class="chat-scroll" id="chatScroll"></div>
+          <form class="composer" id="composer">
+            <input class="composer-input" id="composerInput" autocomplete="off" value="@mira ship the relay status rail with queue replay visible" aria-label="Message composer">
+            <button class="send" type="submit">Send</button>
+          </form>
+        </section>
+
+        <aside class="pane ops-pane">
+          <div class="pane-header">
+            <span class="pane-title">Live Ops Rail</span>
+            <span class="keyhint">enter inspect</span>
+          </div>
+          <div class="side-scroll">
+            <section class="panel">
+              <div class="panel-title"><span>Relay Health</span><span id="relayStamp">now</span></div>
+              <div class="metric-grid">
+                <div class="metric">
+                  <span class="metric-label">connected</span>
+                  <span class="metric-value" id="connectedValue">yes</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">roundtrip</span>
+                  <span class="metric-value" id="latencyValue">64ms</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">subs ready</span>
+                  <span class="metric-value" id="subsValue">5/5</span>
+                </div>
+                <div class="metric">
+                  <span class="metric-label">queue</span>
+                  <span class="metric-value" id="queueValue">0</span>
+                </div>
+              </div>
+              <p class="note">Maps to tui-big-text for connection state, Gauge/Sparkline for confidence, and throbber-widgets-tui while syncing.</p>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title"><span>Persistent Subs</span><span id="syncBadge" class="badge ok">caught up</span></div>
+              <div class="sub-list" id="subList"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-title"><span>Relay Detail</span><button class="retry" type="button" id="inspectRelay">inspect</button></div>
+              <div class="detail-list" id="detailList"></div>
+              <p class="note">This panel is render-only protocol projection data. A real TUI would dispatch inspect/retry actions into Rust/NMP.</p>
+            </section>
+          </div>
+        </aside>
+      </section>
+
+      <section class="console" aria-label="Relay and publish console">
+        <div class="console-section">
+          <div class="console-head">
+            <span>Connection</span>
+            <button class="retry" type="button" id="toggleOnline">go offline</button>
+          </div>
+          <div class="big-state">
+            <div class="state-glyph" id="stateGlyph">ON</div>
+            <div class="state-copy">
+              <div class="state-title" id="stateTitle">RELAY OK</div>
+              <div class="state-sub" id="stateSub">AUTH accepted, live metadata stream active</div>
+              <div class="bar" aria-label="sync progress"><span id="syncBar" style="--value: 100%"></span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="console-section">
+          <div class="console-head">
+            <span>Outbox</span>
+            <button class="retry" type="button" id="retryFailed">retry failed</button>
+          </div>
+          <div class="console-scroll">
+            <div class="outbox-list" id="outboxList"></div>
+          </div>
+        </div>
+
+        <div class="console-section">
+          <div class="console-head">
+            <span>Events</span>
+            <button class="retry" type="button" id="cycleSync">cycle sync</button>
+          </div>
+          <div class="console-scroll">
+            <div class="event-log" id="eventLog"></div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div class="toolbar" aria-label="Sketch toolbar">
+    <button type="button" id="desktopBtn" class="active" title="Desktop viewport">Desk</button>
+    <button type="button" id="mobileBtn" title="Mobile viewport">Mob</button>
+    <button type="button" id="annotateBtn" title="Toggle annotations">Anno</button>
+  </div>
+
+  <script>
+    const state = {
+      online: true,
+      syncIndex: 0,
+      inspected: false,
+      metadataBump: false,
+      rooms: [
+        {
+          groupId: "29er",
+          displayName: "29er",
+          parentId: null,
+          isBranch: true,
+          isOpen: true,
+          isPublic: true,
+          memberCount: 124,
+          adminCount: 6,
+          unreadCount: 4,
+          lastMessagePreview: "Relay status rollup landed"
+        },
+        {
+          groupId: "29er.engineering",
+          displayName: "engineering",
+          parentId: "29er",
+          isBranch: true,
+          isOpen: true,
+          isPublic: false,
+          memberCount: 42,
+          adminCount: 3,
+          unreadCount: 2,
+          lastMessagePreview: "Child room proposal moved"
+        },
+        {
+          groupId: "29er.engineering.relay-ops",
+          displayName: "relay-ops",
+          parentId: "29er.engineering",
+          isBranch: false,
+          isOpen: true,
+          isPublic: false,
+          memberCount: 18,
+          adminCount: 2,
+          unreadCount: 7,
+          lastMessagePreview: "Backfill 39002 then kind:9"
+        },
+        {
+          groupId: "29er.design",
+          displayName: "design",
+          parentId: "29er",
+          isBranch: true,
+          isOpen: false,
+          isPublic: true,
+          memberCount: 31,
+          adminCount: 2,
+          unreadCount: 0,
+          lastMessagePreview: "Composer density notes"
+        },
+        {
+          groupId: "29er.admin",
+          displayName: "admin",
+          parentId: "29er",
+          isBranch: false,
+          isOpen: false,
+          isPublic: false,
+          memberCount: 9,
+          adminCount: 4,
+          unreadCount: 1,
+          lastMessagePreview: "Invite expires in 24h"
+        }
+      ],
+      messages: [
+        { id: "evt9-a", pubkey: "mira", content: "relay auth is green; 39000 metadata caught up before kind:9 replay", createdAt: "10:42", kind: 9 },
+        { id: "evt9-b", pubkey: "rune", content: "@pablo the admin role projection changed two members after the live 39002 event", createdAt: "10:44", kind: 9 },
+        { id: "evt9-c", pubkey: "you", content: "I want queue flush visible without making normal chat feel like a server console", createdAt: "10:46", kind: 9, own: true },
+        { id: "evt9-d", pubkey: "sol", content: "then keep relay confidence in the rail and publish confidence near the composer", createdAt: "10:47", kind: 9 }
+      ],
+      outbox: [
+        { handle: "pub-41", eventId: "evt9-e", kind: 9, content: "publish room message", status: "confirmed", canRetry: false, relays: ["wss://nip29.f7z.io"] },
+        { handle: "pub-42", eventId: "evt39002-a", kind: 39002, content: "put user add role", status: "failed", canRetry: true, relays: ["wss://nip29.f7z.io"] },
+        { handle: "pub-43", eventId: "evt39003-a", kind: 39003, content: "set parent move room", status: "pending", canRetry: false, relays: ["wss://nip29.f7z.io"] }
+      ],
+      events: [
+        ["10:48", "EOSE kind:9 relay-ops timeline, 217 events"],
+        ["10:48", "39001 membership delta applied: +1 admin"],
+        ["10:47", "Publish pub-42 failed: relay rejected stale role"],
+        ["10:47", "AUTH accepted for npub1pablo..."]
+      ]
+    };
+
+    const syncStates = [
+      { label: "caught up", title: "RELAY OK", sub: "AUTH accepted, live metadata stream active", progress: 100, badge: "ok" },
+      { label: "syncing", title: "SYNCING", sub: "Backfilling 39000-39003 then kind:9", progress: 64, badge: "warn" },
+      { label: "degraded", title: "LAGGING", sub: "kind:9 subscription behind; metadata still live", progress: 38, badge: "warn" }
+    ];
+
+    const subs = [
+      ["39000", "group metadata", 100],
+      ["39001", "membership", 96],
+      ["39002", "roles/admin", 86],
+      ["39003", "room tree", 100],
+      ["kind:9", "active timeline", 92]
+    ];
+
+    const treeList = document.getElementById("treeList");
+    const chatScroll = document.getElementById("chatScroll");
+    const outboxList = document.getElementById("outboxList");
+    const eventLog = document.getElementById("eventLog");
+    const subList = document.getElementById("subList");
+    const detailList = document.getElementById("detailList");
+
+    function clsForStatus(status) {
+      if (status === "confirmed") return "ok";
+      if (status === "failed") return "bad";
+      if (status === "retrying" || status === "queued") return "warn";
+      return "";
+    }
+
+    function indentFor(room) {
+      if (room.parentId === "29er.engineering") return 2;
+      if (room.parentId === "29er") return 1;
+      return 0;
+    }
+
+    function escapeHtml(content) {
+      return content
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function mentionMarkup(content) {
+      return escapeHtml(content).replace(/(@[a-z0-9_-]+)/gi, '<span class="mention">$1</span>');
+    }
+
+    function addEvent(line) {
+      const now = new Date();
+      const stamp = now.toTimeString().slice(0, 5);
+      state.events.unshift([stamp, line]);
+      state.events = state.events.slice(0, 9);
+      render();
+    }
+
+    function renderRooms() {
+      treeList.innerHTML = state.rooms.map((room) => {
+        const depth = indentFor(room);
+        const twist = room.isBranch ? (room.isOpen ? "▾" : "▸") : "•";
+        const active = room.groupId.endsWith("relay-ops") ? " active" : "";
+        const privacy = room.isPublic ? "public" : "private";
+        return `
+          <button class="room${active}" type="button" style="padding-left:${8 + depth * 16}px">
+            <span class="room-line">
+              <span class="twisty">${twist}</span>
+              <span class="room-name">${room.displayName}</span>
+              ${room.unreadCount ? `<span class="badge hot">${room.unreadCount}</span>` : `<span class="badge">${privacy}</span>`}
+            </span>
+            <span class="room-meta">
+              <span>${room.memberCount} members</span>
+              <span>${room.adminCount} admins</span>
+              <span class="clip">${room.lastMessagePreview}</span>
+            </span>
+          </button>
+        `;
+      }).join("");
+    }
+
+    function renderMessages() {
+      chatScroll.innerHTML = state.messages.map((message) => {
+        const classes = ["message"];
+        if (message.own) classes.push("own");
+        if (message.pending) classes.push("pending");
+        return `
+          <article class="${classes.join(" ")}">
+            <div class="message-head">
+              <span class="author">${message.pubkey}</span>
+              <span>${message.createdAt}</span>
+              <span>kind:${message.kind}</span>
+              <span>${message.id}</span>
+            </div>
+            <div class="message-content">${mentionMarkup(message.content)}</div>
+          </article>
+        `;
+      }).join("");
+      chatScroll.scrollTop = chatScroll.scrollHeight;
+    }
+
+    function renderOutbox() {
+      outboxList.innerHTML = state.outbox.map((item) => {
+        const klass = clsForStatus(item.status);
+        return `
+          <div class="row">
+            <div class="row-top">
+              <span class="row-name">${item.handle} · kind:${item.kind}</span>
+              <span class="badge ${klass}">${item.status}</span>
+            </div>
+            <div class="row-sub">${item.content} · ${item.relays.join(", ")}</div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderSubs() {
+      const sync = syncStates[state.syncIndex];
+      subList.innerHTML = subs.map(([kind, label, base]) => {
+        const value = state.online ? Math.min(100, Math.max(12, base - (100 - sync.progress) / 3)) : Math.min(42, base / 2);
+        return `
+          <div class="row">
+            <div class="row-top">
+              <span class="row-name">${kind}</span>
+              <span class="badge ${value > 80 ? "ok" : "warn"}">${Math.round(value)}%</span>
+            </div>
+            <div class="row-sub">${label}</div>
+            <div class="bar"><span style="--value:${value}%"></span></div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function renderDetail() {
+      const auth = state.online ? "AUTH accepted npub1pablo..." : "offline, auth cached";
+      const detailRows = [
+        ["relay", "wss://nip29.f7z.io"],
+        ["auth", auth],
+        ["policy", "Rust retry policy owns flush and backoff"],
+        ["room", "29er.engineering.relay-ops"],
+        ["last metadata", state.metadataBump ? "39000 updated member count +3" : "39000 stable"]
+      ];
+      const extra = state.inspected ? [["detail", "subscription handles, EOSE marks, relay notices shown"]] : [];
+      detailList.innerHTML = detailRows.concat(extra).map(([name, value]) => `
+        <div class="row">
+          <div class="row-top"><span class="row-name">${name}</span></div>
+          <div class="row-sub">${value}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderEvents() {
+      eventLog.innerHTML = state.events.map(([time, line]) => `
+        <div class="event">
+          <span class="event-time">${time}</span>
+          <span class="event-line">${line}</span>
+        </div>
+      `).join("");
+    }
+
+    function renderTopState() {
+      const sync = syncStates[state.syncIndex];
+      const queued = state.outbox.filter((item) => item.status === "queued").length;
+      const pending = state.outbox.filter((item) => item.status === "pending" || item.status === "retrying").length;
+      const failed = state.outbox.filter((item) => item.status === "failed").length;
+      const queueTotal = queued + pending + failed;
+
+      document.getElementById("modeBadge").textContent = state.online ? "online" : "offline";
+      document.getElementById("modeBadge").className = `badge ${state.online ? "ok" : "bad"}`;
+      document.getElementById("authBadge").textContent = state.online ? "AUTH OK" : "AUTH CACHED";
+      document.getElementById("authBadge").className = `badge ${state.online ? "ok" : "warn"}`;
+      document.getElementById("connectedValue").textContent = state.online ? "yes" : "no";
+      document.getElementById("latencyValue").textContent = state.online ? (state.syncIndex === 2 ? "340ms" : "64ms") : "offline";
+      document.getElementById("subsValue").textContent = state.online ? (state.syncIndex === 0 ? "5/5" : "3/5") : "paused";
+      document.getElementById("queueValue").textContent = String(queueTotal);
+      document.getElementById("relayStamp").textContent = state.online ? "live" : "paused";
+
+      document.getElementById("syncBadge").textContent = state.online ? sync.label : "offline";
+      document.getElementById("syncBadge").className = `badge ${state.online ? sync.badge : "bad"}`;
+      document.getElementById("syncBar").style.setProperty("--value", `${state.online ? sync.progress : 20}%`);
+      document.getElementById("stateTitle").textContent = state.online ? sync.title : "OFFLINE";
+      document.getElementById("stateSub").textContent = state.online ? sync.sub : "Messages publish into durable Rust-owned outbox queue";
+      document.getElementById("stateGlyph").textContent = state.online ? (sync.label === "syncing" ? "SY" : "ON") : "OFF";
+      document.getElementById("stateGlyph").className = `state-glyph ${state.online ? "" : "offline"}`;
+      document.getElementById("toggleOnline").textContent = state.online ? "go offline" : "reconnect";
+    }
+
+    function render() {
+      renderRooms();
+      renderMessages();
+      renderOutbox();
+      renderSubs();
+      renderDetail();
+      renderEvents();
+      renderTopState();
+    }
+
+    document.getElementById("composer").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = document.getElementById("composerInput");
+      const content = input.value.trim();
+      if (!content) return;
+      const id = `local-${Math.floor(Math.random() * 9000 + 1000)}`;
+      state.messages.push({
+        id,
+        pubkey: "you",
+        content,
+        createdAt: new Date().toTimeString().slice(0, 5),
+        kind: 9,
+        own: true,
+        pending: !state.online
+      });
+      state.outbox.unshift({
+        handle: id,
+        eventId: id,
+        kind: 9,
+        content: content.length > 34 ? `${content.slice(0, 34)}...` : content,
+        status: state.online ? "pending" : "queued",
+        canRetry: !state.online,
+        relays: ["wss://nip29.f7z.io"]
+      });
+      addEvent(state.online ? `Publish ${id} pending relay ack` : `Queued ${id}; offline outbox owns replay`);
+      input.value = "";
+    });
+
+    document.getElementById("toggleOnline").addEventListener("click", () => {
+      state.online = !state.online;
+      if (state.online) {
+        let flushed = 0;
+        state.outbox.forEach((item) => {
+          if (item.status === "queued") {
+            item.status = "retrying";
+            item.canRetry = false;
+            flushed += 1;
+          }
+        });
+        state.messages.forEach((message) => {
+          if (message.pending) message.pending = false;
+        });
+        addEvent(flushed ? `Reconnect flushed ${flushed} queued publish item(s)` : "Reconnect complete; no offline queue");
+      } else {
+        addEvent("Transport offline; subscriptions paused, composer remains usable");
+      }
+      render();
+    });
+
+    document.getElementById("cycleSync").addEventListener("click", () => {
+      state.syncIndex = (state.syncIndex + 1) % syncStates.length;
+      const sync = syncStates[state.syncIndex];
+      addEvent(`Sync state changed to ${sync.label}`);
+    });
+
+    document.getElementById("retryFailed").addEventListener("click", () => {
+      const failed = state.outbox.find((item) => item.status === "failed" && item.canRetry);
+      if (!failed) {
+        addEvent("No failed publish with canRetry=true");
+        return;
+      }
+      failed.status = state.online ? "retrying" : "queued";
+      failed.canRetry = !state.online;
+      addEvent(`${failed.handle} ${state.online ? "retrying now" : "queued until reconnect"}`);
+      render();
+    });
+
+    document.getElementById("inspectRelay").addEventListener("click", () => {
+      state.inspected = !state.inspected;
+      addEvent(state.inspected ? "Relay detail expanded" : "Relay detail collapsed");
+      render();
+    });
+
+    treeList.addEventListener("click", (event) => {
+      const room = event.target.closest(".room");
+      if (!room) return;
+      state.metadataBump = !state.metadataBump;
+      state.rooms[2].memberCount += state.metadataBump ? 3 : -3;
+      state.rooms[2].lastMessagePreview = state.metadataBump ? "39000 member count live update" : "Backfill 39002 then kind:9";
+      addEvent(state.metadataBump ? "Live metadata update: relay-ops member count +3" : "Metadata projection returned to baseline");
+    });
+
+    document.getElementById("desktopBtn").addEventListener("click", () => {
+      document.body.classList.remove("compact");
+      document.getElementById("desktopBtn").classList.add("active");
+      document.getElementById("mobileBtn").classList.remove("active");
+    });
+
+    document.getElementById("mobileBtn").addEventListener("click", () => {
+      document.body.classList.add("compact");
+      document.getElementById("mobileBtn").classList.add("active");
+      document.getElementById("desktopBtn").classList.remove("active");
+    });
+
+    document.getElementById("annotateBtn").addEventListener("click", () => {
+      document.body.classList.toggle("annotations");
+      document.getElementById("annotateBtn").classList.toggle("active");
+    });
+
+    render();
+  </script>
+</body>
+</html>

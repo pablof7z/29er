@@ -1,0 +1,6 @@
+{
+  "id": "019f0-f0bd0",
+  "ts": "2026-06-26T07:29:04Z",
+  "session": "019f02cc-8e3e-7782-9ff3-73e2a3824267",
+  "text": "- HIGH [app.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/app.rs:196): `spawn_poller` polls projections every 250ms. That is a D8 violation and can lag or burn work. Drive TUI snapshots from NMP update callbacks/snapshot frames instead."
+}

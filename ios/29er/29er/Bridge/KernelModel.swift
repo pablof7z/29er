@@ -73,6 +73,14 @@ final class KernelModel: ObservableObject {
     /// that read the registry `NostrProfileHost` environment.
     @Published var profileRefsRevision: UInt64 = 0
 
+    /// Typed app-owned `nmp.29er.relay_selector` sidecar (`N29R`). Rust owns
+    /// active relay selection and the NIP-51 kind:30002 relay-set list.
+    @Published var typedRelaySelector: RelaySelectorSnapshot?
+
+    /// Typed kernel-owned `relay_diagnostics` sidecar (`KRDG`). NMP owns the
+    /// NIP-11 fetch; Swift only renders the relay info fields.
+    @Published var typedRelayDiagnostics: RelayDiagnosticsSnapshot?
+
     // ── Identity routing (S02) ─────────────────────────────────────────────
 
     /// Root-routing state derived from `typedActiveAccount` on every tick,
@@ -103,6 +111,21 @@ final class KernelModel: ObservableObject {
             hostRelayUrl: node.hostRelayUrl,
             localId: node.groupId
         ))
+    }
+
+    @discardableResult
+    func selectNip29Relay(_ relayUrl: String) -> Bool {
+        kernel.selectNip29Relay(relayUrl)
+    }
+
+    @discardableResult
+    func addNip29Relay(_ relayUrl: String) -> Bool {
+        kernel.addNip29Relay(relayUrl)
+    }
+
+    @discardableResult
+    func removeNip29Relay(_ relayUrl: String) -> Bool {
+        kernel.removeNip29Relay(relayUrl)
     }
 
     // ── Local mutable state ──────────────────────────────────────────────

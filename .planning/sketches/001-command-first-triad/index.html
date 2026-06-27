@@ -1,0 +1,1581 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>29er TUI Sketch 001 - Command-first Triad</title>
+  <link rel="stylesheet" href="../themes/default.css">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      letter-spacing: 0;
+      overflow: hidden;
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+    }
+
+    button {
+      color: inherit;
+      cursor: pointer;
+    }
+
+    #viewport-shell {
+      min-height: 100vh;
+      width: 100%;
+      margin: 0 auto;
+      transition: max-width 0.15s ease;
+      background: var(--color-bg);
+    }
+
+    .terminal {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: 36px 1fr 36px;
+      padding: 10px;
+      gap: 8px;
+    }
+
+    .chrome,
+    .hint-strip {
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-width: 0;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .chrome {
+      padding: 0 12px;
+    }
+
+    .term-dots {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      flex: 0 0 auto;
+    }
+
+    .term-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--color-border-strong);
+    }
+
+    .term-dot:nth-child(1) {
+      background: var(--color-accent-2);
+    }
+
+    .term-dot:nth-child(2) {
+      background: var(--color-accent);
+    }
+
+    .term-dot:nth-child(3) {
+      background: var(--color-primary);
+    }
+
+    .chrome-title {
+      color: var(--color-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding: 0 12px;
+    }
+
+    .relay-status {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      white-space: nowrap;
+      font-size: var(--text-xs);
+    }
+
+    .pulse {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--color-success);
+      box-shadow: 0 0 0 0 rgba(136, 217, 107, 0.55);
+      animation: pulse 1.7s ease-out infinite;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(136, 217, 107, 0.45); }
+      100% { box-shadow: 0 0 0 8px rgba(136, 217, 107, 0); }
+    }
+
+    .workbench {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(230px, 0.85fr) minmax(390px, 1.65fr) minmax(270px, 1fr);
+      gap: 8px;
+    }
+
+    .panel {
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+    }
+
+    .panel:focus-within,
+    .panel.focused {
+      border-color: var(--color-primary);
+      box-shadow: var(--shadow-glow);
+    }
+
+    .panel-head {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+      display: grid;
+      gap: 7px;
+    }
+
+    .eyebrow {
+      color: var(--color-text-faint);
+      font-size: 11px;
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .panel-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .panel-title {
+      font-size: var(--text-sm);
+      color: var(--color-text);
+      font-weight: 700;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .panel-subtitle {
+      color: var(--color-text-muted);
+      font-size: 12px;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .input-line,
+    .composer {
+      width: 100%;
+      border: 1px solid var(--color-border);
+      background: var(--color-code-bg);
+      color: var(--color-text);
+      outline: none;
+      padding: 7px 9px;
+      border-radius: var(--radius-sm);
+      transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .input-line:focus,
+    .composer:focus {
+      border-color: var(--color-primary);
+      box-shadow: inset 0 0 0 1px rgba(53, 208, 186, 0.2);
+    }
+
+    .pane-body {
+      min-height: 0;
+      overflow: auto;
+      scrollbar-color: var(--color-border-strong) var(--color-code-bg);
+      scrollbar-width: thin;
+    }
+
+    .room-list {
+      padding: 8px;
+      display: grid;
+      gap: 4px;
+    }
+
+    .room-row {
+      width: 100%;
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 14px 1fr auto;
+      gap: 8px;
+      align-items: start;
+      text-align: left;
+      padding: 8px;
+      border: 1px solid transparent;
+      background: transparent;
+      border-radius: var(--radius-sm);
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .room-row:hover,
+    .room-row.active {
+      background: var(--color-surface-2);
+      border-color: var(--color-border-strong);
+    }
+
+    .room-row.active {
+      color: var(--color-primary);
+    }
+
+    .tree-mark {
+      color: var(--color-text-faint);
+      font-size: 13px;
+      padding-top: 1px;
+    }
+
+    .room-main {
+      min-width: 0;
+      display: grid;
+      gap: 3px;
+    }
+
+    .room-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--color-text);
+    }
+
+    .room-row.active .room-name {
+      color: var(--color-primary);
+    }
+
+    .room-preview {
+      color: var(--color-text-faint);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .badge,
+    .state-pill {
+      border: 1px solid var(--color-border);
+      color: var(--color-text-muted);
+      background: var(--color-code-bg);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      line-height: 1.25;
+      white-space: nowrap;
+      transition: border-color 0.15s ease, color 0.15s ease;
+    }
+
+    .badge.hot {
+      border-color: var(--color-accent);
+      color: var(--color-accent);
+    }
+
+    .badge.ok {
+      border-color: var(--color-success);
+      color: var(--color-success);
+    }
+
+    .room-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+    }
+
+    .metric {
+      min-width: 0;
+      border: 1px solid var(--color-border);
+      background: var(--color-code-bg);
+      padding: 6px;
+      display: grid;
+      gap: 2px;
+    }
+
+    .metric-value {
+      color: var(--color-text);
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .metric-label {
+      color: var(--color-text-faint);
+      font-size: 10px;
+      text-transform: uppercase;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .timeline-shell {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      min-height: 0;
+    }
+
+    .timeline {
+      padding: 10px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+      min-height: 0;
+      overflow: auto;
+      scrollbar-color: var(--color-border-strong) var(--color-code-bg);
+      scrollbar-width: thin;
+    }
+
+    .message-row {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      gap: 10px;
+      padding: 7px 8px;
+      border-left: 2px solid var(--color-border);
+      background: rgba(12, 12, 11, 0.38);
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .message-row.pending {
+      border-color: var(--color-accent);
+      animation: pending-glow 1.2s ease-in-out infinite alternate;
+    }
+
+    .message-row.confirmed {
+      border-color: var(--color-success);
+    }
+
+    @keyframes pending-glow {
+      from { background: rgba(242, 185, 75, 0.06); }
+      to { background: rgba(242, 185, 75, 0.14); }
+    }
+
+    .msg-meta {
+      min-width: 0;
+      color: var(--color-text-faint);
+      font-size: 11px;
+      display: grid;
+      align-content: start;
+      gap: 3px;
+    }
+
+    .msg-author {
+      color: var(--color-link);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .msg-body {
+      min-width: 0;
+      color: var(--color-text);
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .mention {
+      color: var(--color-primary);
+    }
+
+    .composer-area {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: end;
+      border-top: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+      padding: 9px;
+    }
+
+    .composer {
+      resize: none;
+      min-height: 42px;
+      max-height: 86px;
+      line-height: 1.35;
+    }
+
+    .send-button,
+    .small-button,
+    .tab-button,
+    .command-row,
+    .toolbar-button {
+      border: 1px solid var(--color-border);
+      background: var(--color-code-bg);
+      color: var(--color-text-muted);
+      border-radius: var(--radius-sm);
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    }
+
+    .send-button:hover,
+    .small-button:hover,
+    .tab-button:hover,
+    .command-row:hover,
+    .toolbar-button:hover {
+      background: var(--color-surface-2);
+      border-color: var(--color-primary);
+      color: var(--color-text);
+    }
+
+    .send-button:active,
+    .small-button:active,
+    .tab-button:active,
+    .command-row:active,
+    .toolbar-button:active {
+      transform: translateY(1px);
+    }
+
+    .send-button {
+      min-height: 42px;
+      padding: 0 13px;
+      color: var(--color-primary);
+      border-color: var(--color-primary);
+    }
+
+    .small-button {
+      padding: 5px 8px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .small-button.danger {
+      border-color: var(--color-danger);
+      color: var(--color-danger);
+    }
+
+    .small-button.primary {
+      border-color: var(--color-primary);
+      color: var(--color-primary);
+    }
+
+    .mention-pop {
+      position: absolute;
+      left: 10px;
+      bottom: 60px;
+      min-width: 230px;
+      border: 1px solid var(--color-primary);
+      background: var(--color-code-bg);
+      box-shadow: var(--shadow-md);
+      display: none;
+      z-index: 20;
+    }
+
+    .mention-pop.open {
+      display: block;
+    }
+
+    .mention-item {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 10px;
+      border: 0;
+      border-bottom: 1px solid var(--color-border);
+      background: transparent;
+      text-align: left;
+      color: var(--color-text);
+    }
+
+    .mention-item:last-child {
+      border-bottom: 0;
+    }
+
+    .right-grid {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 0;
+    }
+
+    .mode-tabs {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 5px;
+    }
+
+    .tab-button {
+      padding: 6px 4px;
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tab-button.active {
+      color: var(--color-primary);
+      border-color: var(--color-primary);
+      background: rgba(53, 208, 186, 0.08);
+    }
+
+    .command-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 8px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+    }
+
+    .command-row {
+      width: 100%;
+      text-align: left;
+      padding: 9px;
+      display: grid;
+      gap: 5px;
+    }
+
+    .command-name {
+      color: var(--color-text);
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .command-desc {
+      color: var(--color-text-faint);
+      font-size: 11px;
+      line-height: 1.35;
+    }
+
+    .outbox-item,
+    .member-row {
+      border: 1px solid var(--color-border);
+      background: rgba(12, 12, 11, 0.42);
+      padding: 8px;
+      display: grid;
+      gap: 7px;
+    }
+
+    .outbox-top,
+    .member-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .outbox-title,
+    .member-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--color-text);
+    }
+
+    .outbox-detail {
+      color: var(--color-text-faint);
+      font-size: 11px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .status-pending {
+      color: var(--color-accent);
+      border-color: var(--color-accent);
+    }
+
+    .status-failed {
+      color: var(--color-danger);
+      border-color: var(--color-danger);
+    }
+
+    .status-published {
+      color: var(--color-success);
+      border-color: var(--color-success);
+    }
+
+    .hint-strip {
+      padding: 0 10px;
+      gap: 8px;
+      overflow: hidden;
+      font-size: 12px;
+    }
+
+    .hints {
+      display: flex;
+      gap: 12px;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+
+    .key {
+      color: var(--color-primary);
+    }
+
+    .outbox-mini {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      white-space: nowrap;
+    }
+
+    .palette {
+      position: fixed;
+      inset: 0;
+      background: rgba(16, 16, 14, 0.72);
+      z-index: 1000;
+      display: none;
+      place-items: start center;
+      padding-top: 64px;
+    }
+
+    .palette.open {
+      display: grid;
+    }
+
+    .palette-box {
+      width: min(760px, calc(100vw - 28px));
+      border: 1px solid var(--color-primary);
+      background: var(--color-surface);
+      box-shadow: var(--shadow-glow), var(--shadow-md);
+      display: grid;
+      gap: 0;
+      transform: translateY(-8px);
+      animation: palette-in 0.15s ease forwards;
+    }
+
+    @keyframes palette-in {
+      to { transform: translateY(0); }
+    }
+
+    .palette-head {
+      padding: 10px;
+      border-bottom: 1px solid var(--color-border);
+      display: grid;
+      gap: 8px;
+    }
+
+    .palette-search {
+      width: 100%;
+      border: 0;
+      outline: none;
+      background: var(--color-code-bg);
+      color: var(--color-text);
+      padding: 10px;
+    }
+
+    .palette-results {
+      max-height: 46vh;
+      overflow: auto;
+      padding: 8px;
+      display: grid;
+      gap: 6px;
+    }
+
+    .toast-stack {
+      position: fixed;
+      top: 52px;
+      right: 12px;
+      z-index: 1200;
+      display: grid;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .toast {
+      min-width: 260px;
+      max-width: min(420px, calc(100vw - 24px));
+      border: 1px solid var(--color-primary);
+      background: var(--color-code-bg);
+      color: var(--color-text);
+      padding: 9px 11px;
+      box-shadow: var(--shadow-md);
+      animation: toast-in 0.15s ease;
+    }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .annotations .panel::after {
+      content: "Layout::Panel border=" attr(data-border) " bg=" attr(data-bg);
+      position: absolute;
+    }
+
+    .annotation-tip {
+      position: fixed;
+      display: none;
+      z-index: 1500;
+      pointer-events: none;
+      background: #050505;
+      color: white;
+      border: 1px solid #777;
+      padding: 5px 7px;
+      font-family: system-ui, sans-serif;
+      font-size: 11px;
+      max-width: 280px;
+    }
+
+    #sketch-tools {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 1300;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      padding: 8px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.72);
+      color: white;
+      font-family: system-ui, sans-serif;
+      font-size: 12px;
+      opacity: 0.45;
+      transition: opacity 0.15s ease;
+    }
+
+    #sketch-tools:hover {
+      opacity: 1;
+    }
+
+    #sketch-tools select,
+    #sketch-tools button {
+      background: #111;
+      color: white;
+      border: 1px solid #555;
+      border-radius: 4px;
+      padding: 4px 6px;
+      font: inherit;
+    }
+
+    @media (max-width: 980px) {
+      body {
+        overflow: auto;
+      }
+
+      .terminal {
+        min-height: 100vh;
+        height: auto;
+        grid-template-rows: auto auto auto;
+      }
+
+      .workbench {
+        grid-template-columns: 1fr;
+        grid-auto-rows: minmax(300px, auto);
+      }
+
+      .panel.timeline-panel {
+        min-height: 520px;
+      }
+
+      .room-meta-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 620px) {
+      .terminal {
+        padding: 6px;
+        gap: 6px;
+      }
+
+      .chrome,
+      .hint-strip {
+        align-items: flex-start;
+        gap: 6px;
+        padding: 8px;
+        flex-direction: column;
+      }
+
+      .message-row {
+        grid-template-columns: 1fr;
+      }
+
+      .composer-area {
+        grid-template-columns: 1fr;
+      }
+
+      .send-button {
+        min-height: 36px;
+      }
+
+      #sketch-tools {
+        left: 8px;
+        right: 8px;
+        flex-wrap: wrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport-shell">
+    <main class="terminal" aria-label="29er command-first triad TUI sketch">
+      <header class="chrome">
+        <div class="term-dots" aria-hidden="true">
+          <span class="term-dot"></span>
+          <span class="term-dot"></span>
+          <span class="term-dot"></span>
+        </div>
+        <div class="chrome-title">29er / command-first-triad / relay wss://nip29.f7z.io</div>
+        <div class="relay-status"><span class="pulse"></span><span>subscriptions: tree + kind:9 timelines</span></div>
+      </header>
+
+      <section class="workbench">
+        <aside class="panel focused" id="tree-panel">
+          <div class="panel-head">
+            <div class="panel-title-row">
+              <div>
+                <div class="eyebrow">GroupTree projection</div>
+                <div class="panel-title">Room tree</div>
+              </div>
+              <span class="badge ok">signed in</span>
+            </div>
+            <input id="room-filter" class="input-line" type="search" placeholder="filter groups, e.g. ops" autocomplete="off">
+          </div>
+          <div class="pane-body">
+            <div id="room-list" class="room-list"></div>
+          </div>
+        </aside>
+
+        <section class="panel timeline-panel" id="timeline-panel">
+          <div class="panel-head">
+            <div class="panel-title-row">
+              <div>
+                <div class="eyebrow">kind:9 timeline</div>
+                <div id="room-title" class="panel-title">Loading room</div>
+              </div>
+              <div id="room-visibility" class="badge">public</div>
+            </div>
+            <div id="room-subtitle" class="panel-subtitle"></div>
+            <div class="room-meta-grid">
+              <div class="metric"><div id="member-count" class="metric-value">0</div><div class="metric-label">members</div></div>
+              <div class="metric"><div id="admin-count" class="metric-value">0</div><div class="metric-label">admins</div></div>
+              <div class="metric"><div id="unread-count" class="metric-value">0</div><div class="metric-label">unread</div></div>
+              <div class="metric"><div id="room-shape" class="metric-value">leaf</div><div class="metric-label">shape</div></div>
+            </div>
+          </div>
+          <div class="timeline-shell">
+            <div id="timeline" class="timeline" aria-live="polite"></div>
+            <form id="composer-form" class="composer-area">
+              <div id="mention-pop" class="mention-pop" aria-label="mention suggestions"></div>
+              <textarea id="composer" class="composer" rows="2" placeholder="Write kind:9 message. Try @ to mention a member."></textarea>
+              <button class="send-button" type="submit">send</button>
+            </form>
+          </div>
+        </section>
+
+        <aside class="panel" id="command-panel">
+          <div class="panel-head">
+            <div class="panel-title-row">
+              <div>
+                <div class="eyebrow">typed action dispatch</div>
+                <div class="panel-title">Command context</div>
+              </div>
+              <button id="open-palette" class="small-button primary" type="button">/ palette</button>
+            </div>
+            <div class="mode-tabs" role="tablist" aria-label="command modes">
+              <button class="tab-button active" data-tab="room" type="button">room</button>
+              <button class="tab-button" data-tab="admin" type="button">admin</button>
+              <button class="tab-button" data-tab="outbox" type="button">outbox</button>
+            </div>
+          </div>
+          <div class="right-grid">
+            <div id="command-body" class="command-body"></div>
+          </div>
+        </aside>
+      </section>
+
+      <footer class="hint-strip">
+        <div class="hints">
+          <span><span class="key">/</span> command</span>
+          <span><span class="key">Enter</span> send</span>
+          <span><span class="key">@</span> mention</span>
+          <span><span class="key">Tab</span> move focus</span>
+          <span><span class="key">r</span> retry failed outbox</span>
+        </div>
+        <div id="outbox-mini" class="outbox-mini"></div>
+      </footer>
+    </main>
+  </div>
+
+  <div id="palette" class="palette" role="dialog" aria-modal="true" aria-label="command palette">
+    <div class="palette-box">
+      <div class="palette-head">
+        <div class="panel-title-row">
+          <div>
+            <div class="eyebrow">command palette</div>
+            <div class="panel-title">Dispatch typed action</div>
+          </div>
+          <button id="close-palette" class="small-button" type="button">esc</button>
+        </div>
+        <input id="palette-search" class="palette-search" type="search" placeholder="join, invite, role, child, parent, retry">
+        <div class="mode-tabs" aria-label="palette modes">
+          <button class="tab-button active" data-palette-tab="room" type="button">room</button>
+          <button class="tab-button" data-palette-tab="admin" type="button">admin</button>
+          <button class="tab-button" data-palette-tab="outbox" type="button">outbox</button>
+        </div>
+      </div>
+      <div id="palette-results" class="palette-results"></div>
+    </div>
+  </div>
+
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+  <div id="annotation-tip" class="annotation-tip"></div>
+
+  <div id="sketch-tools">
+    <label>theme
+      <select id="theme-switcher">
+        <option value="default">Default</option>
+      </select>
+    </label>
+    <button type="button" data-width="375px">phone</button>
+    <button type="button" data-width="768px">tablet</button>
+    <button type="button" data-width="1280px">desktop</button>
+    <button type="button" data-width="100%">full</button>
+    <button id="annotation-toggle" type="button">annotations</button>
+  </div>
+
+  <script>
+    const rooms = [
+      {
+        groupId: "29er",
+        displayName: "29er",
+        name: "29er",
+        parentId: null,
+        childIds: ["29er.ops", "29er.design", "29er.relays"],
+        memberCount: 142,
+        adminCount: 6,
+        isPublic: true,
+        isOpen: true,
+        isBranch: true,
+        lastMessagePreview: "ops moved onboarding under playbooks",
+        lastMessageCreatedAt: "09:21",
+        unreadCount: 6
+      },
+      {
+        groupId: "29er.ops",
+        displayName: "ops",
+        name: "ops",
+        parentId: "29er",
+        childIds: ["29er.ops.admin", "29er.ops.incidents"],
+        memberCount: 41,
+        adminCount: 4,
+        isPublic: false,
+        isOpen: false,
+        isBranch: true,
+        lastMessagePreview: "@fiatjaf invite window closes after relay ack",
+        lastMessageCreatedAt: "09:18",
+        unreadCount: 3
+      },
+      {
+        groupId: "29er.ops.admin",
+        displayName: "admin desk",
+        name: "admin-desk",
+        parentId: "29er.ops",
+        childIds: [],
+        memberCount: 12,
+        adminCount: 4,
+        isPublic: false,
+        isOpen: false,
+        isBranch: false,
+        lastMessagePreview: "kind:9000 role update waiting in outbox",
+        lastMessageCreatedAt: "09:12",
+        unreadCount: 1
+      },
+      {
+        groupId: "29er.ops.incidents",
+        displayName: "incidents",
+        name: "incidents",
+        parentId: "29er.ops",
+        childIds: [],
+        memberCount: 29,
+        adminCount: 3,
+        isPublic: false,
+        isOpen: true,
+        isBranch: false,
+        lastMessagePreview: "retry publish after relay came back",
+        lastMessageCreatedAt: "08:59",
+        unreadCount: 0
+      },
+      {
+        groupId: "29er.design",
+        displayName: "design",
+        name: "design",
+        parentId: "29er",
+        childIds: ["29er.design.tui"],
+        memberCount: 36,
+        adminCount: 2,
+        isPublic: true,
+        isOpen: true,
+        isBranch: true,
+        lastMessagePreview: "triad layout feels quickest when commands stay visible",
+        lastMessageCreatedAt: "09:20",
+        unreadCount: 2
+      },
+      {
+        groupId: "29er.design.tui",
+        displayName: "tui sketches",
+        name: "tui-sketches",
+        parentId: "29er.design",
+        childIds: [],
+        memberCount: 18,
+        adminCount: 2,
+        isPublic: true,
+        isOpen: true,
+        isBranch: false,
+        lastMessagePreview: "show publish confidence without turning it into diagnostics",
+        lastMessageCreatedAt: "09:17",
+        unreadCount: 2
+      },
+      {
+        groupId: "29er.relays",
+        displayName: "relay lab",
+        name: "relay-lab",
+        parentId: "29er",
+        childIds: [],
+        memberCount: 27,
+        adminCount: 2,
+        isPublic: true,
+        isOpen: true,
+        isBranch: false,
+        lastMessagePreview: "wss://nip29.f7z.io caught up to head",
+        lastMessageCreatedAt: "09:11",
+        unreadCount: 0
+      }
+    ];
+
+    const membersByRoom = {
+      "29er": [
+        { pubkey: "npub1pablo", displayName: "Pablo", admin: true, role: "owner" },
+        { pubkey: "npub1vitor", displayName: "Vitor", admin: true, role: "admin" },
+        { pubkey: "npub1hzrd", displayName: "hazard", admin: false, role: "member" }
+      ],
+      "29er.ops": [
+        { pubkey: "npub1pablo", displayName: "Pablo", admin: true, role: "owner" },
+        { pubkey: "npub1fiat", displayName: "fiatjaf", admin: true, role: "admin" },
+        { pubkey: "npub1ops7", displayName: "ops-runner", admin: false, role: "member" }
+      ],
+      "29er.ops.admin": [
+        { pubkey: "npub1pablo", displayName: "Pablo", admin: true, role: "owner" },
+        { pubkey: "npub1fiat", displayName: "fiatjaf", admin: true, role: "admin" },
+        { pubkey: "npub1lina", displayName: "lina", admin: false, role: "moderator" }
+      ],
+      "29er.ops.incidents": [
+        { pubkey: "npub1pablo", displayName: "Pablo", admin: true, role: "admin" },
+        { pubkey: "npub1ops7", displayName: "ops-runner", admin: false, role: "member" },
+        { pubkey: "npub1mira", displayName: "mira", admin: false, role: "member" }
+      ],
+      "29er.design": [
+        { pubkey: "npub1pablo", displayName: "Pablo", admin: true, role: "admin" },
+        { pubkey: "npub1vitor", displayName: "Vitor", admin: true, role: "admin" },
+        { pubkey: "npub1lara", displayName: "lara", admin: false, role: "member" }
+      ],
+      "29er.design.tui": [
+        { pubkey: "npub1pablo", displayName: "Pablo", admin: true, role: "admin" },
+        { pubkey: "npub1lara", displayName: "lara", admin: false, role: "member" },
+        { pubkey: "npub1micah", displayName: "micah", admin: false, role: "member" }
+      ],
+      "29er.relays": [
+        { pubkey: "npub1pablo", displayName: "Pablo", admin: true, role: "admin" },
+        { pubkey: "npub1relay", displayName: "relay-watcher", admin: false, role: "member" },
+        { pubkey: "npub1mira", displayName: "mira", admin: false, role: "member" }
+      ]
+    };
+
+    const messagesByRoom = {
+      "29er": [
+        { id: "e-29-root-1", pubkey: "npub1vitor", content: "Root tree projection is clean. Branches and leaves both open kind:9 timelines now.", createdAt: "09:04", kind: 9 },
+        { id: "e-29-root-2", pubkey: "npub1pablo", content: "@hazard membership derivation stays Rust-owned; TUI just renders GroupTreeNode and dispatches typed actions.", createdAt: "09:08", kind: 9 },
+        { id: "e-29-root-3", pubkey: "npub1hzrd", content: "That makes the tree fast. I can jump into any branch without local room truth.", createdAt: "09:21", kind: 9 }
+      ],
+      "29er.ops": [
+        { id: "e-ops-1", pubkey: "npub1fiat", content: "@pablo create-invite should show the relay ack before we copy it out.", createdAt: "09:03", kind: 9 },
+        { id: "e-ops-2", pubkey: "npub1pablo", content: "Agree. Pending outbox stays visible in the command pane until publish confirms.", createdAt: "09:18", kind: 9 },
+        { id: "e-ops-3", pubkey: "npub1ops7", content: "Also need a quick set-parent action for moving onboarding under playbooks.", createdAt: "09:19", kind: 9 }
+      ],
+      "29er.ops.admin": [
+        { id: "e-admin-1", pubkey: "npub1lina", content: "Can I promote @ops-runner to moderator for incidents only?", createdAt: "09:09", kind: 9 },
+        { id: "e-admin-2", pubkey: "npub1pablo", content: "Use put-user/add-role in this room context. Rust derives the admin status after relay echo.", createdAt: "09:12", kind: 9 }
+      ],
+      "29er.ops.incidents": [
+        { id: "e-inc-1", pubkey: "npub1mira", content: "Relay recovered. Failed publish is retryable now.", createdAt: "08:59", kind: 9 },
+        { id: "e-inc-2", pubkey: "npub1ops7", content: "The UI should show canRetry without hiding the actual status.", createdAt: "09:01", kind: 9 }
+      ],
+      "29er.design": [
+        { id: "e-design-1", pubkey: "npub1lara", content: "Command-first triad feels right if the right pane changes with mode instead of becoming a generic settings drawer.", createdAt: "09:14", kind: 9 },
+        { id: "e-design-2", pubkey: "npub1vitor", content: "@pablo keep the center stable. The timeline should never disappear when opening actions.", createdAt: "09:20", kind: 9 }
+      ],
+      "29er.design.tui": [
+        { id: "e-tui-1", pubkey: "npub1micah", content: "Ratatui mapping: Layout split, List tree, Paragraph timeline rows, Tabs for command mode, Table for outbox.", createdAt: "09:02", kind: 9 },
+        { id: "e-tui-2", pubkey: "npub1lara", content: "Could use ratatui-textarea for composer and a tiny throbber when publish is pending.", createdAt: "09:17", kind: 9 }
+      ],
+      "29er.relays": [
+        { id: "e-relay-1", pubkey: "npub1relay", content: "wss://nip29.f7z.io caught up to head. Subscriptions are green.", createdAt: "09:11", kind: 9 },
+        { id: "e-relay-2", pubkey: "npub1mira", content: "Sparkline would be useful here, but normal chat should only see confidence, not a network console.", createdAt: "09:13", kind: 9 }
+      ]
+    };
+
+    let outbox = [
+      {
+        handle: "pub_9f17",
+        eventId: "draft-kind9-admin-desk",
+        kind: 9,
+        content: "Please add @ops-runner to incidents before tonight.",
+        status: "pending",
+        canRetry: false,
+        relays: ["wss://nip29.f7z.io"],
+        groupId: "29er.ops.admin"
+      },
+      {
+        handle: "pub_81c2",
+        eventId: "role-update-lina",
+        kind: 9000,
+        content: "put-user/add-role lina moderator",
+        status: "failed",
+        canRetry: true,
+        relays: ["wss://nip29.f7z.io"],
+        groupId: "29er.ops.incidents"
+      }
+    ];
+
+    const state = {
+      activeRoomId: "29er.design",
+      activeTab: "room",
+      paletteTab: "room",
+      paletteOpen: false
+    };
+
+    const roomList = document.getElementById("room-list");
+    const roomFilter = document.getElementById("room-filter");
+    const timeline = document.getElementById("timeline");
+    const commandBody = document.getElementById("command-body");
+    const composer = document.getElementById("composer");
+    const mentionPop = document.getElementById("mention-pop");
+    const palette = document.getElementById("palette");
+    const paletteSearch = document.getElementById("palette-search");
+    const paletteResults = document.getElementById("palette-results");
+
+    function activeRoom() {
+      return rooms.find((room) => room.groupId === state.activeRoomId) || rooms[0];
+    }
+
+    function depthFor(room) {
+      let depth = 0;
+      let current = room;
+      while (current.parentId) {
+        depth += 1;
+        current = rooms.find((candidate) => candidate.groupId === current.parentId) || {};
+      }
+      return depth;
+    }
+
+    function escapeHtml(value) {
+      return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+    }
+
+    function linkMentions(content) {
+      return escapeHtml(content).replace(/(@[a-zA-Z0-9_-]+)/g, '<span class="mention">$1</span>');
+    }
+
+    function renderRooms() {
+      const filter = roomFilter.value.trim().toLowerCase();
+      const visible = rooms.filter((room) => {
+        const haystack = `${room.groupId} ${room.displayName} ${room.lastMessagePreview}`.toLowerCase();
+        return haystack.includes(filter);
+      });
+
+      roomList.innerHTML = "";
+      visible.forEach((room) => {
+        const button = document.createElement("button");
+        button.className = `room-row ${room.groupId === state.activeRoomId ? "active" : ""}`;
+        button.type = "button";
+        button.style.paddingLeft = `${8 + depthFor(room) * 13}px`;
+        button.innerHTML = `
+          <span class="tree-mark">${room.isBranch ? ">" : "-"}</span>
+          <span class="room-main">
+            <span class="room-name">${escapeHtml(room.displayName)}</span>
+            <span class="room-preview">${escapeHtml(room.lastMessagePreview)}</span>
+          </span>
+          <span class="badge ${room.unreadCount ? "hot" : ""}">${room.unreadCount || room.lastMessageCreatedAt}</span>
+        `;
+        button.addEventListener("click", () => {
+          state.activeRoomId = room.groupId;
+          room.unreadCount = 0;
+          renderAll();
+          toast(`opened ${room.displayName}: center timeline preserved`);
+        });
+        roomList.appendChild(button);
+      });
+
+      if (!visible.length) {
+        roomList.innerHTML = '<div class="panel-subtitle" style="padding:10px;">No rooms match this filter.</div>';
+      }
+    }
+
+    function renderRoomHeader() {
+      const room = activeRoom();
+      document.getElementById("room-title").textContent = `${room.displayName} (${room.groupId})`;
+      document.getElementById("room-subtitle").textContent = `${room.isOpen ? "open" : "closed"} membership / ${room.isPublic ? "public" : "private"} / parent: ${room.parentId || "root"}`;
+      document.getElementById("room-visibility").textContent = room.isPublic ? "public" : "private";
+      document.getElementById("member-count").textContent = room.memberCount;
+      document.getElementById("admin-count").textContent = room.adminCount;
+      document.getElementById("unread-count").textContent = room.unreadCount;
+      document.getElementById("room-shape").textContent = room.isBranch ? "branch" : "leaf";
+    }
+
+    function renderTimeline() {
+      const messages = messagesByRoom[state.activeRoomId] || [];
+      timeline.innerHTML = "";
+      messages.forEach((message) => {
+        const row = document.createElement("article");
+        row.className = `message-row ${message.status || ""}`;
+        row.innerHTML = `
+          <div class="msg-meta">
+            <span class="msg-author">${escapeHtml(message.pubkey)}</span>
+            <span>${escapeHtml(message.createdAt)} kind:${message.kind}</span>
+            ${message.status ? `<span class="state-pill status-${message.status}">${message.status}</span>` : ""}
+          </div>
+          <div class="msg-body">${linkMentions(message.content)}</div>
+        `;
+        timeline.appendChild(row);
+      });
+      timeline.scrollTop = timeline.scrollHeight;
+    }
+
+    function commandsFor(tab) {
+      const room = activeRoom();
+      const roomCommands = [
+        { name: "join room", desc: `dispatch JoinGroup for ${room.groupId}` },
+        { name: "leave room", desc: `dispatch LeaveGroup; NMP updates membership projection` },
+        { name: "create child room", desc: `new GroupTreeNode parentId=${room.groupId}` },
+        { name: "set parent / move room", desc: "dispatch parent update; tree re-renders from projection" }
+      ];
+      const adminCommands = [
+        { name: "create invite", desc: `invite scoped to ${room.displayName}; relay ack shown in outbox` },
+        { name: "put user / add role", desc: "assign member/admin/moderator role through Rust action" },
+        { name: "remove role", desc: "dispatch role removal; no local membership mutation" },
+        { name: "copy group coordinates", desc: `groupId=${room.groupId}` }
+      ];
+      const outboxCommands = outbox.map((item) => ({
+        name: `${item.status}: ${item.handle}`,
+        desc: `kind:${item.kind} ${item.canRetry ? "canRetry" : "no retry"} / ${item.relays.join(", ")}`,
+        outbox: item
+      }));
+      return tab === "admin" ? adminCommands : tab === "outbox" ? outboxCommands : roomCommands;
+    }
+
+    function renderCommandBody() {
+      commandBody.innerHTML = "";
+      if (state.activeTab === "admin") {
+        renderMembers();
+      }
+
+      commandsFor(state.activeTab).forEach((command) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "command-row";
+        button.innerHTML = `
+          <span class="command-name">${escapeHtml(command.name)}</span>
+          <span class="command-desc">${escapeHtml(command.desc)}</span>
+        `;
+        button.addEventListener("click", () => {
+          if (command.outbox && command.outbox.canRetry) {
+            retryOutbox(command.outbox.handle);
+          } else {
+            toast(`queued command: ${command.name}`);
+          }
+        });
+        commandBody.appendChild(button);
+      });
+
+      if (state.activeTab === "outbox") {
+        outbox.forEach((item) => {
+          const block = document.createElement("div");
+          block.className = "outbox-item";
+          block.innerHTML = `
+            <div class="outbox-top">
+              <div class="outbox-title">${escapeHtml(item.handle)} / kind:${item.kind}</div>
+              <span class="state-pill status-${item.status}">${item.status}</span>
+            </div>
+            <div class="outbox-detail">${escapeHtml(item.content)}</div>
+            <div class="outbox-detail">${escapeHtml(item.relays.join(", "))} / ${item.eventId}</div>
+            ${item.canRetry ? '<button class="small-button primary" type="button">retry publish</button>' : ""}
+          `;
+          const retry = block.querySelector("button");
+          if (retry) retry.addEventListener("click", () => retryOutbox(item.handle));
+          commandBody.appendChild(block);
+        });
+      }
+    }
+
+    function renderMembers() {
+      const members = membersByRoom[state.activeRoomId] || [];
+      members.forEach((member) => {
+        const row = document.createElement("div");
+        row.className = "member-row";
+        row.innerHTML = `
+          <span class="member-name">${escapeHtml(member.displayName)} <span class="panel-subtitle">${escapeHtml(member.pubkey)}</span></span>
+          <span class="state-pill ${member.admin ? "status-published" : ""}">${escapeHtml(member.role)}</span>
+        `;
+        commandBody.appendChild(row);
+      });
+    }
+
+    function renderOutboxMini() {
+      const pending = outbox.filter((item) => item.status === "pending").length;
+      const failed = outbox.filter((item) => item.status === "failed").length;
+      document.getElementById("outbox-mini").innerHTML = `
+        <span class="state-pill status-pending">${pending} pending</span>
+        <span class="state-pill status-failed">${failed} failed</span>
+      `;
+    }
+
+    function renderPaletteResults() {
+      const query = paletteSearch.value.trim().toLowerCase();
+      const commands = commandsFor(state.paletteTab).filter((command) => {
+        return `${command.name} ${command.desc}`.toLowerCase().includes(query);
+      });
+      paletteResults.innerHTML = "";
+      commands.forEach((command) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "command-row";
+        button.innerHTML = `
+          <span class="command-name">/${escapeHtml(command.name)}</span>
+          <span class="command-desc">${escapeHtml(command.desc)}</span>
+        `;
+        button.addEventListener("click", () => {
+          closePalette();
+          if (command.outbox && command.outbox.canRetry) {
+            retryOutbox(command.outbox.handle);
+          } else {
+            toast(`dispatched: ${command.name}`);
+          }
+        });
+        paletteResults.appendChild(button);
+      });
+    }
+
+    function renderAll() {
+      renderRooms();
+      renderRoomHeader();
+      renderTimeline();
+      renderCommandBody();
+      renderOutboxMini();
+      renderPaletteResults();
+    }
+
+    function retryOutbox(handle) {
+      const item = outbox.find((candidate) => candidate.handle === handle);
+      if (!item) return;
+      item.status = "pending";
+      item.canRetry = false;
+      renderAll();
+      toast(`retrying ${handle} through ${item.relays[0]}`);
+      setTimeout(() => {
+        item.status = "published";
+        renderAll();
+        toast(`${handle} published`);
+      }, 1100);
+    }
+
+    function toast(message) {
+      const stack = document.getElementById("toast-stack");
+      const node = document.createElement("div");
+      node.className = "toast";
+      node.textContent = message;
+      stack.appendChild(node);
+      setTimeout(() => {
+        node.style.opacity = "0";
+        node.style.transform = "translateY(-6px)";
+        setTimeout(() => node.remove(), 180);
+      }, 2200);
+    }
+
+    function openPalette() {
+      state.paletteOpen = true;
+      palette.classList.add("open");
+      paletteSearch.value = "";
+      renderPaletteResults();
+      setTimeout(() => paletteSearch.focus(), 10);
+    }
+
+    function closePalette() {
+      state.paletteOpen = false;
+      palette.classList.remove("open");
+      document.getElementById("open-palette").focus();
+    }
+
+    document.getElementById("composer-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const text = composer.value.trim();
+      if (!text) {
+        toast("message is empty");
+        return;
+      }
+      const roomId = state.activeRoomId;
+      const handle = `pub_${Math.random().toString(16).slice(2, 6)}`;
+      const createdAt = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const message = {
+        id: `local-${handle}`,
+        pubkey: "npub1pablo",
+        content: text,
+        createdAt,
+        kind: 9,
+        status: "pending"
+      };
+      messagesByRoom[roomId].push(message);
+      outbox.unshift({
+        handle,
+        eventId: `kind9-${handle}`,
+        kind: 9,
+        content: text,
+        status: "pending",
+        canRetry: false,
+        relays: ["wss://nip29.f7z.io"],
+        groupId: roomId
+      });
+      composer.value = "";
+      mentionPop.classList.remove("open");
+      renderAll();
+      toast(`publishing kind:9 to ${activeRoom().displayName}`);
+      setTimeout(() => {
+        message.status = "confirmed";
+        const item = outbox.find((candidate) => candidate.handle === handle);
+        if (item) item.status = "published";
+        renderAll();
+        toast("relay ack received; message confirmed");
+      }, 1300);
+    });
+
+    composer.addEventListener("input", () => {
+      const value = composer.value;
+      const atIndex = value.lastIndexOf("@");
+      const term = atIndex >= 0 ? value.slice(atIndex + 1).toLowerCase() : "";
+      if (atIndex < 0 || /\s/.test(term)) {
+        mentionPop.classList.remove("open");
+        return;
+      }
+      const members = (membersByRoom[state.activeRoomId] || []).filter((member) => {
+        return member.displayName.toLowerCase().includes(term) || member.pubkey.toLowerCase().includes(term);
+      });
+      mentionPop.innerHTML = "";
+      members.forEach((member) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "mention-item";
+        button.innerHTML = `<span>@${escapeHtml(member.displayName)}</span><span class="panel-subtitle">${escapeHtml(member.role)}</span>`;
+        button.addEventListener("click", () => {
+          composer.value = `${value.slice(0, atIndex)}@${member.displayName} `;
+          mentionPop.classList.remove("open");
+          composer.focus();
+        });
+        mentionPop.appendChild(button);
+      });
+      mentionPop.classList.toggle("open", members.length > 0);
+    });
+
+    composer.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        document.getElementById("composer-form").requestSubmit();
+      }
+    });
+
+    roomFilter.addEventListener("input", renderRooms);
+    document.getElementById("open-palette").addEventListener("click", openPalette);
+    document.getElementById("close-palette").addEventListener("click", closePalette);
+    paletteSearch.addEventListener("input", renderPaletteResults);
+    palette.addEventListener("click", (event) => {
+      if (event.target === palette) closePalette();
+    });
+
+    document.querySelectorAll("[data-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.activeTab = button.dataset.tab;
+        document.querySelectorAll("[data-tab]").forEach((tab) => tab.classList.toggle("active", tab === button));
+        renderCommandBody();
+      });
+    });
+
+    document.querySelectorAll("[data-palette-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.paletteTab = button.dataset.paletteTab;
+        document.querySelectorAll("[data-palette-tab]").forEach((tab) => tab.classList.toggle("active", tab === button));
+        renderPaletteResults();
+      });
+    });
+
+    document.addEventListener("keydown", (event) => {
+      const tag = event.target.tagName.toLowerCase();
+      const editing = tag === "input" || tag === "textarea";
+      if (event.key === "/" && !editing) {
+        event.preventDefault();
+        openPalette();
+      }
+      if (event.key === "Escape" && state.paletteOpen) {
+        closePalette();
+      }
+      if (event.key.toLowerCase() === "r" && !editing) {
+        const retryable = outbox.find((item) => item.canRetry);
+        if (retryable) retryOutbox(retryable.handle);
+      }
+    });
+
+    document.querySelectorAll("#sketch-tools [data-width]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const width = button.dataset.width;
+        document.getElementById("viewport-shell").style.maxWidth = width;
+      });
+    });
+
+    document.getElementById("theme-switcher").addEventListener("change", (event) => {
+      document.querySelector('link[href*="themes"]').href = `../themes/${event.target.value}.css`;
+    });
+
+    const annotationTip = document.getElementById("annotation-tip");
+    document.getElementById("annotation-toggle").addEventListener("click", () => {
+      document.body.classList.toggle("annotations");
+      toast(document.body.classList.contains("annotations") ? "annotations on" : "annotations off");
+    });
+
+    document.addEventListener("mousemove", (event) => {
+      if (!document.body.classList.contains("annotations")) return;
+      const target = event.target.closest(".panel, .room-row, .command-row, .message-row, .metric, .composer");
+      if (!target) {
+        annotationTip.style.display = "none";
+        return;
+      }
+      const style = getComputedStyle(target);
+      annotationTip.style.display = "block";
+      annotationTip.style.left = `${event.clientX + 12}px`;
+      annotationTip.style.top = `${event.clientY + 12}px`;
+      annotationTip.textContent = `display:${style.display} padding:${style.padding} border:${style.borderColor} bg:${style.backgroundColor} font:${style.fontSize}`;
+    });
+
+    renderAll();
+  </script>
+</body>
+</html>

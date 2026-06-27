@@ -13,54 +13,52 @@
 /// Braille spinner frames.  Use `(spinner_tick % SPINNER_FRAMES.len())` to pick one.
 pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+use crate::actions::Action;
+use crate::app::{Focus, IdentityState, RelayState, TuiSnapshot};
+use crate::ui;
+use crate::Component;
 use crossterm::event::Event;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
-use crate::actions::Action;
-use crate::app::{Focus, IdentityState, RelayState, TuiSnapshot};
-use crate::ui;
-use crate::Component;
 
 /// A hint pair: bracket+key label rendered in LAVENDER; action verb in TEXT.
 type HintEntry = (&'static str, &'static str);
 
 static HINTS_ROOMLIST: &[HintEntry] = &[
-    ("[j/k]",    "navigate"),
-    ("[Enter]",  "open"),
-    ("[h/l]",    "expand"),
-    ("[n]",      "compose"),
-    ("[/]",      "search"),
-    ("[?]",      "help"),
+    ("[j/k]", "navigate"),
+    ("[Enter]", "open"),
+    ("[h/l]", "expand"),
+    ("[n]", "compose"),
+    ("[/]", "search"),
+    ("[?]", "help"),
 ];
 static HINTS_CHAT: &[HintEntry] = &[
-    ("[j/k]",       "scroll"),
-    ("[PgUp/Dn]",   "page"),
-    ("[n]",         "compose"),
-    ("[/]",         "search"),
-    ("[?]",         "help"),
+    ("[j/k]", "scroll"),
+    ("[PgUp/Dn]", "page"),
+    ("[n]", "compose"),
+    ("[/]", "search"),
+    ("[?]", "help"),
 ];
 static HINTS_COMPOSER: &[HintEntry] = &[
-    ("[Enter]",  "send"),
-    ("[Esc]",    "cancel"),
-    ("[@]",      "mention"),
-    ("[?]",      "help"),
+    ("[Enter]", "send"),
+    ("[Esc]", "cancel"),
+    ("[@]", "mention"),
+    ("[?]", "help"),
 ];
 static HINTS_PALETTE: &[HintEntry] = &[
-    ("[Enter]",  "select"),
-    ("[Esc]",    "close"),
-    ("[↑/↓]",   "navigate"),
+    ("[Enter]", "select"),
+    ("[Esc]", "close"),
+    ("[↑/↓]", "navigate"),
 ];
 static HINTS_FORM: &[HintEntry] = &[
-    ("[Enter]",  "submit"),
-    ("[Tab]",    "next field"),
-    ("[Esc]",    "cancel"),
+    ("[Enter]", "submit"),
+    ("[Tab]", "next field"),
+    ("[Esc]", "cancel"),
 ];
-static HINTS_HELP: &[HintEntry] = &[
-    ("[? / Esc]", "close help"),
-];
+static HINTS_HELP: &[HintEntry] = &[("[? / Esc]", "close help")];
 
 pub struct StatusBar {
     relay_state: RelayState,
@@ -91,14 +89,16 @@ impl Default for StatusBar {
 }
 
 impl StatusBar {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn update(&mut self, s: &TuiSnapshot) {
         self.relay_state = s.relay_state.clone();
         self.identity = match &s.identity_state {
             IdentityState::LoggedIn { npub } => ui::short_pubkey(npub),
-            IdentityState::LoggingIn         => "signing in\u{2026}".to_string(),
-            IdentityState::LoggedOut         => "offline".to_string(),
+            IdentityState::LoggingIn => "signing in\u{2026}".to_string(),
+            IdentityState::LoggedOut => "offline".to_string(),
         };
         self.total_unread = s.channel_tree.iter().map(|c| c.unread).sum();
         self.status_message = s.status_message.clone();
@@ -111,11 +111,11 @@ impl StatusBar {
             HINTS_FORM
         } else {
             match s.focus {
-                Focus::RoomList  => HINTS_ROOMLIST,
-                Focus::Chat      => HINTS_CHAT,
-                Focus::Composer  => HINTS_COMPOSER,
-                Focus::Palette   => HINTS_PALETTE,
-                Focus::Modal     => HINTS_FORM,
+                Focus::RoomList => HINTS_ROOMLIST,
+                Focus::Chat => HINTS_CHAT,
+                Focus::Composer => HINTS_COMPOSER,
+                Focus::Palette => HINTS_PALETTE,
+                Focus::Modal => HINTS_FORM,
             }
         };
     }
@@ -139,7 +139,7 @@ impl StatusBar {
                 if i > 0 {
                     spans.push(Span::raw("  "));
                 }
-                spans.push(Span::styled(*key,    Style::default().fg(ui::LAVENDER)));
+                spans.push(Span::styled(*key, Style::default().fg(ui::LAVENDER)));
                 spans.push(Span::styled(*action, Style::default().fg(ui::TEXT)));
             }
         }
@@ -170,7 +170,8 @@ impl StatusBar {
         match &self.relay_state {
             RelayState::Connected => {
                 // Flash "● Connected" in green for 2 s after first connection.
-                let flash_active = self.connected_at
+                let flash_active = self
+                    .connected_at
                     .map(|t| t.elapsed().as_secs_f32() < 2.0)
                     .unwrap_or(false);
                 let state_fg = if flash_active { ui::GREEN } else { ui::TEXT };
@@ -181,7 +182,8 @@ impl StatusBar {
                 spans.push(Span::styled(" Connected", Style::default().fg(state_fg)));
             }
             RelayState::Connecting => {
-                let elapsed = self.connecting_since
+                let elapsed = self
+                    .connecting_since
                     .map(|t| t.elapsed().as_secs())
                     .unwrap_or(0);
                 spans.push(Span::raw("relay: "));
@@ -233,7 +235,7 @@ impl Component for StatusBar {
         let (right, right_w) = self.right_line();
         // Guard: never let the right column consume more than half the bar
         let right_w = right_w.min(area.width / 2);
-        let left_w  = area.width.saturating_sub(right_w);
+        let left_w = area.width.saturating_sub(right_w);
 
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -247,5 +249,7 @@ impl Component for StatusBar {
         );
     }
 
-    fn handle_event(&mut self, _event: &Event) -> Option<Action> { None }
+    fn handle_event(&mut self, _event: &Event) -> Option<Action> {
+        None
+    }
 }

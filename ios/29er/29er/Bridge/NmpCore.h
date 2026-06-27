@@ -156,6 +156,13 @@ typedef enum : uint32_t {
 uint32_t nmp_app_29er_register(void *app, void **handle_out);
 void nmp_app_29er_unregister(void *handle);
 
+// 29er relay selector. `handle` is the opaque pointer returned by
+// `nmp_app_29er_register`. Rust owns the active relay and the user's NIP-51
+// kind:30002 relay-set mutation; Swift forwards user intent only.
+bool nmp_app_29er_relay_selector_select_relay(void *handle, const char *relay_url);
+bool nmp_app_29er_relay_selector_add_relay(void *handle, const char *relay_url);
+bool nmp_app_29er_relay_selector_remove_relay(void *handle, const char *relay_url);
+
 // ADR-0053 — declare that this host consumes every Tier-2 kernel-owned
 // built-in projection (the ONE non-footgun way to receive the full set). 29er
 // is a full client, so it follows Chirp's posture. Idempotent; call before

@@ -1,0 +1,6 @@
+{
+  "id": "019f0-6a50b",
+  "ts": "2026-06-26T07:28:10Z",
+  "session": "019f02cc-8e3e-7782-9ff3-73e2a3824267",
+  "text": "- HIGH [composer.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/ui/composer.rs:58), [app.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/app.rs:428), [app.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/app.rs:671): mentions are shell-derived and effectively broken. Composer inserts `@display_name`, dispatch sends only `content`, and unread mention tier checks for `@<my_pubkey>` in previews. Dispatch selected mention pubkeys and derive mention tiers from NMP event tags/projection state."
+}

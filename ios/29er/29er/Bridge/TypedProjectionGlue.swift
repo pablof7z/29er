@@ -164,4 +164,38 @@ enum TypedProjectionGlue {
             unreadCount: row.unreadCount
         )
     }
+
+    // MARK: nmp.29er.relay_selector → RelaySelectorSnapshot
+
+    static func relaySelector(
+        _ reader: nmp_app_29er_RelaySelectorSnapshot
+    ) -> RelaySelectorSnapshot {
+        RelaySelectorSnapshot(
+            activeRelayUrl: reader.activeRelayUrl ?? "",
+            relays: reader.relays.map { row in
+                RelaySelectorRow(
+                    relayUrl: row.relayUrl ?? "",
+                    selected: row.selected,
+                    fromNip51: row.fromNip51
+                )
+            }
+        )
+    }
+
+    // MARK: relay_diagnostics → RelayDiagnosticsSnapshot
+
+    static func relayDiagnostics(
+        _ reader: nmp_kernel_RelayDiagnosticsSnapshot
+    ) -> RelayDiagnosticsSnapshot {
+        RelayDiagnosticsSnapshot(
+            relays: reader.relays.map { row in
+                let info = row.info
+                return RelayDiagnosticsRelay(
+                    relayUrl: row.relayUrl ?? "",
+                    connection: row.connection ?? "",
+                    nip11Name: info?.hasName == true ? info?.name : nil
+                )
+            }
+        )
+    }
 }

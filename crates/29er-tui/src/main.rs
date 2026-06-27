@@ -1,11 +1,11 @@
 //! Runtime loop + full wiring (issues #5, #10). Owns the Screen state machine,
 //! the 4Hz projection mpsc, modal-aware input routing, and the only `apply`.
-use std::time::Duration;
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::Frame;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use twentyniner_tui::actions::Action;
 use twentyniner_tui::app::{App, Focus, ProjectionView, Screen, TuiSnapshot};
@@ -32,7 +32,9 @@ struct Ui {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> Result<()> { run().await }
+async fn main() -> Result<()> {
+    run().await
+}
 
 async fn run() -> Result<()> {
     let mut terminal = TerminalHandle::new()?;
@@ -76,7 +78,9 @@ async fn run() -> Result<()> {
                 Some(Err(_)) | None => app.quit(),
             },
         }
-        if app.should_quit() { break; }
+        if app.should_quit() {
+            break;
+        }
     }
     terminal.clear().ok();
     Ok(())
@@ -84,13 +88,24 @@ async fn run() -> Result<()> {
 
 fn draw(f: &mut Frame, s: &TuiSnapshot, ui: &mut Ui) {
     match s.screen {
-        Screen::Login => { ui.login.draw(f, f.area()); return; }
+        Screen::Login => {
+            ui.login.draw(f, f.area());
+            return;
+        }
         Screen::App => {}
     }
-    let composer_h: u16 = if s.selected_channel_id.is_some() { 6 } else { 0 };
+    let composer_h: u16 = if s.selected_channel_id.is_some() {
+        6
+    } else {
+        0
+    };
     let root = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(composer_h), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(composer_h),
+            Constraint::Length(1),
+        ])
         .split(f.area());
     let main = Layout::default()
         .direction(Direction::Horizontal)
@@ -98,12 +113,20 @@ fn draw(f: &mut Frame, s: &TuiSnapshot, ui: &mut Ui) {
         .split(root[0]);
     ui.room_list.draw(f, main[0]);
     ui.chat.draw(f, main[1]);
-    if composer_h > 0 { ui.composer.draw(f, root[1]); }
+    if composer_h > 0 {
+        ui.composer.draw(f, root[1]);
+    }
     ui.status_bar.draw(f, root[2]);
     // Overlay layers: palette > form > help
-    if s.palette_open { ui.palette.draw(f, f.area()); }
-    if s.active_form.is_some() { ui.membership.draw(f, f.area()); }
-    if s.help_open { ui.help.draw(f, f.area()); }
+    if s.palette_open {
+        ui.palette.draw(f, f.area());
+    }
+    if s.active_form.is_some() {
+        ui.membership.draw(f, f.area());
+    }
+    if s.help_open {
+        ui.help.draw(f, f.area());
+    }
 }
 
 fn handle_event(event: &Event, app: &mut App, ui: &mut Ui) {
@@ -119,13 +142,17 @@ fn handle_event(event: &Event, app: &mut App, ui: &mut Ui) {
 
     // Login screen: forward everything to the login component.
     if app.screen() == Screen::Login {
-        if let Some(a) = ui.login.handle_event(event) { apply(a, app); }
+        if let Some(a) = ui.login.handle_event(event) {
+            apply(a, app);
+        }
         return;
     }
 
     // Help overlay: only Esc / ? dismisses it; all other input is swallowed.
     if app.is_help_open() {
-        if let Some(a) = ui.help.handle_event(event) { apply(a, app); }
+        if let Some(a) = ui.help.handle_event(event) {
+            apply(a, app);
+        }
         return;
     }
 
@@ -133,7 +160,9 @@ fn handle_event(event: &Event, app: &mut App, ui: &mut Ui) {
     match app.focus() {
         Focus::Modal => {
             // Form/modal: membership component handles everything; Esc closes.
-            if let Some(a) = ui.membership.handle_event(event) { apply(a, app); }
+            if let Some(a) = ui.membership.handle_event(event) {
+                apply(a, app);
+            }
             return;
         }
         Focus::Palette => {
@@ -183,8 +212,14 @@ fn handle_event(event: &Event, app: &mut App, ui: &mut Ui) {
                     return;
                 }
                 // Tab / Shift+Tab cycle through base panels.
-                KeyCode::Tab => { app.cycle_focus(); return; }
-                KeyCode::BackTab => { app.reverse_cycle_focus(); return; }
+                KeyCode::Tab => {
+                    app.cycle_focus();
+                    return;
+                }
+                KeyCode::BackTab => {
+                    app.reverse_cycle_focus();
+                    return;
+                }
                 // 'q' quits from the room list.
                 KeyCode::Char('q') if app.focus() == Focus::RoomList => {
                     app.quit();
@@ -220,7 +255,9 @@ fn handle_event(event: &Event, app: &mut App, ui: &mut Ui) {
         Focus::Composer => ui.composer.handle_event(event),
         Focus::Palette | Focus::Modal => None, // already handled above
     };
-    if let Some(a) = action { apply(a, app); }
+    if let Some(a) = action {
+        apply(a, app);
+    }
 }
 
 fn apply(action: Action, app: &mut App) {
@@ -253,7 +290,11 @@ fn apply(action: Action, app: &mut App) {
         Action::Leave { group } => app.leave(group),
         Action::ShowMembers(g) => app.show_members(g),
         Action::CreateInvite { group, codes } => app.create_invite(group, codes),
-        Action::PutUser { group, target_pubkey, role } => app.put_user(group, target_pubkey, role),
+        Action::PutUser {
+            group,
+            target_pubkey,
+            role,
+        } => app.put_user(group, target_pubkey, role),
         Action::CreateChild { parent, name } => app.create_child(parent, name),
         Action::MoveChannel { group, parent } => app.move_channel(group, parent),
         // forms — open_form handles palette collapse + focus stack internally.

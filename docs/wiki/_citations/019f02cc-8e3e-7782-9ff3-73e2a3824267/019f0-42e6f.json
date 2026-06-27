@@ -1,0 +1,6 @@
+{
+  "id": "019f0-42e6f",
+  "ts": "2026-06-26T07:28:00Z",
+  "session": "019f02cc-8e3e-7782-9ff3-73e2a3824267",
+  "text": "- MEDIUM [app.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/app.rs:468): join/leave/admin actions ignore dispatch errors, close forms, and show optimistic status anyway. Parse returned errors or consume action-stage snapshot state before showing success/failure."
+}

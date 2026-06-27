@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>29er TUI Sketch 006 - Channel List Palette</title>
+  <link rel="stylesheet" href="../themes/default.css">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    button, input { font: inherit; }
+    button {
+      border: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+      color: var(--color-text);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    button:hover, button:focus-visible {
+      border-color: var(--color-primary);
+      box-shadow: var(--shadow-glow);
+      outline: none;
+    }
+    #viewport {
+      min-height: 100vh;
+      margin: 0 auto;
+      transition: max-width 0.15s ease;
+    }
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: 42px minmax(0, 1fr) 34px;
+      border-inline: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+      background: var(--color-surface);
+    }
+    .topbar, .bottombar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      border-color: var(--color-border);
+      min-width: 0;
+    }
+    .topbar { border-bottom: 1px solid var(--color-border); }
+    .bottombar { border-top: 1px solid var(--color-border); color: var(--color-text-muted); font-size: 12px; }
+    .brand {
+      color: var(--color-primary);
+      font-weight: 800;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: var(--color-text-muted);
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 22px;
+      padding: 2px 7px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-bg);
+      color: var(--color-text-muted);
+      white-space: nowrap;
+    }
+    .pill.good { color: var(--color-success); border-color: color-mix(in srgb, var(--color-success) 50%, var(--color-border)); }
+    .pill.warn { color: var(--color-warning); border-color: color-mix(in srgb, var(--color-warning) 50%, var(--color-border)); }
+    .open-palette {
+      margin-left: auto;
+      padding: 6px 10px;
+      color: var(--color-primary);
+      white-space: nowrap;
+    }
+    .main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .channel-list {
+      min-height: 0;
+      overflow: auto;
+      padding: 10px;
+    }
+    .row {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      min-height: 58px;
+      padding: 7px 9px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: inherit;
+      text-align: left;
+      transition: all 0.15s ease;
+    }
+    .row:hover { background: var(--color-surface-2); border-color: var(--color-border); }
+    .row.active {
+      background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface-2));
+      border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border));
+      box-shadow: inset 3px 0 0 var(--color-primary);
+    }
+    .tree { color: var(--color-text-faint); white-space: pre; text-align: right; }
+    .chan-main { min-width: 0; }
+    .chan-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      font-weight: 700;
+      color: var(--color-text);
+    }
+    .chan-title span:first-child {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .preview {
+      margin-top: 4px;
+      min-width: 0;
+      color: var(--color-text-muted);
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .meta {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+      color: var(--color-text-faint);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .badge {
+      min-width: 22px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0 6px;
+      border-radius: var(--radius-sm);
+      background: var(--color-primary);
+      color: #06110f;
+      font-weight: 900;
+    }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      max-width: 120px;
+      min-height: 18px;
+      padding: 1px 5px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      color: var(--color-text-muted);
+      font-size: 11px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .tag.closed { color: var(--color-warning); }
+    .tag.pending { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border)); }
+    .summary {
+      display: flex;
+      gap: 8px;
+      min-width: 0;
+      margin-left: auto;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .summary strong { color: var(--color-text); font-weight: 700; }
+    .keys {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+    }
+    kbd {
+      min-width: 20px;
+      padding: 1px 5px;
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius-sm);
+      color: var(--color-text);
+      background: var(--color-bg);
+      font-size: 11px;
+      text-align: center;
+    }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 54px;
+      transform: translateX(-50%) translateY(14px);
+      opacity: 0;
+      z-index: 20;
+      padding: 8px 12px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-elevated);
+      color: var(--color-text);
+      box-shadow: var(--shadow-md);
+      pointer-events: none;
+      transition: all 0.15s ease;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .palette-backdrop {
+      position: fixed;
+      inset: 0;
+      display: none;
+      place-items: start center;
+      padding-top: min(12vh, 92px);
+      background: rgba(0, 0, 0, 0.42);
+      z-index: 15;
+    }
+    .palette-backdrop.open { display: grid; }
+    .palette {
+      width: min(760px, calc(100vw - 28px));
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--radius-lg);
+      background: var(--color-elevated);
+      box-shadow: var(--shadow-md);
+      overflow: hidden;
+      transform: translateY(-8px);
+      opacity: 0;
+      transition: all 0.15s ease;
+    }
+    .palette-backdrop.open .palette { transform: translateY(0); opacity: 1; }
+    .palette-input {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-bg);
+    }
+    .palette-input input {
+      width: 100%;
+      border: 0;
+      outline: none;
+      background: transparent;
+      color: var(--color-text);
+    }
+    .palette-input input::placeholder { color: var(--color-text-faint); }
+    .palette-results {
+      max-height: min(58vh, 440px);
+      overflow: auto;
+      padding: 6px;
+    }
+    .result {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 70px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 9px;
+      border: 1px solid transparent;
+      background: transparent;
+      text-align: left;
+      color: inherit;
+    }
+    .result:hover, .result.active {
+      background: var(--color-surface-2);
+      border-color: var(--color-primary);
+    }
+    .kind {
+      color: var(--color-primary);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+    .result-title {
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      font-weight: 700;
+    }
+    .result-sub {
+      margin-top: 3px;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      color: var(--color-text-muted);
+      font-size: 12px;
+    }
+    .empty {
+      padding: 18px;
+      color: var(--color-text-muted);
+      text-align: center;
+    }
+    #sketch-tools {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.74);
+      color: white;
+      font-family: system-ui, sans-serif;
+      font-size: 12px;
+      opacity: 0.42;
+      transition: opacity 0.2s ease;
+    }
+    #sketch-tools:hover { opacity: 1; }
+    #sketch-tools button, #sketch-tools select {
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      background: rgba(255, 255, 255, 0.08);
+      color: white;
+      border-radius: 5px;
+      padding: 4px 6px;
+      font: inherit;
+    }
+    .annotate *:hover::after {
+      content: attr(class);
+      position: fixed;
+      left: 12px;
+      bottom: 54px;
+      max-width: 320px;
+      padding: 6px 8px;
+      border-radius: 6px;
+      background: #000;
+      color: #fff;
+      font: 12px system-ui;
+      z-index: 9998;
+      pointer-events: none;
+    }
+    @media (max-width: 700px) {
+      body { font-size: 13px; }
+      .topbar { gap: 7px; padding-inline: 10px; }
+      .status .pill:nth-child(n + 3) { display: none; }
+      .row { grid-template-columns: 20px minmax(0, 1fr); }
+      .meta { grid-column: 2; justify-content: flex-start; margin-top: -2px; }
+      .summary { display: none; }
+      .bottombar { padding-right: 128px; }
+      .result { grid-template-columns: minmax(0, 1fr); }
+      .kind, .result kbd { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <main class="app">
+      <header class="topbar">
+        <div class="brand">29er</div>
+        <div class="status">
+          <span class="pill good">● nip29.f7z.io</span>
+          <span class="pill">signed in npub1z…k9m2</span>
+          <span class="pill warn" id="pending-pill">1 pending</span>
+        </div>
+        <button class="open-palette" id="open-palette">⌘K Palette</button>
+      </header>
+
+      <section class="main" aria-label="Channel list sketch">
+        <div class="channel-list" id="channel-list"></div>
+      </section>
+
+      <footer class="bottombar">
+        <div class="keys">
+          <kbd>↑↓</kbd> move
+          <kbd>Enter</kbd> open
+          <kbd>/</kbd> palette
+          <kbd>n</kbd> compose
+          <kbd>m</kbd> members
+          <kbd>a</kbd> admin
+        </div>
+        <div class="summary" id="selected-summary"></div>
+      </footer>
+    </main>
+  </div>
+
+  <div class="palette-backdrop" id="palette-backdrop" aria-hidden="true">
+    <section class="palette" role="dialog" aria-label="Command palette">
+      <div class="palette-input">
+        <span style="color: var(--color-primary);">:</span>
+        <input id="palette-query" placeholder="Jump to channel, compose, join, members, invite..." autocomplete="off">
+        <kbd>Esc</kbd>
+      </div>
+      <div class="palette-results" id="palette-results"></div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <div id="sketch-tools">
+    <select onchange="document.querySelector('link[href*=themes]').href='../themes/'+this.value+'.css'">
+      <option value="default">Default</option>
+    </select>
+    <button onclick="setViewport('375px')">Phone</button>
+    <button onclick="setViewport('768px')">Tablet</button>
+    <button onclick="setViewport('100%')">Full</button>
+    <button onclick="document.body.classList.toggle('annotate')">Annotate</button>
+  </div>
+
+  <script>
+    const channels = [
+      { id: '29er', depth: 0, name: '29er', unread: 12, state: 'admin', access: 'open', members: 41, preview: 'pablo: kind:9 finally renders on-device', pending: false },
+      { id: 'm002-membership', depth: 1, name: 'm002-membership', unread: 5, state: 'admin', access: 'open', members: 9, preview: 'jo: join sheet should show pending outbox', pending: true },
+      { id: 'relay-ops', depth: 1, name: 'relay-ops', unread: 2, state: 'member', access: 'closed', members: 7, preview: 'relay ack delayed on kind:9009 invite', pending: false },
+      { id: 'ios-shell', depth: 1, name: 'ios-shell', unread: 0, state: 'member', access: 'open', members: 14, preview: 'Liquid Glass row treatment is cleaner now', pending: false },
+      { id: 'podcast-player', depth: 0, name: 'podcast-player', unread: 8, state: 'member', access: 'open', members: 23, preview: 'queue controls should stay Rust-owned', pending: false },
+      { id: 'autosnip', depth: 1, name: 'autosnip', unread: 1, state: 'member', access: 'open', members: 6, preview: 'boundary resolver moved out of Swift', pending: false },
+      { id: 'hl', depth: 0, name: 'hl', unread: 0, state: 'not joined', access: 'open', members: 18, preview: 'tap Join from palette to follow work', pending: false },
+      { id: 'nmp', depth: 0, name: 'nostr-multi-platform', unread: 3, state: 'member', access: 'closed', members: 57, preview: 'typed projections should remain generic', pending: false }
+    ];
+
+    let selected = '29er';
+    let paletteOpen = false;
+    const actions = [
+      { kind: 'action', title: 'Compose in current channel', sub: 'Open ratatui-textarea composer for kind:9', key: 'n', run: () => fakeSend() },
+      { kind: 'action', title: 'Show members', sub: 'Open GroupMembers projection for selected channel', key: 'm', run: () => toast('Members palette: admins and roles from Rust projection') },
+      { kind: 'action', title: 'Create invite', sub: 'Dispatch nmp.nip29.create_invite if admin', key: 'a', run: () => toast('Invite action queued as kind:9009') },
+      { kind: 'action', title: 'Join selected channel', sub: 'Dispatch nmp.nip29.join when not a member', key: 'j', run: () => joinSelected() },
+      { kind: 'action', title: 'Copy raw event JSON', sub: 'Copy selected row backing event/projection payload', key: 'y', run: () => toast('Raw JSON copied for selected channel') }
+    ];
+
+    const listEl = document.getElementById('channel-list');
+    const summaryEl = document.getElementById('selected-summary');
+    const paletteBackdrop = document.getElementById('palette-backdrop');
+    const paletteQuery = document.getElementById('palette-query');
+    const paletteResults = document.getElementById('palette-results');
+    const pendingPill = document.getElementById('pending-pill');
+
+    function selectedChannel() {
+      return channels.find(c => c.id === selected) || channels[0];
+    }
+
+    function renderChannels() {
+      listEl.innerHTML = channels.map(channel => {
+        const tree = channel.depth === 0 ? '●' : '└';
+        const active = channel.id === selected ? 'active' : '';
+        const unread = channel.unread ? `<span class="badge">${channel.unread > 99 ? '99+' : channel.unread}</span>` : '';
+        const pending = channel.pending ? '<span class="tag pending">pending</span>' : '';
+        return `
+          <button class="row ${active}" data-id="${channel.id}" onclick="selectChannel('${channel.id}')">
+            <div class="tree">${' '.repeat(channel.depth * 2)}${tree}</div>
+            <div class="chan-main">
+              <div class="chan-title">
+                <span># ${channel.name}</span>
+                <span class="tag ${channel.access === 'closed' ? 'closed' : ''}">${channel.access}</span>
+                <span class="tag">${channel.state}</span>
+                ${pending}
+              </div>
+              <div class="preview">${channel.preview}</div>
+            </div>
+            <div class="meta">
+              <span>${channel.members} members</span>
+              ${unread}
+            </div>
+          </button>
+        `;
+      }).join('');
+
+      const current = selectedChannel();
+      summaryEl.innerHTML = `<strong># ${current.name}</strong> ${current.members} members · ${current.state} · ${current.access}`;
+      pendingPill.textContent = `${channels.filter(c => c.pending).length} pending`;
+    }
+
+    function selectChannel(id) {
+      selected = id;
+      const channel = selectedChannel();
+      channel.unread = 0;
+      renderChannels();
+      toast(`Selected #${channel.name}`);
+    }
+
+    function openPalette(seed = '') {
+      paletteBackdrop.classList.add('open');
+      paletteBackdrop.setAttribute('aria-hidden', 'false');
+      paletteQuery.value = seed;
+      renderPalette();
+      setTimeout(() => paletteQuery.focus(), 20);
+    }
+
+    function closePalette() {
+      paletteBackdrop.classList.remove('open');
+      paletteBackdrop.setAttribute('aria-hidden', 'true');
+    }
+
+    function renderPalette() {
+      const query = paletteQuery.value.trim().toLowerCase();
+      const channelResults = channels
+        .filter(c => !query || c.name.toLowerCase().includes(query) || c.preview.toLowerCase().includes(query))
+        .map(c => ({
+          kind: 'channel',
+          title: `# ${c.name}`,
+          sub: `${c.members} members · ${c.state} · ${c.preview}`,
+          key: 'Enter',
+          run: () => { selectChannel(c.id); closePalette(); }
+        }));
+
+      const actionResults = actions.filter(a =>
+        !query || a.title.toLowerCase().includes(query) || a.sub.toLowerCase().includes(query) || a.key === query
+      );
+      const results = [...channelResults, ...actionResults].slice(0, 9);
+
+      if (!results.length) {
+        paletteResults.innerHTML = '<div class="empty">No channel or action matches that query.</div>';
+        return;
+      }
+
+      paletteResults.innerHTML = results.map((result, index) => `
+        <button class="result ${index === 0 ? 'active' : ''}" onclick="runPaletteResult(${index})">
+          <div class="kind">${result.kind}</div>
+          <div>
+            <div class="result-title">${result.title}</div>
+            <div class="result-sub">${result.sub}</div>
+          </div>
+          <kbd>${result.key}</kbd>
+        </button>
+      `).join('');
+      window.currentPaletteResults = results;
+    }
+
+    function runPaletteResult(index) {
+      const result = window.currentPaletteResults?.[index];
+      if (!result) return;
+      result.run();
+      if (result.kind === 'action') closePalette();
+    }
+
+    function fakeSend() {
+      const current = selectedChannel();
+      current.pending = true;
+      current.preview = 'you: Draft from palette queued as kind:9...';
+      renderChannels();
+      toast(`Queued kind:9 in #${current.name}`);
+      setTimeout(() => {
+        current.pending = false;
+        current.preview = 'you: Draft from palette confirmed';
+        renderChannels();
+        toast(`Confirmed on ${current.id}`);
+      }, 1300);
+    }
+
+    function joinSelected() {
+      const current = selectedChannel();
+      if (current.state !== 'not joined') {
+        toast(`#${current.name} is already ${current.state}`);
+        return;
+      }
+      current.pending = true;
+      renderChannels();
+      toast(`Join request queued for #${current.name}`);
+      setTimeout(() => {
+        current.pending = false;
+        current.state = 'member';
+        current.preview = 'membership updated from kind:39002';
+        renderChannels();
+        toast(`Joined #${current.name}`);
+      }, 1100);
+    }
+
+    function toast(message) {
+      const el = document.getElementById('toast');
+      el.textContent = message;
+      el.classList.add('show');
+      clearTimeout(window.toastTimer);
+      window.toastTimer = setTimeout(() => el.classList.remove('show'), 1600);
+    }
+
+    function setViewport(width) {
+      document.getElementById('viewport').style.maxWidth = width;
+    }
+
+    document.getElementById('open-palette').addEventListener('click', () => openPalette());
+    paletteQuery.addEventListener('input', renderPalette);
+    paletteBackdrop.addEventListener('click', event => {
+      if (event.target === paletteBackdrop) closePalette();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') closePalette();
+      if (event.key === '/' && document.activeElement !== paletteQuery) {
+        event.preventDefault();
+        openPalette();
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        openPalette();
+      }
+      if (event.key === 'n' && !paletteBackdrop.classList.contains('open')) fakeSend();
+      if (event.key === 'm' && !paletteBackdrop.classList.contains('open')) toast('Members stay in the palette for this direction');
+      if (event.key === 'a' && !paletteBackdrop.classList.contains('open')) openPalette('invite');
+      if (paletteBackdrop.classList.contains('open') && event.key === 'Enter') {
+        runPaletteResult(0);
+      }
+    });
+
+    renderChannels();
+  </script>
+</body>
+</html>

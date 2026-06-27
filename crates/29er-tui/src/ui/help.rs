@@ -1,44 +1,46 @@
 //! Help overlay: centered bordered block listing all keybindings in two columns.
 //! Opens on `?`, dismissed with `Esc` or `?`.
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
-use ratatui::Frame;
 use crate::actions::Action;
 use crate::app::TuiSnapshot;
 use crate::ui;
 use crate::Component;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
+use ratatui::Frame;
 
 /// (key, description) pairs for the help table.
 static KEYBINDS: &[(&str, &str)] = &[
     // Navigation
-    ("j / ↓",        "Move down in list"),
-    ("k / ↑",        "Move up in list"),
-    ("g",            "Go to top of list"),
-    ("G",            "Go to bottom of list"),
-    ("Enter",        "Open selected channel"),
+    ("j / ↓", "Move down in list"),
+    ("k / ↑", "Move up in list"),
+    ("g", "Go to top of list"),
+    ("G", "Go to bottom of list"),
+    ("Enter", "Open selected channel"),
     // Focus
-    ("Tab",          "Next panel"),
-    ("Shift+Tab",    "Previous panel"),
-    ("n",            "Focus composer"),
-    ("Esc",          "Back / pop focus"),
+    ("Tab", "Next panel"),
+    ("Shift+Tab", "Previous panel"),
+    ("n", "Focus composer"),
+    ("Esc", "Back / pop focus"),
     // Chat
-    ("j / PgDn",     "Scroll chat down"),
-    ("k / PgUp",     "Scroll chat up"),
+    ("j / PgDn", "Scroll chat down"),
+    ("k / PgUp", "Scroll chat up"),
     // Palette / commands
-    ("/ or Ctrl+K",  "Open command palette"),
+    ("/ or Ctrl+K", "Open command palette"),
     // Misc
-    ("?",            "Toggle this help"),
-    ("Ctrl+C/Q",     "Quit"),
+    ("?", "Toggle this help"),
+    ("Ctrl+C/Q", "Quit"),
 ];
 
 #[derive(Default)]
 pub struct HelpOverlay;
 
 impl HelpOverlay {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
     pub fn update(&mut self, _s: &TuiSnapshot) {}
 }
 
@@ -84,8 +86,7 @@ impl Component for HelpOverlay {
 
         let half = KEYBINDS.len() / 2 + KEYBINDS.len() % 2;
 
-        for (col_idx, (col_rect, slice_start)) in
-            [(cols[0], 0), (cols[1], half)].iter().enumerate()
+        for (col_idx, (col_rect, slice_start)) in [(cols[0], 0), (cols[1], half)].iter().enumerate()
         {
             let end = if col_idx == 0 { half } else { KEYBINDS.len() };
             let lines: Vec<Line> = KEYBINDS[*slice_start..end]
@@ -94,7 +95,9 @@ impl Component for HelpOverlay {
                     Line::from(vec![
                         Span::styled(
                             format!("{:<16}", key),
-                            Style::default().fg(ui::LAVENDER).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(ui::LAVENDER)
+                                .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(*desc, Style::default().fg(ui::TEXT)),
                     ])
@@ -106,7 +109,9 @@ impl Component for HelpOverlay {
 
     fn handle_event(&mut self, event: &Event) -> Option<Action> {
         let Event::Key(key) = event else { return None };
-        if key.kind != KeyEventKind::Press { return None; }
+        if key.kind != KeyEventKind::Press {
+            return None;
+        }
         match key.code {
             KeyCode::Esc | KeyCode::Char('?') => Some(Action::CloseHelp),
             _ => None,

@@ -1,0 +1,1248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>29er TUI Sketch 003 - Tree Map Focus</title>
+  <link rel="stylesheet" href="../themes/default.css">
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-mono);
+      line-height: 1.35;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      border: 1px solid var(--color-border);
+      background: var(--color-surface-2);
+      color: var(--color-text);
+      border-radius: var(--radius-sm);
+      padding: 6px 9px;
+      cursor: pointer;
+    }
+
+    button:hover,
+    button:focus-visible {
+      border-color: var(--color-primary);
+      color: var(--color-primary-hover);
+      outline: none;
+    }
+
+    .app {
+      min-height: 100vh;
+      padding: 12px;
+    }
+
+    .terminal {
+      min-height: calc(100vh - 24px);
+      border: 1px solid var(--color-border-strong);
+      background: var(--color-code-bg);
+      box-shadow: var(--shadow-md);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+    }
+
+    .topbar,
+    .statusbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 10px;
+      background: var(--color-surface);
+      border-bottom: 1px solid var(--color-border);
+      overflow: hidden;
+    }
+
+    .statusbar {
+      border-top: 1px solid var(--color-border);
+      border-bottom: 0;
+      color: var(--color-text-muted);
+      font-size: var(--text-xs);
+      flex-wrap: wrap;
+    }
+
+    .brand,
+    .tabs,
+    .relay {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .brand strong {
+      color: var(--color-primary);
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .truncate {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .tab,
+    .pill,
+    .badge {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: 2px 6px;
+      color: var(--color-text-muted);
+      background: var(--color-surface-2);
+      white-space: nowrap;
+    }
+
+    .tab.active,
+    .badge.hot {
+      border-color: var(--color-primary);
+      color: var(--color-primary);
+    }
+
+    .badge.warn {
+      border-color: var(--color-warning);
+      color: var(--color-warning);
+    }
+
+    .badge.danger {
+      border-color: var(--color-danger);
+      color: var(--color-danger);
+    }
+
+    .main {
+      display: grid;
+      grid-template-columns: minmax(330px, 0.95fr) minmax(360px, 1.25fr) minmax(260px, 0.75fr);
+      min-height: 0;
+    }
+
+    .panel {
+      min-width: 0;
+      min-height: 0;
+      border-right: 1px solid var(--color-border);
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      background: var(--color-bg);
+    }
+
+    .panel:last-child {
+      border-right: 0;
+    }
+
+    .panel-head {
+      padding: 9px 10px;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-surface);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .panel-title {
+      font-size: var(--text-sm);
+      color: var(--color-text);
+      min-width: 0;
+    }
+
+    .panel-subtitle {
+      font-size: var(--text-xs);
+      color: var(--color-text-faint);
+      margin-top: 2px;
+    }
+
+    .panel-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 10px;
+    }
+
+    .panel-foot {
+      border-top: 1px solid var(--color-border);
+      padding: 8px 10px;
+      background: var(--color-surface);
+    }
+
+    .focus-stack {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .crumb {
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      border-radius: var(--radius-sm);
+      padding: 6px;
+      min-width: 0;
+    }
+
+    .crumb.is-selected {
+      border-color: var(--color-primary);
+      box-shadow: var(--shadow-glow);
+    }
+
+    .crumb-label {
+      color: var(--color-text-muted);
+      font-size: var(--text-xs);
+    }
+
+    .crumb-name {
+      margin-top: 2px;
+      color: var(--color-text);
+      overflow-wrap: anywhere;
+    }
+
+    .tree-shell {
+      border: 1px solid var(--color-border);
+      background: var(--color-code-bg);
+      min-height: 450px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .tree-ruler {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--color-border);
+      color: var(--color-text-faint);
+      font-size: var(--text-xs);
+    }
+
+    .tree-lines {
+      padding: 8px;
+      display: grid;
+      gap: 4px;
+      align-content: start;
+    }
+
+    .tree-node {
+      width: 100%;
+      text-align: left;
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) auto auto;
+      gap: 8px;
+      align-items: center;
+      border-color: transparent;
+      background: transparent;
+      padding: 5px 6px;
+      color: var(--color-text-muted);
+      min-width: 0;
+    }
+
+    .tree-node:hover {
+      background: var(--color-surface);
+    }
+
+    .tree-node.in-path {
+      color: var(--color-text);
+      background: rgba(53, 208, 186, 0.05);
+      border-color: var(--color-border);
+    }
+
+    .tree-node.selected {
+      color: var(--color-primary-hover);
+      border-color: var(--color-primary);
+      background: var(--color-surface-2);
+    }
+
+    .node-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    .node-meta {
+      color: var(--color-text-faint);
+      font-size: var(--text-xs);
+      white-space: nowrap;
+    }
+
+    .node-unread {
+      min-width: 3ch;
+      text-align: right;
+      color: var(--color-accent);
+    }
+
+    .node-unread.zero {
+      color: var(--color-text-faint);
+    }
+
+    .map-actions,
+    .composer-row,
+    .side-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .hero-room {
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+
+    .hero-name {
+      font-size: clamp(1.25rem, 3vw, 2.25rem);
+      color: var(--color-primary);
+      line-height: 1.05;
+      overflow-wrap: anywhere;
+    }
+
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 8px;
+    }
+
+    .message {
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      padding: 8px;
+    }
+
+    .message-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--color-text-faint);
+      font-size: var(--text-xs);
+      margin-bottom: 5px;
+    }
+
+    .message-content {
+      color: var(--color-text);
+      overflow-wrap: anywhere;
+    }
+
+    .composer {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+    }
+
+    .composer input {
+      min-width: 0;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      background: var(--color-code-bg);
+      color: var(--color-text);
+      padding: 8px;
+    }
+
+    .facts,
+    .members,
+    .outbox {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .section-label {
+      color: var(--color-primary);
+      font-size: var(--text-xs);
+      text-transform: uppercase;
+    }
+
+    .table {
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: minmax(90px, 0.7fr) minmax(0, 1fr);
+      border-bottom: 1px solid var(--color-border);
+      min-width: 0;
+    }
+
+    .row:last-child {
+      border-bottom: 0;
+    }
+
+    .cell {
+      padding: 6px 8px;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .cell:first-child {
+      color: var(--color-text-faint);
+      border-right: 1px solid var(--color-border);
+    }
+
+    .sparkline {
+      border: 1px solid var(--color-border);
+      background: var(--color-code-bg);
+      padding: 8px;
+      color: var(--color-accent);
+      overflow-wrap: anywhere;
+    }
+
+    .member,
+    .outbox-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      padding: 7px 8px;
+      min-width: 0;
+    }
+
+    .muted {
+      color: var(--color-text-muted);
+    }
+
+    .faint {
+      color: var(--color-text-faint);
+    }
+
+    .annotation {
+      display: none;
+      border: 1px dashed var(--color-accent);
+      color: var(--color-accent);
+      background: rgba(242, 185, 75, 0.06);
+      padding: 7px;
+      margin-top: 8px;
+      font-size: var(--text-xs);
+    }
+
+    body.show-annotations .annotation {
+      display: block;
+    }
+
+    .sketch-toolbar {
+      position: fixed;
+      right: 12px;
+      bottom: 12px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: min(460px, calc(100vw - 24px));
+      padding: 7px;
+      border: 1px solid var(--color-border-strong);
+      background: var(--color-surface);
+      box-shadow: var(--shadow-sm);
+      z-index: 20;
+    }
+
+    .dialog-backdrop {
+      position: fixed;
+      inset: 0;
+      display: none;
+      place-items: center;
+      padding: 16px;
+      background: rgba(0, 0, 0, 0.62);
+      z-index: 30;
+    }
+
+    .dialog-backdrop.open {
+      display: grid;
+    }
+
+    .dialog {
+      width: min(560px, 100%);
+      border: 1px solid var(--color-border-strong);
+      background: var(--color-bg);
+      box-shadow: var(--shadow-md);
+    }
+
+    .dialog-head,
+    .dialog-foot {
+      padding: 10px;
+      background: var(--color-surface);
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .dialog-foot {
+      border-top: 1px solid var(--color-border);
+      border-bottom: 0;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .dialog-body {
+      padding: 10px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .dialog select {
+      width: 100%;
+      border: 1px solid var(--color-border);
+      background: var(--color-code-bg);
+      color: var(--color-text);
+      padding: 8px;
+      border-radius: var(--radius-sm);
+    }
+
+    .empty-state,
+    .error-state,
+    .loading-state {
+      border: 1px solid var(--color-border);
+      padding: 18px;
+      background: var(--color-surface);
+      color: var(--color-text-muted);
+    }
+
+    .loading-state {
+      color: var(--color-primary);
+    }
+
+    .error-state {
+      color: var(--color-danger);
+      border-color: var(--color-danger);
+    }
+
+    .terminal.viewport-mobile .main {
+      grid-template-columns: 1fr;
+    }
+
+    .terminal.viewport-mobile .panel {
+      border-right: 0;
+      border-bottom: 1px solid var(--color-border);
+      min-height: 520px;
+    }
+
+    .terminal.viewport-mobile .focus-stack {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .terminal.viewport-tablet .main {
+      grid-template-columns: minmax(300px, 0.9fr) minmax(360px, 1.1fr);
+    }
+
+    .terminal.viewport-tablet .side {
+      grid-column: 1 / -1;
+      border-top: 1px solid var(--color-border);
+    }
+
+    @media (max-width: 980px) {
+      .main {
+        grid-template-columns: 1fr;
+      }
+
+      .panel {
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border);
+        min-height: 520px;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .focus-stack {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .composer {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .app {
+        padding: 6px;
+      }
+
+      .terminal {
+        min-height: calc(100vh - 12px);
+      }
+
+      .tabs,
+      .relay,
+      .hero-meta,
+      .map-actions,
+      .side-actions {
+        width: 100%;
+      }
+
+      .focus-stack {
+        grid-template-columns: 1fr;
+      }
+
+      .tree-node {
+        grid-template-columns: 1fr;
+      }
+
+      .node-meta,
+      .node-unread {
+        text-align: left;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <main class="terminal" id="terminal">
+      <header class="topbar">
+        <div class="brand">
+          <strong>29er</strong>
+          <span class="truncate">tree-map-focus / signed in as npub1pablo...</span>
+        </div>
+        <nav class="tabs" aria-label="TUI tabs">
+          <span class="tab active">rooms</span>
+          <span class="tab">members</span>
+          <span class="tab">outbox</span>
+          <span class="tab">relay</span>
+        </nav>
+        <div class="relay">
+          <span class="badge hot">wss://nip29.f7z.io</span>
+          <span class="badge">sub ok</span>
+        </div>
+      </header>
+
+      <section class="main" aria-label="29er TUI sketch">
+        <section class="panel map">
+          <div class="panel-head">
+            <div class="panel-title">
+              <div>Hierarchy Map</div>
+              <div class="panel-subtitle">Every branch and leaf is a kind:9 room</div>
+            </div>
+            <span class="badge hot" id="totalUnread">0 unread</span>
+          </div>
+          <div class="panel-body">
+            <div class="focus-stack" id="focusStack"></div>
+            <div class="tree-shell">
+              <div class="tree-ruler">
+                <span>ASCII spatial room map</span>
+                <span>members | rollup</span>
+              </div>
+              <div class="tree-lines" id="treeLines"></div>
+            </div>
+            <div class="annotation">
+              Ratatui mapping: outer Layout splits map/chat/details; tree uses tui-widgets tree/list helpers or a custom List row renderer. Selection state is a Rust projection key, not local room truth.
+            </div>
+          </div>
+          <div class="panel-foot">
+            <div class="map-actions">
+              <button data-action="parent">h parent</button>
+              <button data-action="prev">k prev</button>
+              <button data-action="next">j next</button>
+              <button data-action="child">l child</button>
+              <button data-action="toggle-flow">unread flow</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel chat">
+          <div class="panel-head">
+            <div class="panel-title">
+              <div id="selectedTitle">Room</div>
+              <div class="panel-subtitle truncate" id="selectedPreview"></div>
+            </div>
+            <span class="badge" id="roomMode">open</span>
+          </div>
+          <div class="panel-body">
+            <div class="hero-room">
+              <div class="hero-name" id="heroName"></div>
+              <div class="hero-meta" id="heroMeta"></div>
+            </div>
+            <div class="timeline" id="timeline"></div>
+            <div class="annotation">
+              The big selected-room label maps to tui-big-text for focus transitions. Timeline rows are List items fed by GroupChatMessage projections.
+            </div>
+          </div>
+          <div class="panel-foot">
+            <form class="composer" id="composer">
+              <input id="messageInput" autocomplete="off" placeholder="post kind:9 to selected room, @mention supported">
+              <button type="submit">publish</button>
+            </form>
+          </div>
+        </section>
+
+        <aside class="panel side">
+          <div class="panel-head">
+            <div class="panel-title">
+              <div>Room Projection</div>
+              <div class="panel-subtitle">Rendered from Rust/NMP state</div>
+            </div>
+            <button data-action="cycle-state">state</button>
+          </div>
+          <div class="panel-body">
+            <div class="facts">
+              <div class="section-label">GroupTreeNode</div>
+              <div class="table" id="factsTable"></div>
+            </div>
+            <div class="facts" id="flowPanel">
+              <div class="section-label">Unread propagation</div>
+              <div class="sparkline" id="sparkline"></div>
+            </div>
+            <div class="members">
+              <div class="section-label">Members and admins</div>
+              <div id="memberList"></div>
+            </div>
+            <div class="outbox">
+              <div class="section-label">PublishOutboxItem</div>
+              <div id="outboxList"></div>
+            </div>
+            <div class="annotation">
+              Admin actions dispatch typed commands such as SetParent, CreateChildRoom, PutUserRole, Join, Leave, and CreateInvite. Retry policy and publish status remain Rust-owned.
+            </div>
+          </div>
+          <div class="panel-foot">
+            <div class="side-actions">
+              <button data-action="move-dialog">set parent</button>
+              <button data-action="create-child">create child</button>
+              <button data-action="invite">invite</button>
+              <button data-action="retry">retry outbox</button>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <footer class="statusbar">
+        <span class="truncate" id="statusText">ready</span>
+        <span>keys: h parent / j next / k prev / l child / m move / s state</span>
+      </footer>
+    </main>
+  </div>
+
+  <div class="sketch-toolbar" aria-label="Sketch toolbar">
+    <button data-viewport="desktop">desktop</button>
+    <button data-viewport="tablet">tablet</button>
+    <button data-viewport="mobile">mobile</button>
+    <button data-action="annotations">annotations</button>
+  </div>
+
+  <div class="dialog-backdrop" id="moveDialog" role="dialog" aria-modal="true" aria-labelledby="moveTitle">
+    <div class="dialog">
+      <div class="dialog-head">
+        <strong id="moveTitle">Set parent / move room</strong>
+        <button data-action="close-dialog">close</button>
+      </div>
+      <div class="dialog-body">
+        <div class="muted" id="moveSummary"></div>
+        <select id="parentSelect" aria-label="New parent room"></select>
+        <div class="table">
+          <div class="row">
+            <div class="cell">Typed action</div>
+            <div class="cell">Dispatch AdminAction::SetParent { groupId, parentId }</div>
+          </div>
+          <div class="row">
+            <div class="cell">Source of truth</div>
+            <div class="cell">Rust/NMP validates role, signs, publishes, retries</div>
+          </div>
+        </div>
+      </div>
+      <div class="dialog-foot">
+        <button data-action="close-dialog">cancel</button>
+        <button data-action="apply-parent">dispatch move</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const rooms = {
+      root: {
+        groupId: "29er-root",
+        name: "29er HQ",
+        parentId: null,
+        childIds: ["dev", "ops", "design"],
+        memberCount: 118,
+        adminCount: 5,
+        isPublic: true,
+        isOpen: true,
+        isBranch: true,
+        unreadCount: 1,
+        lastMessagePreview: "@nina linked the admin derivation notes"
+      },
+      dev: {
+        groupId: "dev",
+        name: "Protocol Dev",
+        parentId: "root",
+        childIds: ["rust", "tui", "qa"],
+        memberCount: 44,
+        adminCount: 3,
+        isPublic: true,
+        isOpen: true,
+        isBranch: true,
+        unreadCount: 2,
+        lastMessagePreview: "@pablo can we keep the TUI shell projection-only?"
+      },
+      rust: {
+        groupId: "rust",
+        name: "Rust/NMP Core",
+        parentId: "dev",
+        childIds: [],
+        memberCount: 21,
+        adminCount: 2,
+        isPublic: false,
+        isOpen: false,
+        isBranch: false,
+        unreadCount: 5,
+        lastMessagePreview: "publish retry should stay in the outbox reducer"
+      },
+      tui: {
+        groupId: "tui",
+        name: "Ratatui TUI",
+        parentId: "dev",
+        childIds: ["tree-lab"],
+        memberCount: 18,
+        adminCount: 2,
+        isPublic: true,
+        isOpen: true,
+        isBranch: true,
+        unreadCount: 7,
+        lastMessagePreview: "@marco the room tree needs rollup counts, not a flat list"
+      },
+      "tree-lab": {
+        groupId: "tree-lab",
+        name: "Tree Map Lab",
+        parentId: "tui",
+        childIds: [],
+        memberCount: 9,
+        adminCount: 1,
+        isPublic: true,
+        isOpen: true,
+        isBranch: false,
+        unreadCount: 3,
+        lastMessagePreview: "focus stack prototype now has parent movement"
+      },
+      qa: {
+        groupId: "qa",
+        name: "Interop QA",
+        parentId: "dev",
+        childIds: [],
+        memberCount: 16,
+        adminCount: 1,
+        isPublic: true,
+        isOpen: true,
+        isBranch: false,
+        unreadCount: 0,
+        lastMessagePreview: "nak fixture passes against nip29.f7z.io"
+      },
+      ops: {
+        groupId: "ops",
+        name: "Relay Ops",
+        parentId: "root",
+        childIds: ["relay", "admin"],
+        memberCount: 31,
+        adminCount: 4,
+        isPublic: false,
+        isOpen: false,
+        isBranch: true,
+        unreadCount: 0,
+        lastMessagePreview: "relay fanout is green after the restart"
+      },
+      relay: {
+        groupId: "relay",
+        name: "nip29.f7z.io",
+        parentId: "ops",
+        childIds: [],
+        memberCount: 12,
+        adminCount: 2,
+        isPublic: false,
+        isOpen: false,
+        isBranch: false,
+        unreadCount: 4,
+        lastMessagePreview: "auth challenge latency is back under 100ms"
+      },
+      admin: {
+        groupId: "admin",
+        name: "Admin Desk",
+        parentId: "ops",
+        childIds: [],
+        memberCount: 10,
+        adminCount: 4,
+        isPublic: false,
+        isOpen: false,
+        isBranch: false,
+        unreadCount: 2,
+        lastMessagePreview: "move proposal: Tree Map Lab under Ratatui TUI"
+      },
+      design: {
+        groupId: "design",
+        name: "Product Design",
+        parentId: "root",
+        childIds: ["mobile"],
+        memberCount: 26,
+        adminCount: 2,
+        isPublic: true,
+        isOpen: true,
+        isBranch: true,
+        unreadCount: 0,
+        lastMessagePreview: "terminal map should explain where a message lives"
+      },
+      mobile: {
+        groupId: "mobile",
+        name: "Mobile Shells",
+        parentId: "design",
+        childIds: [],
+        memberCount: 15,
+        adminCount: 1,
+        isPublic: true,
+        isOpen: true,
+        isBranch: false,
+        unreadCount: 1,
+        lastMessagePreview: "iOS and Android should dispatch the same action"
+      }
+    };
+
+    const messages = {
+      root: [
+        ["npub1nina", "kind:9", "@pablo linked the milestone to membership/admin flows.", "09:12"],
+        ["npub1max", "kind:9", "Root should show descendant unread, not only direct messages.", "09:16"]
+      ],
+      dev: [
+        ["npub1pablo", "kind:9", "Typed actions first: Join, Leave, CreateChildRoom, SetParent.", "09:34"],
+        ["npub1mira", "kind:9", "The shell can cache focus, but room state comes from projections.", "09:38"]
+      ],
+      rust: [
+        ["npub1sam", "kind:9", "PublishOutboxItem needs canRetry plus relay list in the detail pane.", "10:01"],
+        ["npub1nina", "kind:9", "Membership derivation stays in Rust. TUI gets GroupMember rows.", "10:05"]
+      ],
+      tui: [
+        ["npub1marco", "kind:9", "@pablo the room tree needs rollup counts, not a flat list.", "10:20"],
+        ["npub1pablo", "kind:9", "Make the hierarchy the star. Timeline attaches to whichever branch has focus.", "10:22"],
+        ["npub1ruth", "kind:9", "This feels buildable with Layout, List, Paragraph, Table, and Sparkline.", "10:24"]
+      ],
+      "tree-lab": [
+        ["npub1ana", "kind:9", "Focus stack prototype now has parent movement.", "10:31"]
+      ],
+      qa: [],
+      ops: [
+        ["npub1ops", "kind:9", "Relay fanout is green after the restart.", "08:51"]
+      ],
+      relay: [
+        ["npub1ops", "kind:9", "auth challenge latency is back under 100ms.", "08:59"]
+      ],
+      admin: [
+        ["npub1root", "kind:9", "Move proposal: Tree Map Lab under Ratatui TUI.", "09:04"]
+      ],
+      design: [
+        ["npub1mira", "kind:9", "Terminal map should explain where a message lives.", "09:48"]
+      ],
+      mobile: [
+        ["npub1zoe", "kind:9", "iOS and Android should dispatch the same action.", "09:50"]
+      ]
+    };
+
+    const members = [
+      { displayName: "Pablo", pubkey: "npub1pablo...", admin: true, role: "owner" },
+      { displayName: "Nina", pubkey: "npub1nina...", admin: true, role: "moderator" },
+      { displayName: "Marco", pubkey: "npub1marco...", admin: false, role: "member" },
+      { displayName: "Ruth", pubkey: "npub1ruth...", admin: false, role: "member" }
+    ];
+
+    const outbox = [
+      { handle: "pub-018", eventId: "note1q3...", kind: 9, content: "Make the hierarchy the star.", status: "sent", canRetry: false, relays: ["wss://nip29.f7z.io"] },
+      { handle: "pub-019", eventId: "pending", kind: 9, content: "@marco checking parent move UX", status: "queued", canRetry: true, relays: ["wss://nip29.f7z.io"] }
+    ];
+
+    const state = {
+      selected: "tui",
+      showFlow: true,
+      viewState: "normal",
+      viewport: "desktop"
+    };
+
+    const byId = (id) => document.getElementById(id);
+
+    function rollupUnread(id) {
+      return rooms[id].unreadCount + rooms[id].childIds.reduce((sum, childId) => sum + rollupUnread(childId), 0);
+    }
+
+    function pathTo(id) {
+      const path = [];
+      let cursor = id;
+      while (cursor) {
+        path.unshift(cursor);
+        cursor = rooms[cursor].parentId;
+      }
+      return path;
+    }
+
+    function subtreeIds(id, seen = new Set()) {
+      seen.add(id);
+      rooms[id].childIds.forEach((childId) => subtreeIds(childId, seen));
+      return seen;
+    }
+
+    function visibleRows(id = "root", prefix = "", rows = []) {
+      const room = rooms[id];
+      rows.push({ id, prefix });
+      room.childIds.forEach((childId, index) => {
+        const last = index === room.childIds.length - 1;
+        visibleRows(childId, prefix + (last ? "`- " : "|- "), rows);
+      });
+      return rows;
+    }
+
+    function siblings(id) {
+      const parentId = rooms[id].parentId;
+      return parentId ? rooms[parentId].childIds : ["root"];
+    }
+
+    function selectRoom(id, reason) {
+      if (!rooms[id]) return;
+      state.selected = id;
+      state.viewState = "normal";
+      render();
+      setStatus(reason || ("focus -> " + rooms[id].name));
+    }
+
+    function moveSibling(offset) {
+      const sibs = siblings(state.selected);
+      const current = sibs.indexOf(state.selected);
+      const next = sibs[(current + offset + sibs.length) % sibs.length];
+      selectRoom(next, "focus sibling -> " + rooms[next].name);
+    }
+
+    function setStatus(text) {
+      byId("statusText").textContent = text;
+    }
+
+    function renderFocusStack() {
+      const stack = pathTo(state.selected).slice(-4);
+      byId("focusStack").innerHTML = stack.map((id, index) => {
+        const room = rooms[id];
+        const label = index === stack.length - 1 ? "focus" : "parent " + (stack.length - index - 1);
+        return `
+          <button class="crumb ${id === state.selected ? "is-selected" : ""}" data-room="${id}">
+            <div class="crumb-label">${label}</div>
+            <div class="crumb-name">${room.name}</div>
+            <div class="faint">${rollupUnread(id)} unread rollup</div>
+          </button>
+        `;
+      }).join("");
+    }
+
+    function renderTree() {
+      const selectedPath = new Set(pathTo(state.selected));
+      byId("treeLines").innerHTML = visibleRows().map(({ id, prefix }) => {
+        const room = rooms[id];
+        const selected = id === state.selected;
+        const inPath = selectedPath.has(id);
+        const rollup = rollupUnread(id);
+        const marker = room.isBranch ? "[+]" : "[ ]";
+        const open = room.isOpen ? "open" : "closed";
+        return `
+          <button class="tree-node ${selected ? "selected" : ""} ${inPath ? "in-path" : ""}" data-room="${id}">
+            <span class="node-name">${prefix}${marker} ${room.name}</span>
+            <span class="node-meta">${room.memberCount}m ${room.adminCount}a ${open}</span>
+            <span class="node-unread ${rollup ? "" : "zero"}">${rollup ? "+" + rollup : "0"}</span>
+          </button>
+        `;
+      }).join("");
+      byId("totalUnread").textContent = rollupUnread("root") + " unread";
+    }
+
+    function renderTimeline() {
+      const room = rooms[state.selected];
+      byId("selectedTitle").textContent = room.name + " / kind:9";
+      byId("selectedPreview").textContent = room.lastMessagePreview;
+      byId("heroName").textContent = room.name;
+      byId("roomMode").textContent = room.isOpen ? "open" : "closed";
+      byId("roomMode").className = "badge " + (room.isOpen ? "hot" : "warn");
+      byId("heroMeta").innerHTML = [
+        room.groupId,
+        room.isPublic ? "public" : "private",
+        room.isOpen ? "open join" : "invite only",
+        room.isBranch ? room.childIds.length + " child rooms" : "leaf room",
+        rollupUnread(state.selected) + " rollup unread"
+      ].map((item) => `<span class="badge">${item}</span>`).join("");
+
+      const target = byId("timeline");
+      if (state.viewState === "loading") {
+        target.innerHTML = `<div class="loading-state">loading subscription frames ... throbber would run here</div>`;
+        return;
+      }
+      if (state.viewState === "error") {
+        target.innerHTML = `<div class="error-state">relay error: subscription eose timeout. Rust retry policy owns recovery.</div>`;
+        return;
+      }
+      const rows = messages[state.selected] || [];
+      if (state.viewState === "empty" || rows.length === 0) {
+        target.innerHTML = `<div class="empty-state">empty kind:9 timeline for this room. Composer can still publish if policy allows.</div>`;
+        return;
+      }
+      target.innerHTML = rows.map(([pubkey, kind, content, createdAt]) => `
+        <article class="message">
+          <div class="message-head">
+            <span>${pubkey}</span>
+            <span>${kind} ${createdAt}</span>
+          </div>
+          <div class="message-content">${content}</div>
+        </article>
+      `).join("");
+    }
+
+    function renderFacts() {
+      const room = rooms[state.selected];
+      const rows = [
+        ["groupId", room.groupId],
+        ["parentId", room.parentId || "null"],
+        ["childIds", room.childIds.length ? room.childIds.join(", ") : "[]"],
+        ["memberCount", room.memberCount],
+        ["adminCount", room.adminCount],
+        ["direct unread", room.unreadCount],
+        ["rollup unread", rollupUnread(state.selected)],
+        ["last kind:9", room.lastMessagePreview]
+      ];
+      byId("factsTable").innerHTML = rows.map(([key, value]) => `
+        <div class="row"><div class="cell">${key}</div><div class="cell">${value}</div></div>
+      `).join("");
+
+      byId("flowPanel").style.display = state.showFlow ? "grid" : "none";
+      const flow = visibleRows(state.selected).map(({ id }) => Math.min(9, rollupUnread(id)));
+      const bars = flow.length ? flow.map((n) => "._:-=+*#"[Math.max(0, n - 1)] || "_").join(" ") : "_";
+      byId("sparkline").textContent = "descendant flow: " + bars + "  values: " + flow.join(" ");
+
+      byId("memberList").innerHTML = members.map((member) => `
+        <div class="member">
+          <div class="truncate">${member.displayName} <span class="faint">${member.pubkey}</span></div>
+          <span class="badge ${member.admin ? "hot" : ""}">${member.role}</span>
+        </div>
+      `).join("");
+
+      byId("outboxList").innerHTML = outbox.map((item) => `
+        <div class="outbox-item">
+          <div class="truncate">${item.handle} kind:${item.kind} ${item.content}</div>
+          <span class="badge ${item.status === "queued" ? "warn" : "hot"}">${item.status}</span>
+        </div>
+      `).join("");
+    }
+
+    function renderParentOptions() {
+      const blocked = subtreeIds(state.selected);
+      const candidates = Object.keys(rooms).filter((id) => !blocked.has(id) && rooms[id].isBranch);
+      byId("moveSummary").textContent = "Move " + rooms[state.selected].name + " under another branch room.";
+      byId("parentSelect").innerHTML = candidates.length
+        ? candidates.map((id) => `<option value="${id}">${rooms[id].name} (${rooms[id].groupId})</option>`).join("")
+        : `<option value="">no eligible branch parent</option>`;
+    }
+
+    function render() {
+      renderFocusStack();
+      renderTree();
+      renderTimeline();
+      renderFacts();
+      renderParentOptions();
+    }
+
+    function dispatch(action) {
+      const room = rooms[state.selected];
+      if (action === "parent" && room.parentId) selectRoom(room.parentId, "focus parent");
+      if (action === "child" && room.childIds.length) selectRoom(room.childIds[0], "focus first child");
+      if (action === "prev") moveSibling(-1);
+      if (action === "next") moveSibling(1);
+      if (action === "toggle-flow") {
+        state.showFlow = !state.showFlow;
+        render();
+        setStatus("show unread flow -> " + state.showFlow);
+      }
+      if (action === "move-dialog") {
+        byId("moveDialog").classList.add("open");
+        setStatus("open set-parent dialog for " + room.groupId);
+      }
+      if (action === "close-dialog") byId("moveDialog").classList.remove("open");
+      if (action === "apply-parent") {
+        const parentId = byId("parentSelect").value;
+        if (!parentId) {
+          setStatus("no eligible parent for " + room.groupId);
+          return;
+        }
+        setStatus("dispatched SetParent { groupId: " + room.groupId + ", parentId: " + parentId + " }");
+        byId("moveDialog").classList.remove("open");
+      }
+      if (action === "cycle-state") {
+        const states = ["normal", "loading", "empty", "error"];
+        state.viewState = states[(states.indexOf(state.viewState) + 1) % states.length];
+        render();
+        setStatus("timeline state -> " + state.viewState);
+      }
+      if (action === "annotations") {
+        document.body.classList.toggle("show-annotations");
+      }
+      if (action === "create-child") setStatus("dispatched CreateChildRoom under " + room.groupId);
+      if (action === "invite") setStatus("dispatched CreateInvite for " + room.groupId);
+      if (action === "retry") setStatus("dispatched RetryPublish for queued outbox item");
+    }
+
+    document.addEventListener("click", (event) => {
+      const roomButton = event.target.closest("[data-room]");
+      if (roomButton) selectRoom(roomButton.dataset.room);
+
+      const actionButton = event.target.closest("[data-action]");
+      if (actionButton) dispatch(actionButton.dataset.action);
+
+      const viewportButton = event.target.closest("[data-viewport]");
+      if (viewportButton) {
+        const terminal = byId("terminal");
+        terminal.classList.remove("viewport-desktop", "viewport-tablet", "viewport-mobile");
+        terminal.classList.add("viewport-" + viewportButton.dataset.viewport);
+        setStatus("preview viewport -> " + viewportButton.dataset.viewport);
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.target.matches("input, select")) return;
+      const keys = { h: "parent", j: "next", k: "prev", l: "child", m: "move-dialog", s: "cycle-state" };
+      if (keys[event.key]) {
+        event.preventDefault();
+        dispatch(keys[event.key]);
+      }
+    });
+
+    byId("composer").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const input = byId("messageInput");
+      const content = input.value.trim();
+      if (!content) return;
+      messages[state.selected] = messages[state.selected] || [];
+      messages[state.selected].push(["npub1pablo", "kind:9", content, "now"]);
+      rooms[state.selected].lastMessagePreview = content;
+      outbox.unshift({
+        handle: "pub-" + String(Math.floor(Math.random() * 900) + 100),
+        eventId: "pending",
+        kind: 9,
+        content,
+        status: "queued",
+        canRetry: true,
+        relays: ["wss://nip29.f7z.io"]
+      });
+      input.value = "";
+      render();
+      setStatus("queued PublishTextMessage to " + rooms[state.selected].groupId);
+    });
+
+    render();
+  </script>
+</body>
+</html>

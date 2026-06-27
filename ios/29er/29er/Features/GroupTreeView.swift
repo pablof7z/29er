@@ -21,6 +21,7 @@ private let gtLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupT
 ///   - otherwise → the chat-style list.
 struct GroupTreeView: View {
     @EnvironmentObject private var model: KernelModel
+    @State private var showingRelaySelector = false
 
     var body: some View {
         let tree = model.groupTree
@@ -41,8 +42,30 @@ struct GroupTreeView: View {
                 GroupTreeList(nodes: tree.roots, tree: tree)
             }
         }
-        .navigationTitle("29er")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Button {
+                    showingRelaySelector = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(model.activeRelayTitle)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Relay")
+            }
+        }
+        .sheet(isPresented: $showingRelaySelector) {
+            RelaySelectorSheet()
+                .environmentObject(model)
+        }
         .navigationDestination(for: String.self) { groupId in
             GroupTimelineView(groupId: groupId)
         }
@@ -50,13 +73,12 @@ struct GroupTreeView: View {
             GroupChildrenView(parentGroupId: route.groupId)
         }
         .task {
-            // Host relay comes from the Rust-owned `group_defaults` projection
-            // (D7), never a Swift literal. Skip until it has landed; the
-            // apply-time auto-open (KernelModel+Apply) covers the common case,
-            // and this `.task` retries when the view appears after the tick.
-            let suggestedRelay = model.groupDefaults.suggestedRelayUrl
-            if model.discoveredGroups.hostRelayUrl.isEmpty, !suggestedRelay.isEmpty {
-                model.openGroupDiscovery(hostRelayUrl: suggestedRelay)
+            // Host relay comes from the Rust-owned relay selector projection.
+            // The selector falls back to 29er's default relay when no NIP-51
+            // relay set exists yet.
+            let activeRelay = model.relaySelector.activeRelayUrl
+            if model.discoveredGroups.hostRelayUrl.isEmpty, !activeRelay.isEmpty {
+                model.openGroupDiscovery(hostRelayUrl: activeRelay)
             }
         }
         .onChange(of: tree.totalCount) { _, count in
@@ -64,6 +86,96 @@ struct GroupTreeView: View {
         }
     }
 
+}
+
+private struct RelaySelectorSheet: View {
+    @EnvironmentObject private var model: KernelModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var newRelayUrl = ""
+
+    private var trimmedNewRelayUrl: String {
+        newRelayUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(model.relaySelector.relays) { row in
+                        Button {
+                            if model.selectNip29Relay(row.relayUrl) {
+                                dismiss()
+                            }
+                        } label: {
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(model.relayDisplayName(for: row.relayUrl))
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+                                    Text(row.relayUrl)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                if row.selected {
+                                    Image(systemName: "checkmark")
+                                        .font(.headline)
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .onDelete(perform: removeRelays)
+                }
+
+                Section {
+                    HStack(spacing: 10) {
+                        TextField("wss://relay.example", text: $newRelayUrl)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Button {
+                            addRelay()
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title3)
+                        }
+                        .disabled(trimmedNewRelayUrl.isEmpty)
+                    }
+                }
+            }
+            .navigationTitle("Relay")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private func addRelay() {
+        let relayUrl = trimmedNewRelayUrl
+        guard !relayUrl.isEmpty else { return }
+        if model.addNip29Relay(relayUrl) {
+            newRelayUrl = ""
+        }
+    }
+
+    private func removeRelays(at offsets: IndexSet) {
+        let relays = offsets
+            .compactMap { index in model.relaySelector.relays.indices.contains(index) ? model.relaySelector.relays[index] : nil }
+            .filter(\.fromNip51)
+        for relay in relays {
+            _ = model.removeNip29Relay(relay.relayUrl)
+        }
+    }
 }
 
 private struct GroupChildrenRoute: Hashable {

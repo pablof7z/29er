@@ -1,0 +1,6 @@
+{
+  "id": "019f0-c82fa",
+  "ts": "2026-06-26T07:28:47Z",
+  "session": "019f02cc-8e3e-7782-9ff3-73e2a3824267",
+  "text": "- BLOCKING [main.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/main.rs:39), [login.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/ui/login.rs:18), [app.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/app.rs:307): relay selection/default relay policy is shell-owned and hardcoded. Move relay/default/fallback selection into Rust/NMP state/actions; the TUI should render the active relay and dispatch selection intent."
+}

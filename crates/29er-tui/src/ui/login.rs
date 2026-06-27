@@ -3,6 +3,10 @@
 //! Step 1 – Identity:  nsec paste (masked), validates `nsec1` prefix.
 //! Step 2 – Relay:     relay URL, pre-filled with the default.
 //! Step 3 – Discover:  optional quick-join prompt (shown when no rooms exist).
+use crate::actions::Action;
+use crate::app::TuiSnapshot;
+use crate::ui;
+use crate::Component;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -10,15 +14,15 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 use ratatui_textarea::{CursorMove, TextArea};
-use crate::actions::Action;
-use crate::app::TuiSnapshot;
-use crate::ui;
-use crate::Component;
 
 const DEFAULT_RELAY: &str = "wss://nip29.f7z.io";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Step { Identity, Relay, Discover }
+enum Step {
+    Identity,
+    Relay,
+    Discover,
+}
 
 pub struct LoginComponent {
     step: Step,
@@ -37,7 +41,9 @@ pub struct LoginComponent {
 }
 
 impl Default for LoginComponent {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl LoginComponent {
@@ -72,12 +78,12 @@ impl LoginComponent {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Percentage(28),
-                Constraint::Length(1),  // header
-                Constraint::Length(1),  // spacer
-                Constraint::Length(3),  // input field
-                Constraint::Length(1),  // spacer
-                Constraint::Length(1),  // hint / error
-                Constraint::Length(1),  // subtext
+                Constraint::Length(1), // header
+                Constraint::Length(1), // spacer
+                Constraint::Length(3), // input field
+                Constraint::Length(1), // spacer
+                Constraint::Length(1), // hint / error
+                Constraint::Length(1), // subtext
                 Constraint::Min(0),
             ])
             .split(area);
@@ -98,14 +104,19 @@ impl LoginComponent {
             Paragraph::new(Line::from(Span::styled(
                 label,
                 Style::default().fg(ui::OVERLAY),
-            ))).alignment(Alignment::Right),
+            )))
+            .alignment(Alignment::Right),
             area,
         );
     }
 
     fn current_relay(&self) -> String {
         let r = self.relay_ta.lines().join("").trim().to_string();
-        if r.is_empty() { DEFAULT_RELAY.to_string() } else { r }
+        if r.is_empty() {
+            DEFAULT_RELAY.to_string()
+        } else {
+            r
+        }
     }
 
     // ── step draw functions ─────────────────────────────────────────────────
@@ -116,8 +127,11 @@ impl LoginComponent {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "Welcome to 29er \u{2014} Nostr Group Chat",
-                Style::default().fg(ui::LAVENDER).add_modifier(Modifier::BOLD),
-            ))).alignment(Alignment::Center),
+                Style::default()
+                    .fg(ui::LAVENDER)
+                    .add_modifier(Modifier::BOLD),
+            )))
+            .alignment(Alignment::Center),
             header_area,
         );
 
@@ -151,12 +165,16 @@ impl LoginComponent {
         );
 
         // Subtext row (one below hint_area)
-        let subtext_area = Rect { y: hint_area.y + 1, ..hint_area };
+        let subtext_area = Rect {
+            y: hint_area.y + 1,
+            ..hint_area
+        };
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "Your key never leaves this device",
                 Style::default().fg(ui::OVERLAY),
-            ))).alignment(Alignment::Center),
+            )))
+            .alignment(Alignment::Center),
             subtext_area,
         );
     }
@@ -167,8 +185,11 @@ impl LoginComponent {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "Connect to a relay",
-                Style::default().fg(ui::LAVENDER).add_modifier(Modifier::BOLD),
-            ))).alignment(Alignment::Center),
+                Style::default()
+                    .fg(ui::LAVENDER)
+                    .add_modifier(Modifier::BOLD),
+            )))
+            .alignment(Alignment::Center),
             header_area,
         );
 
@@ -184,7 +205,8 @@ impl LoginComponent {
             Paragraph::new(Line::from(Span::styled(
                 "Default relay \u{2014} press Enter to continue  \u{2022}  Esc to go back",
                 Style::default().fg(ui::SUBTEXT),
-            ))).alignment(Alignment::Center),
+            )))
+            .alignment(Alignment::Center),
             hint_area,
         );
     }
@@ -194,11 +216,11 @@ impl LoginComponent {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Percentage(35),
-                Constraint::Length(1),  // header
-                Constraint::Length(1),  // spacer
-                Constraint::Length(1),  // body
-                Constraint::Length(1),  // spacer
-                Constraint::Length(1),  // hint
+                Constraint::Length(1), // header
+                Constraint::Length(1), // spacer
+                Constraint::Length(1), // body
+                Constraint::Length(1), // spacer
+                Constraint::Length(1), // hint
                 Constraint::Min(0),
             ])
             .split(area);
@@ -206,8 +228,11 @@ impl LoginComponent {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "Connect and discover rooms?",
-                Style::default().fg(ui::LAVENDER).add_modifier(Modifier::BOLD),
-            ))).alignment(Alignment::Center),
+                Style::default()
+                    .fg(ui::LAVENDER)
+                    .add_modifier(Modifier::BOLD),
+            )))
+            .alignment(Alignment::Center),
             v[1],
         );
 
@@ -215,7 +240,8 @@ impl LoginComponent {
             Paragraph::new(Line::from(Span::styled(
                 "29er will scan the relay and list available rooms.",
                 Style::default().fg(ui::TEXT),
-            ))).alignment(Alignment::Center),
+            )))
+            .alignment(Alignment::Center),
             v[3],
         );
 
@@ -223,7 +249,8 @@ impl LoginComponent {
             Paragraph::new(Line::from(Span::styled(
                 "Enter to connect  \u{2022}  Esc to go back",
                 Style::default().fg(ui::SUBTEXT),
-            ))).alignment(Alignment::Center),
+            )))
+            .alignment(Alignment::Center),
             v[5],
         );
     }
@@ -235,21 +262,23 @@ impl Component for LoginComponent {
 
         let step_num: u8 = match self.step {
             Step::Identity => 1,
-            Step::Relay    => 2,
+            Step::Relay => 2,
             Step::Discover => 3,
         };
         Self::render_step_badge(f, area, step_num);
 
         match self.step {
             Step::Identity => self.draw_identity(f, area),
-            Step::Relay    => self.draw_relay(f, area),
+            Step::Relay => self.draw_relay(f, area),
             Step::Discover => self.draw_discover(f, area),
         }
     }
 
     fn handle_event(&mut self, event: &Event) -> Option<Action> {
         let Event::Key(key) = event else { return None };
-        if key.kind != KeyEventKind::Press { return None; }
+        if key.kind != KeyEventKind::Press {
+            return None;
+        }
 
         match self.step {
             Step::Identity => match key.code {
@@ -267,15 +296,31 @@ impl Component for LoginComponent {
                     self.step = Step::Relay;
                     None
                 }
-                KeyCode::Char(c)  => { self.nsec_ta.insert_char(c); self.inline_error = None; None }
-                KeyCode::Backspace => { self.nsec_ta.delete_char(); None }
-                KeyCode::Left     => { self.nsec_ta.move_cursor(CursorMove::Back); None }
-                KeyCode::Right    => { self.nsec_ta.move_cursor(CursorMove::Forward); None }
+                KeyCode::Char(c) => {
+                    self.nsec_ta.insert_char(c);
+                    self.inline_error = None;
+                    None
+                }
+                KeyCode::Backspace => {
+                    self.nsec_ta.delete_char();
+                    None
+                }
+                KeyCode::Left => {
+                    self.nsec_ta.move_cursor(CursorMove::Back);
+                    None
+                }
+                KeyCode::Right => {
+                    self.nsec_ta.move_cursor(CursorMove::Forward);
+                    None
+                }
                 _ => None,
             },
 
             Step::Relay => match key.code {
-                KeyCode::Esc => { self.step = Step::Identity; None }
+                KeyCode::Esc => {
+                    self.step = Step::Identity;
+                    None
+                }
                 KeyCode::Enter => {
                     let relay = self.current_relay();
                     if self.has_rooms {
@@ -288,18 +333,33 @@ impl Component for LoginComponent {
                         None
                     }
                 }
-                KeyCode::Char(c)   => { self.relay_ta.insert_char(c); None }
-                KeyCode::Backspace => { self.relay_ta.delete_char(); None }
-                KeyCode::Left      => { self.relay_ta.move_cursor(CursorMove::Back); None }
-                KeyCode::Right     => { self.relay_ta.move_cursor(CursorMove::Forward); None }
+                KeyCode::Char(c) => {
+                    self.relay_ta.insert_char(c);
+                    None
+                }
+                KeyCode::Backspace => {
+                    self.relay_ta.delete_char();
+                    None
+                }
+                KeyCode::Left => {
+                    self.relay_ta.move_cursor(CursorMove::Back);
+                    None
+                }
+                KeyCode::Right => {
+                    self.relay_ta.move_cursor(CursorMove::Forward);
+                    None
+                }
                 _ => None,
             },
 
             Step::Discover => match key.code {
-                KeyCode::Esc   => { self.step = Step::Relay; None }
+                KeyCode::Esc => {
+                    self.step = Step::Relay;
+                    None
+                }
                 KeyCode::Enter => {
                     let relay = self.current_relay();
-                    let nsec  = self.nsec.take().unwrap_or_default();
+                    let nsec = self.nsec.take().unwrap_or_default();
                     Some(Action::LoginSubmit { nsec, relay })
                 }
                 _ => None,

@@ -36,3 +36,45 @@ struct GroupTreeSnapshot: Equatable {
 
     static let empty = GroupTreeSnapshot(hostRelayUrl: "", roots: [], allNodes: [:], totalCount: 0)
 }
+
+struct RelaySelectorRow: Identifiable, Equatable {
+    let relayUrl: String
+    let selected: Bool
+    let fromNip51: Bool
+
+    var id: String { relayUrl }
+}
+
+struct RelaySelectorSnapshot: Equatable {
+    let activeRelayUrl: String
+    let relays: [RelaySelectorRow]
+
+    static let empty = RelaySelectorSnapshot(activeRelayUrl: "", relays: [])
+}
+
+struct RelayDiagnosticsRelay: Equatable {
+    let relayUrl: String
+    let connection: String
+    let nip11Name: String?
+}
+
+struct RelayDiagnosticsSnapshot: Equatable {
+    let relays: [RelayDiagnosticsRelay]
+
+    static let empty = RelayDiagnosticsSnapshot(relays: [])
+
+    func relay(for url: String) -> RelayDiagnosticsRelay? {
+        relays.first { $0.relayUrl == url }
+    }
+}
+
+extension String {
+    var relayHostLabel: String {
+        if let host = URLComponents(string: self)?.host, !host.isEmpty {
+            return host
+        }
+        return replacingOccurrences(of: "wss://", with: "")
+            .replacingOccurrences(of: "ws://", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+}

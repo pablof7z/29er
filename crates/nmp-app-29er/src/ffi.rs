@@ -10,7 +10,7 @@ use std::sync::Arc;
 use nmp_core::dispatch_envelope::{encode_dispatch_envelope, DISPATCH_ENVELOPE_SCHEMA_VERSION};
 use nmp_core::substrate::{ActionPayload, ObservedProjection, ObservedProjectionRegistrar};
 use nmp_core::{ObservedProjectionId, ObservedProjectionSink, TypedProjectionData};
-use nmp_ffi::{nmp_app_dispatch_action_bytes, NmpApp};
+use nmp_ffi::{nmp_app_add_relay, nmp_app_dispatch_action_bytes, nmp_app_remove_relay, NmpApp};
 use nmp_nip29::group_id::GroupId;
 use nmp_nip29::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 
@@ -18,12 +18,14 @@ use crate::group_tree::{
     encode_group_tree_snapshot, membership_from_joined, GroupMembershipMap, GroupTreeProjection,
     GROUP_TREE_FILE_IDENTIFIER, GROUP_TREE_SCHEMA_ID, GROUP_TREE_SCHEMA_VERSION,
 };
+use crate::relay_selector::{register_relay_selector_runtime, RelaySelectorProjection};
 
 /// Opaque handle returned by [`nmp_app_29er_register`] and consumed by
 /// [`nmp_app_29er_unregister`]. Boxed on the heap; the pointer is opaque to C.
 pub struct TwentyNinerHandle {
     #[allow(dead_code)]
     app: *mut NmpApp,
+    relay_selector: Arc<RelaySelectorProjection>,
 }
 
 pub struct TwentyNinerGroupDiscoveryHandle {
@@ -131,6 +133,7 @@ pub extern "C" fn nmp_app_29er_register(
         unsafe { &*app },
         crate::config::public_group_relay_url(),
     );
+    let relay_selector = register_relay_selector_runtime(unsafe { &*app });
 
     // D6 — guard the write-through before allocating the handle. A null
     // `handle_out` is a programmer-error contract violation; returning
@@ -139,7 +142,10 @@ pub extern "C" fn nmp_app_29er_register(
     if handle_out.is_null() {
         return NmpRegisterStatus::NullApp as u32;
     }
-    let handle = Box::into_raw(Box::new(TwentyNinerHandle { app }));
+    let handle = Box::into_raw(Box::new(TwentyNinerHandle {
+        app,
+        relay_selector,
+    }));
     // SAFETY: `handle_out` was verified non-null above; the pointer must be a
     // valid `*mut *mut TwentyNinerHandle` per the function's SAFETY contract.
     unsafe { *handle_out = handle };
@@ -168,6 +174,83 @@ pub extern "C" fn nmp_app_29er_unregister(handle: *mut TwentyNinerHandle) {
     // The `app` pointer inside is NOT freed here — the caller still owns it
     // and frees it via `nmp_app_free` after this returns.
     unsafe { drop(Box::from_raw(handle)) };
+}
+
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn nmp_app_29er_relay_selector_select_relay(
+    handle: *mut TwentyNinerHandle,
+    relay_url: *const c_char,
+) -> bool {
+    let Some((app, relay_selector, relay_url)) = relay_selector_args(handle, relay_url) else {
+        return false;
+    };
+    let Some(selected) = relay_selector.select_relay(&relay_url) else {
+        return false;
+    };
+    seed_relay(app, &selected);
+    true
+}
+
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn nmp_app_29er_relay_selector_add_relay(
+    handle: *mut TwentyNinerHandle,
+    relay_url: *const c_char,
+) -> bool {
+    let Some((app, relay_selector, relay_url)) = relay_selector_args(handle, relay_url) else {
+        return false;
+    };
+    let tx = unsafe { &*app }.actor_sender();
+    let Some(added) = relay_selector.add_relay(&relay_url, &tx) else {
+        return false;
+    };
+    seed_relay(app, &added);
+    true
+}
+
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn nmp_app_29er_relay_selector_remove_relay(
+    handle: *mut TwentyNinerHandle,
+    relay_url: *const c_char,
+) -> bool {
+    let Some((app, relay_selector, relay_url)) = relay_selector_args(handle, relay_url) else {
+        return false;
+    };
+    let tx = unsafe { &*app }.actor_sender();
+    let Some(removed) = relay_selector.remove_relay(&relay_url, &tx) else {
+        return false;
+    };
+    if removed != crate::config::public_group_relay_url() {
+        let Ok(url) = std::ffi::CString::new(removed) else {
+            return true;
+        };
+        nmp_app_remove_relay(app, url.as_ptr());
+    }
+    true
+}
+
+fn relay_selector_args(
+    handle: *mut TwentyNinerHandle,
+    relay_url: *const c_char,
+) -> Option<(*mut NmpApp, Arc<RelaySelectorProjection>, String)> {
+    if handle.is_null() {
+        return None;
+    }
+    let relay_url = c_string_opt(relay_url).filter(|value| !value.trim().is_empty())?;
+    let handle = unsafe { &*handle };
+    Some((handle.app, Arc::clone(&handle.relay_selector), relay_url))
+}
+
+fn seed_relay(app: *mut NmpApp, relay_url: &str) {
+    let (Ok(url), Ok(role)) = (
+        std::ffi::CString::new(relay_url),
+        std::ffi::CString::new("both"),
+    ) else {
+        return;
+    };
+    nmp_app_add_relay(app, url.as_ptr(), role.as_ptr());
 }
 
 /// Declare that this host consumes all kernel-owned built-in Tier-2
@@ -312,7 +395,10 @@ mod tests {
         assert_eq!(input.tags, vec![vec!["p".to_string(), HEX.to_string()]]);
         // The envelope tags (`h` / `previous`) must NOT be present — nmp-nip29
         // injects them and rejects caller-supplied copies.
-        assert!(input.tags.iter().all(|t| t.first().map(String::as_str) != Some("h")));
+        assert!(input
+            .tags
+            .iter()
+            .all(|t| t.first().map(String::as_str) != Some("h")));
         assert!(input
             .tags
             .iter()
@@ -585,7 +671,7 @@ pub extern "C" fn nmp_app_29er_select_group_members(
 /// correlation ids.
 static NEXT_CORRELATION_ID: AtomicU64 = AtomicU64::new(1);
 
-fn mint_correlation_id() -> String {
+pub(crate) fn mint_correlation_id() -> String {
     let n = NEXT_CORRELATION_ID.fetch_add(1, Ordering::Relaxed);
     format!("29er-{n}")
 }
@@ -645,11 +731,9 @@ pub extern "C" fn nmp_app_29er_dispatch_action_bytes(
         match encode_chat_send_payload(&body) {
             Some(p) => (PUBLISH_GROUP_EVENT_NAMESPACE, p),
             None => {
-                return CString::new(
-                    r#"{"error":"could not compose chat message from body"}"#,
-                )
-                .unwrap_or_else(|_| c"{}".to_owned())
-                .into_raw();
+                return CString::new(r#"{"error":"could not compose chat message from body"}"#)
+                    .unwrap_or_else(|_| c"{}".to_owned())
+                    .into_raw();
             }
         }
     } else {

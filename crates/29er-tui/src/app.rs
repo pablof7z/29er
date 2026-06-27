@@ -521,6 +521,7 @@ impl App {
                 if slot.is_some() {
                     return;
                 }
+
                 // SAFETY: the App owns `app` for the whole session and frees it
                 // only in `Drop` after the listener thread is gone. (The deref
                 // is covered by the enclosing `unsafe` block in `init_nmp`.)
@@ -1127,12 +1128,6 @@ impl Drop for App {
                 unsafe { handle.close(); }
             }
             app.close_joined_groups();
-        }
-        if !self.handle.is_null() {
-            nmp_app_29er_unregister(self.handle);
-        }
-        if !self.app_ptr.is_null() {
-            nmp_ffi::nmp_app_free(self.app_ptr);
         }
     }
 }

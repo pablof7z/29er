@@ -33,7 +33,10 @@ impl GroupTreeMessageState {
     /// Direct unread count for a group's `local_id` (0 when unknown).
     #[must_use]
     pub fn unread_for(&self, group_id: &str) -> u32 {
-        self.direct_unread_by_group.get(group_id).copied().unwrap_or(0)
+        self.direct_unread_by_group
+            .get(group_id)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Newest message summary for a group's `local_id`, if any.
@@ -420,10 +423,7 @@ fn build_node(
         .get(group.group_id.as_str())
         .map(|children| children.iter().map(|child| (*child).to_string()).collect())
         .unwrap_or_default();
-    let viewer = membership
-        .get(&group.group_id)
-        .copied()
-        .unwrap_or_default();
+    let viewer = membership.get(&group.group_id).copied().unwrap_or_default();
     GroupTreeNode {
         group_id: group.group_id.clone(),
         host_relay_url: group.host_relay_url.clone(),
@@ -519,7 +519,11 @@ mod tests {
         projection.on_kernel_event(&event("old", "child", 10, "older"));
         projection.on_kernel_event(&event("new", "child", 20, "newer"));
 
-        let tree = derive_group_tree(&discovered(), &projection.snapshot(), &GroupMembershipMap::new());
+        let tree = derive_group_tree(
+            &discovered(),
+            &projection.snapshot(),
+            &GroupMembershipMap::new(),
+        );
         let child = tree
             .nodes
             .iter()
@@ -548,7 +552,11 @@ mod tests {
         projection.on_kernel_event(&event("root-msg", "root", 10, "root direct"));
         projection.on_kernel_event(&event("child-msg", "child", 20, "child direct"));
 
-        let tree = derive_group_tree(&discovered(), &projection.snapshot(), &GroupMembershipMap::new());
+        let tree = derive_group_tree(
+            &discovered(),
+            &projection.snapshot(),
+            &GroupMembershipMap::new(),
+        );
         let root = tree
             .nodes
             .iter()
@@ -571,7 +579,11 @@ mod tests {
         projection.on_kernel_event(&event("child-msg", "child", 20, "child direct"));
         projection.mark_read("child");
 
-        let tree = derive_group_tree(&discovered(), &projection.snapshot(), &GroupMembershipMap::new());
+        let tree = derive_group_tree(
+            &discovered(),
+            &projection.snapshot(),
+            &GroupMembershipMap::new(),
+        );
         let root = tree
             .nodes
             .iter()
@@ -594,7 +606,11 @@ mod tests {
         projection.on_kernel_event(&event);
         projection.on_kernel_event(&event);
 
-        let tree = derive_group_tree(&discovered(), &projection.snapshot(), &GroupMembershipMap::new());
+        let tree = derive_group_tree(
+            &discovered(),
+            &projection.snapshot(),
+            &GroupMembershipMap::new(),
+        );
         let root = tree
             .nodes
             .iter()

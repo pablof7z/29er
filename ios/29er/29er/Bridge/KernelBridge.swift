@@ -234,6 +234,30 @@ final class KernelHandle {
         json.withCString { nmp_app_29er_seed_relays_from_json(raw, $0) }
     }
 
+    @discardableResult
+    func selectNip29Relay(_ relayUrl: String) -> Bool {
+        guard let app29erHandle else { return false }
+        return relayUrl.withCString {
+            nmp_app_29er_relay_selector_select_relay(app29erHandle, $0)
+        }
+    }
+
+    @discardableResult
+    func addNip29Relay(_ relayUrl: String) -> Bool {
+        guard let app29erHandle else { return false }
+        return relayUrl.withCString {
+            nmp_app_29er_relay_selector_add_relay(app29erHandle, $0)
+        }
+    }
+
+    @discardableResult
+    func removeNip29Relay(_ relayUrl: String) -> Bool {
+        guard let app29erHandle else { return false }
+        return relayUrl.withCString {
+            nmp_app_29er_relay_selector_remove_relay(app29erHandle, $0)
+        }
+    }
+
     /// Sign in with a local nsec and activate it as the active account.
     /// Fire-and-forget (D6): the nsec is validated by `nostr::Keys::parse`
     /// in Rust. On success the `active_account` slot is populated and the
@@ -355,6 +379,8 @@ extension KernelHandle {
                 let typedPublishOutbox = TypedPublishOutboxDecoder.decode(from: envelopes)
                 let typedActiveAccount = TypedActiveAccountDecoder.decode(from: envelopes)
                 let typedGroupDefaults = TypedGroupDefaultsDecoder.decode(from: envelopes)
+                let typedRelaySelector = TypedRelaySelectorDecoder.decode(from: envelopes)
+                let typedRelayDiagnostics = TypedRelayDiagnosticsDecoder.decode(from: envelopes)
                 let duration = start.duration(to: .now)
                 kbLog.info("decoded ok rev=\(rev) activeAccount=\(typedActiveAccount ?? "nil")")
                 return .snapshot(
@@ -369,6 +395,8 @@ extension KernelHandle {
                         typedProjections: envelopes,
                         sessionId: sessionId,
                         snapshotEpoch: snapshotEpoch,
+                        typedRelaySelector: typedRelaySelector,
+                        typedRelayDiagnostics: typedRelayDiagnostics,
                         rev: rev,
                         running: running,
                         lastErrorToast: lastErrorToast,

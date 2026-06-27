@@ -1,0 +1,6 @@
+{
+  "id": "019f0-e996c",
+  "ts": "2026-06-26T12:07:31Z",
+  "session": "019f03c8-721e-7783-87f1-b3dbc19bfcef",
+  "text": "Assistant: - BLOCKING: [ffi.rs](/Users/pablofernandez/Work/29er/crates/nmp-app-29er/src/ffi.rs:367) still wires discovery/joined/tree by manually registering projections, and [ffi.rs](/Users/pablofernandez/Work/29er/crates/nmp-app-29er/src/ffi.rs:458) opens global `{\"kinds\":[9]}` directly. That bypasses NMP’s hydrating `open_group_discovery` / `open_joined_groups` / `open_group_chat` path and lets [group_tree.rs](/Users/pablofernandez/Work/29er/crates/nmp-app-29er/src/group_tree.rs:196) re-derive `kind` / `h` state from raw events. This is still a Rust-side NMP doctrine violation and risks cross-relay local-id mixing. [...] - HIGH: [GroupTreeView.swift](/Users/pablofernandez/Work/29er/ios/29er/29er/Features/GroupTreeView.swift:267) still gates join/composer state on `group_members`, but [ffi.rs](/Users/pablofernandez/Work/29er/crates/nmp-app-29er/src/ffi.rs:524) makes `nmp_app_29er_select_group_members` a no-op. Since Rust no longer produces that projection, `membersProjectionMatchesGroup` never becomes true, leaving users stuck in “Checking” and disabling Join."
+}

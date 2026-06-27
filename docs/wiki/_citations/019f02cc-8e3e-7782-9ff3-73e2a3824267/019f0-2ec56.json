@@ -1,0 +1,6 @@
+{
+  "id": "019f0-2ec56",
+  "ts": "2026-06-26T07:29:04Z",
+  "session": "019f02cc-8e3e-7782-9ff3-73e2a3824267",
+  "text": "- HIGH [app.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/app.rs:397): every visited channel gets a retained `GroupChatProjection` observer in `self.chats`, with no close/unregister. Memory and work scale with visited history, not the open view. Keep only active-view projections or close previous group-chat interest/snapshot."
+}

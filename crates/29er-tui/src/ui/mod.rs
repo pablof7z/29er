@@ -50,8 +50,11 @@ pub fn author_color(pubkey: &str) -> Color {
 
 #[must_use]
 pub fn short_pubkey(pubkey: &str) -> String {
-    if pubkey.len() <= 12 { pubkey.to_string() }
-    else { format!("{}\u{2026}{}", &pubkey[..8], &pubkey[pubkey.len() - 4..]) }
+    if pubkey.len() <= 12 {
+        pubkey.to_string()
+    } else {
+        format!("{}\u{2026}{}", &pubkey[..8], &pubkey[pubkey.len() - 4..])
+    }
 }
 
 /// HH:MM (UTC) from unix seconds, no chrono dependency.
@@ -69,10 +72,15 @@ pub fn relative_time(created_at: u64) -> String {
         .map(|d| d.as_secs())
         .unwrap_or(created_at);
     let delta = now.saturating_sub(created_at);
-    if delta < 60 { "now".to_string() }
-    else if delta < 3600 { format!("{}m", delta / 60) }
-    else if delta < 86_400 { format!("{}h", delta / 3600) }
-    else { format!("{}d", delta / 86_400) }
+    if delta < 60 {
+        "now".to_string()
+    } else if delta < 3600 {
+        format!("{}m", delta / 60)
+    } else if delta < 86_400 {
+        format!("{}h", delta / 3600)
+    } else {
+        format!("{}d", delta / 86_400)
+    }
 }
 
 /// Whole-day bucket (days since the Unix epoch, UTC) used to detect day
@@ -125,4 +133,6 @@ fn civil_from_days(days: i64) -> (i64, u32, u32) {
 
 const SPINNER: [char; 10] = ['\u{280b}','\u{2819}','\u{2839}','\u{2838}','\u{283c}','\u{2834}','\u{2826}','\u{2827}','\u{2807}','\u{280f}'];
 #[must_use]
-pub fn spinner_frame(tick: usize) -> char { SPINNER[tick % SPINNER.len()] }
+pub fn spinner_frame(tick: usize) -> char {
+    SPINNER[tick % SPINNER.len()]
+}

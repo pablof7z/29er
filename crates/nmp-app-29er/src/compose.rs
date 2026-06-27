@@ -133,7 +133,10 @@ mod tests {
             &format!("@{HEX} and again @{HEX}"),
             &[HEX.to_string(), HEX.to_string()],
         );
-        assert_eq!(composed.content, format!("nostr:{npub} and again nostr:{npub}"));
+        assert_eq!(
+            composed.content,
+            format!("nostr:{npub} and again nostr:{npub}")
+        );
         assert_eq!(composed.tags, vec![vec!["p".to_string(), HEX.to_string()]]);
     }
 

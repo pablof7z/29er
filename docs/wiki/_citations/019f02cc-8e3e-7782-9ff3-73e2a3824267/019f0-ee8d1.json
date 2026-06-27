@@ -1,0 +1,6 @@
+{
+  "id": "019f0-ee8d1",
+  "ts": "2026-06-26T07:28:20Z",
+  "session": "019f02cc-8e3e-7782-9ff3-73e2a3824267",
+  "text": "- HIGH [app.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/app.rs:338): outbox confirmation matches by message content in the currently selected message list, and accepts any pubkey while `my_pubkey` is missing. Same text or channel switches can confirm the wrong item or never confirm. Use NMP action-stage/correlation state."
+}

@@ -37,6 +37,13 @@ struct KernelUpdateResult {
     /// projections (`refs.profile`) merge through their own host store because
     /// their payload is not one whole value.
     let typedProjections: [TypedProjectionEnvelope]
+    /// Typed app-owned `nmp.29er.relay_selector` projection decode (`N29R`).
+    /// Rust owns active relay selection and the NIP-51 kind:30002 relay-set
+    /// list; Swift renders this snapshot and submits relay intents back.
+    let typedRelaySelector: RelaySelectorSnapshot?
+    /// Typed kernel-owned `relay_diagnostics` projection decode (`KRDG`).
+    /// Carries NIP-11 relay info once NMP has fetched it; Swift renders fields.
+    let typedRelayDiagnostics: RelayDiagnosticsSnapshot?
     /// ADR-0044 Tier-3: bare envelope scalars read directly off the
     /// `SnapshotFrame` table. `rev` is the authoritative snapshot revision;
     /// `running` mirrors the kernel's `running` flag; `lastErrorToast` is the

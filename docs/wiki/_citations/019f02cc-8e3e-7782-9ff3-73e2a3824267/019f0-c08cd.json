@@ -1,0 +1,6 @@
+{
+  "id": "019f0-c08cd",
+  "ts": "2026-06-26T07:28:47Z",
+  "session": "019f02cc-8e3e-7782-9ff3-73e2a3824267",
+  "text": "- HIGH [app.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/app.rs:187): relay status is inferred from “have we ever seen data.” Empty relays stay “Connecting” forever; a relay that disconnects after data stays “Connected.” Use NMP relay diagnostics/connection state."
+}

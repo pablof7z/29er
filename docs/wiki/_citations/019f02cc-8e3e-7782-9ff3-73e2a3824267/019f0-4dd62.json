@@ -1,0 +1,6 @@
+{
+  "id": "019f0-4dd62",
+  "ts": "2026-06-26T07:29:04Z",
+  "session": "019f02cc-8e3e-7782-9ff3-73e2a3824267",
+  "text": "- BLOCKING [app.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/app.rs:173): the TUI owns projection composition and derives app state (`derive_channel_tree`, unread tiers, member admin state) instead of rendering an NMP snapshot. Use the existing `nmp.29er.group_tree` / `nmp.nip29.*` typed snapshots from `nmp-app-29er`; keep the TUI to decode/render plus dispatch actions."
+}

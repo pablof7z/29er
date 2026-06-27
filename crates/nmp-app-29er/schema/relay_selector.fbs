@@ -1,0 +1,16 @@
+namespace nmp_app_29er;
+
+table RelaySelectorRow {
+  relay_url:string (required);
+  selected:bool = false;
+  from_nip51:bool = false;
+}
+
+table RelaySelectorSnapshot {
+  schema_version:uint32 = 1;
+  active_relay_url:string (required);
+  relays:[RelaySelectorRow];
+}
+
+root_type RelaySelectorSnapshot;
+file_identifier "N29R";

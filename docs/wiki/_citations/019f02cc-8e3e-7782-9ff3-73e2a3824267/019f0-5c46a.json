@@ -1,0 +1,6 @@
+{
+  "id": "019f0-5c46a",
+  "ts": "2026-06-26T07:29:04Z",
+  "session": "019f02cc-8e3e-7782-9ff3-73e2a3824267",
+  "text": "- MEDIUM [room_list.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/ui/room_list.rs:261), [app.rs](/Users/pablofernandez/Work/29er/crates/29er-tui/src/app.rs:519): room selection has split state. Tree navigation mutates `TreeState`; `g/G` and Alt+A use `App.selected_index`, so cursor/global navigation can diverge. Make selected room/path one snapshot-owned fact."
+}
