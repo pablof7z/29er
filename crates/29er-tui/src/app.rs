@@ -7,15 +7,15 @@ use std::time::{Duration, Instant};
 use nmp_app_29er::group_tree::{GroupTreeMessageState, GroupTreeProjection};
 use nmp_app_29er::{
     nmp_app_29er_declare_consumed_projections, nmp_app_29er_dispatch_action_bytes,
-    nmp_app_29er_register, nmp_app_29er_register_group_chat, nmp_app_29er_unregister,
-    TwentyNinerHandle,
+    nmp_app_29er_register, nmp_app_29er_unregister, TwentyNinerHandle,
 };
 use nmp_core::refs::{RefProfileStore, REFS_PROFILE_KEY};
-use nmp_core::{KernelEventObserver, KernelEventObserverId};
-use nmp_ffi::{nmp_free_string, NmpApp};
+use nmp_core::substrate::{ObservedProjection, ObservedProjectionRegistrar};
+use nmp_core::{ObservedProjectionId, ObservedProjectionSink};
+use nmp_ffi::{nmp_free_string, GroupFeedHandle, NmpApp};
 use nmp_nip29::projection::{
-    DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, GroupChatMessage,
-    GroupChatProjection, JoinedGroupsProjection,
+    DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot,
+    GroupEvent as GroupChatMessage, GroupEventsProjection, JoinedGroupsProjection,
 };
 use nmp_nip29::GroupId;
 use tokio::sync::mpsc::UnboundedSender;
@@ -217,17 +217,12 @@ impl Default for IdentityState {
     }
 }
 
-/// Maximum number of live `GroupChatProjection` observers kept in `App::chats`.
-/// The least-recently-used entry is evicted (and its NMP observer unregistered)
-/// when this limit is exceeded.
-const CHAT_LRU_LIMIT: usize = 50;
-
-/// A `GroupChatProjection` pinned to an open NMP observer, with an LRU timestamp.
+/// A per-group `GroupEventsProjection` opened via `open_group_events_with_reader`.
+/// The LRU map keeps up to `CHAT_LRU_LIMIT` entries so switching back to a
+/// recently visited channel skips a full re-open.
+const CHAT_LRU_LIMIT: usize = 10;
 struct ChatEntry {
-    projection: Arc<GroupChatProjection>,
-    /// The observer handle returned by `register_event_observer`; `None` when
-    /// the projection was created before NMP was initialised (app_ptr was null).
-    observer_id: Option<KernelEventObserverId>,
+    projection: Arc<GroupEventsProjection>,
     last_accessed: Instant,
 }
 
@@ -238,13 +233,13 @@ struct ProfileUpdateBridge {
 /// Send+Sync read-side state shared between App (main thread) and the poller.
 pub struct SharedProjections {
     pub group_tree: Arc<GroupTreeProjection>,
-    pub discovered: Arc<DiscoveredGroupsProjection>,
-    /// Active-account joined/admin state (v0.8.0 replacement for the removed
+    pub discovered: Mutex<Option<Arc<DiscoveredGroupsProjection>>>,
+    /// Active-account joined/admin state (v0.8.2 replacement for the removed
     /// `GroupMembersProjection`). Wired lazily once the active pubkey resolves
     /// (the projection captures the pubkey at construction).
     pub joined: Mutex<Option<Arc<JoinedGroupsProjection>>>,
     pub active_account: Mutex<ActiveAccountSlot>,
-    pub selected_chat: Mutex<Option<Arc<GroupChatProjection>>>,
+    pub selected_chat: Mutex<Option<Arc<GroupEventsProjection>>>,
     pub selected_group: Mutex<Option<GroupId>>,
     pub profile_refs: Mutex<RefProfileStore>,
     /// Set on each snapshot poll that returns non-empty data; drives relay-state indicator.
@@ -252,7 +247,12 @@ pub struct SharedProjections {
 }
 impl SharedProjections {
     pub fn project(&self) -> ProjectionView {
-        let discovered = self.discovered.snapshot();
+        let discovered = self
+            .discovered
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|projection| projection.snapshot()))
+            .unwrap_or_default();
         let tree_state = self.group_tree.snapshot();
         // Resolve my_pubkey first so it can be passed to tier computation.
         let me = self
@@ -265,7 +265,7 @@ impl SharedProjections {
             .selected_chat
             .lock()
             .ok()
-            .and_then(|c| c.as_ref().map(|c| c.snapshot().messages))
+            .and_then(|c| c.as_ref().map(|c| c.snapshot().events))
             .unwrap_or_default();
         // The per-member roster API was removed in v0.8.0; no source yet.
         let members: Vec<GroupMemberRow> = Vec::new();
@@ -347,6 +347,8 @@ pub struct App {
     chats: HashMap<String, ChatEntry>,
     profile_update_bridge: Option<Box<ProfileUpdateBridge>>,
     claimed_profile_authors: HashSet<String>,
+    discovery_handle: Option<GroupFeedHandle>,
+    group_tree_observer_id: Option<ObservedProjectionId>,
     latest: ProjectionView,
     screen: Screen,
     focus: Focus,
@@ -379,7 +381,7 @@ impl App {
         let relay_url = relay_url.into();
         let shared = Arc::new(SharedProjections {
             group_tree: Arc::new(GroupTreeProjection::new()),
-            discovered: Arc::new(DiscoveredGroupsProjection::new(relay_url.clone())),
+            discovered: Mutex::new(None),
             joined: Mutex::new(None),
             active_account: Mutex::new(Arc::new(Mutex::new(None))),
             selected_chat: Mutex::new(None),
@@ -396,6 +398,8 @@ impl App {
             chats: HashMap::new(),
             profile_update_bridge: None,
             claimed_profile_authors: HashSet::new(),
+            discovery_handle: None,
+            group_tree_observer_id: None,
             latest: ProjectionView::default(),
             screen: Screen::Login,
             focus: Focus::RoomList,
@@ -473,13 +477,32 @@ impl App {
                 profile_bridge.as_mut() as *mut ProfileUpdateBridge as *mut c_void;
             nmp_ffi::nmp_app_set_update_callback(app, profile_context, Some(on_nmp_update));
             let app_ref = &*app;
-            // v0.8.0: `register_event_observer` is now `register_live_event_tap`.
-            let _ = app_ref.register_live_event_tap(
-                Arc::clone(&self.shared.group_tree) as Arc<dyn KernelEventObserver>
-            );
-            let _ = app_ref.register_live_event_tap(
-                Arc::clone(&self.shared.discovered) as Arc<dyn KernelEventObserver>
-            );
+            // v0.8.4: open the discovery door (DiscoveredGroupsProjection) and
+            // retain the reader Arc for snapshot polling.
+            let (discovery_handle, discovered) = app_ref.open_group_discovery_with_reader(relay.clone());
+            if let Ok(mut slot) = self.shared.discovered.lock() {
+                *slot = Some(discovered);
+            }
+            // v0.8.4: register the group-tree kind:9 observer via the typed
+            // ObservedProjection path; relay-pinned so it tracks the host relay.
+            let mut tree_shape = nmp_planner::InterestShape::from_filter_json(&format!(
+                r#"{{"kinds":[{}]}}"#,
+                nmp_nip29::kinds::KIND_CHAT_MESSAGE
+            ))
+            .ok_or_else(|| anyhow::anyhow!("failed to build group-tree interest shape"))?;
+            tree_shape.relay_pin = Some(relay.clone());
+            let tree_observer_id = app_ref.open_observed_projection(ObservedProjection::from_shape(
+                Arc::clone(&self.shared.group_tree) as Arc<dyn ObservedProjectionSink>,
+                format!("29er.tui.group_tree.kind9:{relay}"),
+                1,
+                tree_shape,
+                80,
+            ));
+            if tree_observer_id.0 == 0 {
+                discovery_handle.close();
+                nmp_ffi::nmp_app_free(app);
+                anyhow::bail!("failed to open group-tree observer");
+            }
             // The `JoinedGroupsProjection` captures the active pubkey at
             // construction, which is not known until sign-in resolves. Wire it
             // from an identity-change observer (registered BEFORE sign-in so we
@@ -498,17 +521,11 @@ impl App {
                 if slot.is_some() {
                     return;
                 }
-                let proj = Arc::new(JoinedGroupsProjection::new_for_host(
-                    pk,
-                    joined_relay.clone(),
-                ));
                 // SAFETY: the App owns `app` for the whole session and frees it
                 // only in `Drop` after the listener thread is gone. (The deref
                 // is covered by the enclosing `unsafe` block in `init_nmp`.)
                 let app = &*(joined_app_addr as *const NmpApp);
-                let _ =
-                    app.register_live_event_tap(Arc::clone(&proj) as Arc<dyn KernelEventObserver>);
-                *slot = Some(proj);
+                *slot = app.open_joined_groups_with_reader(pk, joined_relay.clone());
             });
             let c_relay = CString::new(relay.clone())?;
             let c_role = CString::new("read")?;
@@ -522,6 +539,8 @@ impl App {
             self.app_ptr = app;
             self.handle = handle;
             self.profile_update_bridge = Some(profile_bridge);
+            self.discovery_handle = Some(discovery_handle);
+            self.group_tree_observer_id = Some(tree_observer_id);
         }
         let discover_body = serde_json::json!({ "relay_url": relay }).to_string();
         self.dispatch_json("nmp.nip29.discover", &discover_body);
@@ -695,6 +714,8 @@ impl App {
         let key = group.local_id.clone();
         if !self.chats.contains_key(&key) {
             // LRU eviction: drop the least-recently-used entry when at capacity.
+            // The evicted ChatEntry's projection Arc is dropped here; NMP keeps
+            // its own subscription alive until closed via close_group_events.
             if self.chats.len() >= CHAT_LRU_LIMIT {
                 let lru_key = self
                     .chats
@@ -702,40 +723,28 @@ impl App {
                     .min_by_key(|(_, e)| e.last_accessed)
                     .map(|(k, _)| k.clone());
                 if let Some(lru) = lru_key {
-                    if let Some(evicted) = self.chats.remove(&lru) {
-                        if let Some(obs_id) = evicted.observer_id {
-                            if !self.app_ptr.is_null() {
-                                unsafe {
-                                    (&*self.app_ptr).unregister_event_observer(obs_id);
-                                }
-                            }
-                        }
-                    }
+                    self.chats.remove(&lru);
                 }
             }
-            let chat = Arc::new(GroupChatProjection::new(group.clone()));
-            let observer_id = if !self.app_ptr.is_null() {
-                let obs_id = unsafe {
-                    (&*self.app_ptr)
-                        .register_live_event_tap(Arc::clone(&chat) as Arc<dyn KernelEventObserver>)
+            if !self.app_ptr.is_null() {
+                // v0.8.4: open a group-events reader for kinds 9 + 11.
+                let chat = unsafe {
+                    (&*self.app_ptr).open_group_events_with_reader(
+                        group.clone(),
+                        vec![
+                            nmp_nip29::kinds::KIND_CHAT_MESSAGE,
+                            nmp_nip29::kinds::KIND_DISCUSSION_OR_ARTIFACT,
+                        ],
+                    )
                 };
-                if let Ok(json) = serde_json::to_string(&group) {
-                    if let Ok(c) = CString::new(json) {
-                        nmp_app_29er_register_group_chat(self.app_ptr, c.as_ptr());
-                    }
-                }
-                Some(obs_id)
-            } else {
-                None
-            };
-            self.chats.insert(
-                key.clone(),
-                ChatEntry {
-                    projection: chat,
-                    observer_id,
-                    last_accessed: Instant::now(),
-                },
-            );
+                self.chats.insert(
+                    key.clone(),
+                    ChatEntry {
+                        projection: chat,
+                        last_accessed: Instant::now(),
+                    },
+                );
+            }
         }
         if let Some(entry) = self.chats.get_mut(&key) {
             entry.last_accessed = Instant::now();
@@ -1107,6 +1116,18 @@ impl Drop for App {
             nmp_ffi::nmp_app_set_update_callback(self.app_ptr, std::ptr::null_mut(), None);
         }
         self.profile_update_bridge = None;
+        if !self.app_ptr.is_null() {
+            let app = unsafe { &*self.app_ptr };
+            if let Some(id) = self.group_tree_observer_id.take() {
+                app.close_observed_projection(id);
+            }
+            if let Some(handle) = self.discovery_handle.take() {
+                // SAFETY: the handle was opened against this live app and is
+                // consumed exactly once during `App` teardown.
+                unsafe { handle.close(); }
+            }
+            app.close_joined_groups();
+        }
         if !self.handle.is_null() {
             nmp_app_29er_unregister(self.handle);
         }
@@ -1293,7 +1314,7 @@ mod tests {
     use super::*;
     use nmp_core::substrate::KernelEvent;
     use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
-    use nmp_nip29::projection::GroupChatMessage;
+    use nmp_nip29::projection::GroupEvent as GroupChatMessage;
 
     fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
         DiscoveredGroup {

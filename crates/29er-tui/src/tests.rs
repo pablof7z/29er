@@ -16,7 +16,7 @@ use crate::ui::login::LoginComponent;
 use crate::ui::room_list::RoomListComponent;
 use crate::ui::status_bar::StatusBar;
 use crate::Component;
-use nmp_nip29::projection::GroupChatMessage;
+use nmp_nip29::projection::GroupEvent as GroupChatMessage;
 use nmp_nip29::GroupId;
 
 // ── helpers ──────────────────────────────────────────────────────────────────

@@ -19,7 +19,7 @@ use crate::components::nostr_content::{
 use crate::ui;
 use crate::Component;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
-use nmp_nip29::projection::GroupChatMessage;
+use nmp_nip29::projection::GroupEvent as GroupChatMessage;
 use ratatui::layout::{Alignment, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};

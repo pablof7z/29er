@@ -2,7 +2,13 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 
 use nmp_content::embed_projection::EmbeddedEventEnvelope;
-use nmp_content::EventClaimSink;
+
+/// Local stand-in for the NMP content claim interface. The v0.8.4 API dropped
+/// the re-export from `nmp_content`; this trait preserves the calling contract
+/// for the embed reference-counting path until NMP re-exports it.
+pub trait EventClaimSink: Send + Sync {
+    fn claim(&self, uri: &str, consumer_id: &str);
+}
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},

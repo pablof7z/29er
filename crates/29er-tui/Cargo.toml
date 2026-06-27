@@ -20,6 +20,7 @@ nmp-nip29 = { workspace = true }
 nmp-content = { workspace = true }
 nmp-core = { workspace = true }
 nmp-ffi = { workspace = true }
+nmp-planner = { workspace = true }
 serde_json = { workspace = true }
 ratatui = "0.30"
 ratatui-image = { version = "11.0.2", default-features = false, features = ["crossterm"] }
