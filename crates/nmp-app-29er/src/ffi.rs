@@ -9,10 +9,10 @@ use std::sync::Arc;
 
 use nmp_core::dispatch_envelope::{encode_dispatch_envelope, DISPATCH_ENVELOPE_SCHEMA_VERSION};
 use nmp_core::substrate::{ActionPayload, ObservedProjection, ObservedProjectionRegistrar};
-use nmp_core::{KernelEventObserver, KernelEventObserverId, TypedProjectionData};
+use nmp_core::{ObservedProjectionId, ObservedProjectionSink, TypedProjectionData};
 use nmp_ffi::{nmp_app_dispatch_action_bytes, NmpApp};
 use nmp_nip29::group_id::GroupId;
-use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
+use nmp_nip29::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 
 use crate::group_tree::{
     encode_group_tree_snapshot, membership_from_joined, GroupMembershipMap, GroupTreeProjection,
@@ -32,7 +32,7 @@ pub struct TwentyNinerGroupDiscoveryHandle {
     /// the `teardown_fn` closure captures its own copy to close it, so the field
     /// itself is not read back.
     #[allow(dead_code)]
-    tree_observer_id: KernelEventObserverId,
+    tree_observer_id: ObservedProjectionId,
     /// The 29er kind:9 reader Arc — kept reachable so
     /// [`nmp_app_29er_mark_group_read`] can fold read state into the next tree
     /// snapshot.
@@ -110,10 +110,10 @@ pub extern "C" fn nmp_app_29er_register(
     //
     // SAFETY: same exclusive-borrow rationale as `register_defaults` — no
     // other reference aliases `app` at this point.
-    // Take the immutable V-83 event-store publish-back handle BEFORE the
-    // exclusive `&mut *app` borrow so the two borrows do not overlap.
-    let store_slot = unsafe { &*app }.event_store_handle();
-    let _ = nmp_nip29::register::register_actions(unsafe { &mut *app }, store_slot);
+    // Group-publishing actions now read recent group events for `["previous", …]`
+    // tags through the execution `ActionContext` at dispatch time (#2140), so
+    // `register_actions` no longer takes the event-store publish-back handle.
+    let _ = nmp_nip29::register::register_actions(unsafe { &mut *app });
 
     // Wire the NIP-29 group-create defaults projection so 29er's suggested
     // public-group relay URL surfaces under `"nmp.nip29.group_defaults"`. The
@@ -224,11 +224,14 @@ pub extern "C" fn nmp_app_29er_register_group_chat(app: *mut NmpApp, group_id_js
         return;
     };
 
-    // v0.8.0: the per-open chat read view is the all-in-one `open_group_chat`.
-    // It registers the NGCS typed sidecar, the (muted) `GroupChatProjection`,
-    // replays the read cache, and opens the relay-pinned tailing interest —
-    // superseding the old `wire_group_chat` + two `push_interest` calls.
-    app_ref.open_group_chat(group_id);
+    // v0.8.4 (#2189 GroupEvents redesign): the per-open chat read view is
+    // `open_group_events`, where the CONSUMER declares which kinds it wants —
+    // NIP-29 owns only the `["h", local_id]` routing concern. 29er's chat screen
+    // reads chat (kind 9) + thread/discussion (kind 11), so it passes those two
+    // explicitly. The door registers the NGEV typed sidecar + the (muted)
+    // `GroupEventsProjection`, replays the read cache, and opens the relay-pinned
+    // tailing interest — superseding the old kind-hardcoded `open_group_timeline`.
+    app_ref.open_group_events(group_id, vec![KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT]);
 }
 
 #[cfg(test)]
@@ -386,7 +389,7 @@ fn open_group_discovery_with_tree(
     //    `nmp.nip29.discovered_groups` sidecar, the relay-pinned interest, and
     //    the #2088 hydrating replay. We retain the returned snapshot reader
     //    (Arc) to compose the 29er tree.
-    let (_discovery_handle, discovered) = app.open_group_discovery(relay_url.clone());
+    let (_discovery_handle, discovered) = app.open_group_discovery_with_reader(relay_url.clone());
 
     // 2. Viewer membership/admin truth comes from the account-scoped joined-
     //    groups door (D11 — the app crate owns membership/admin derivation, not
@@ -405,7 +408,7 @@ fn open_group_discovery_with_tree(
     let joined = if active_pubkey.is_empty() {
         None
     } else {
-        app.open_joined_groups(active_pubkey, relay_url.clone())
+        app.open_joined_groups_with_reader(active_pubkey, relay_url.clone())
     };
 
     // 3. 29er-owned kind:9 unread/preview reader — folding kind:9 into per-group
@@ -429,7 +432,7 @@ fn open_group_discovery_with_tree(
             .into_iter()
             .collect();
     let tree_observer_id = app.open_observed_projection(ObservedProjection {
-        observer: Arc::clone(&tree_messages) as Arc<dyn KernelEventObserver>,
+        observer: Arc::clone(&tree_messages) as Arc<dyn ObservedProjectionSink>,
         filter_json,
         consumer_id: format!("29er.nip29.group_tree.kind9:{relay_url}"),
         // Global, relay-pinned — matches the discovery door's SCOPE_GLOBAL.

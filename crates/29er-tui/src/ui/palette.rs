@@ -4,7 +4,10 @@
 //! * nucleo Matcher and scratch buffer hoisted out of the hot path.
 //! * Contextual empty-state: recent → channels-by-recency → actions.
 //! * Inline badge ([n], [Admin], …) on action entries.
-use std::collections::{HashSet, VecDeque};
+use crate::actions::Action;
+use crate::app::{Focus, FormKind, TuiSnapshot};
+use crate::ui;
+use crate::Component;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
@@ -13,10 +16,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
-use crate::actions::Action;
-use crate::app::{Focus, FormKind, TuiSnapshot};
-use crate::ui;
-use crate::Component;
+use std::collections::{HashSet, VecDeque};
 
 /// Maximum number of recently-confirmed entries to remember across openings.
 const RECENT_CAP: usize = 5;
@@ -74,7 +74,10 @@ impl Palette {
         for it in &s.channel_tree {
             entries.push(Entry {
                 label: it.name.clone(),
-                subtitle: format!("channel \u{2022} {}", it.last_preview.clone().unwrap_or_default()),
+                subtitle: format!(
+                    "channel \u{2022} {}",
+                    it.last_preview.clone().unwrap_or_default()
+                ),
                 badge: None,
                 action: Action::SelectChannel(it.group_id.clone()),
             });
@@ -151,8 +154,11 @@ impl Palette {
         } else if self.selected >= self.filtered.len() {
             self.selected = self.filtered.len() - 1;
         }
-        self.state
-            .select(if self.filtered.is_empty() { None } else { Some(self.selected) });
+        self.state.select(if self.filtered.is_empty() {
+            None
+        } else {
+            Some(self.selected)
+        });
     }
 
     /// Fuzzy filter. Empty query uses contextual ordering (see `filter_empty`).
@@ -161,7 +167,11 @@ impl Palette {
         if self.query.trim().is_empty() {
             return self.filter_empty();
         }
-        let pattern = Pattern::parse(self.query.trim(), CaseMatching::Ignore, Normalization::Smart);
+        let pattern = Pattern::parse(
+            self.query.trim(),
+            CaseMatching::Ignore,
+            Normalization::Smart,
+        );
 
         // Collect haystack strings first so we hold no borrow over `self.matcher`.
         let hays: Vec<String> = self
@@ -205,8 +215,18 @@ impl Palette {
             .filter(|i| !seen.contains(i))
             .collect();
         channel_indices.sort_by(|&a, &b| {
-            let ta = self.channel_timestamps.get(a).copied().flatten().unwrap_or(0);
-            let tb = self.channel_timestamps.get(b).copied().flatten().unwrap_or(0);
+            let ta = self
+                .channel_timestamps
+                .get(a)
+                .copied()
+                .flatten()
+                .unwrap_or(0);
+            let tb = self
+                .channel_timestamps
+                .get(b)
+                .copied()
+                .flatten()
+                .unwrap_or(0);
             tb.cmp(&ta)
         });
         for idx in channel_indices {
@@ -247,7 +267,9 @@ impl Palette {
 }
 
 impl Default for Palette {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Component for Palette {
@@ -305,7 +327,9 @@ impl Component for Palette {
                 if let Some(badge) = &e.badge {
                     let badge_style = if badge == "[Admin]" {
                         // Dim for privilege-gated items
-                        Style::default().fg(ui::OVERLAY0).add_modifier(Modifier::DIM)
+                        Style::default()
+                            .fg(ui::OVERLAY0)
+                            .add_modifier(Modifier::DIM)
                     } else {
                         // Accent color for keyboard shortcuts
                         Style::default().fg(ui::LAVENDER)
@@ -318,7 +342,10 @@ impl Component for Palette {
                     Style::default().fg(ui::TEXT).add_modifier(Modifier::BOLD),
                 ));
                 spans.push(Span::raw("  "));
-                spans.push(Span::styled(e.subtitle.clone(), Style::default().fg(ui::OVERLAY0)));
+                spans.push(Span::styled(
+                    e.subtitle.clone(),
+                    Style::default().fg(ui::OVERLAY0),
+                ));
                 ListItem::new(Line::from(spans))
             })
             .collect();
@@ -442,14 +469,15 @@ mod tests {
     /// Admin-only palette entries are hidden for non-admin users and visible for admins.
     #[test]
     fn test_palette_admin_gating() {
-        use nmp_nip29::GroupId;
         use crate::app::{IdentityState, RelayState, Screen};
+        use nmp_nip29::GroupId;
         let gid = GroupId::new("wss://h", "room");
         let base_snap = TuiSnapshot {
             channel_tree: vec![],
             selected_channel_id: Some(gid.clone()),
             selected_messages: vec![],
             selected_members: vec![],
+            profiles: Default::default(),
             is_admin: false,
             my_pubkey: None,
             publish_outbox: vec![],
@@ -492,15 +520,30 @@ mod tests {
         let mut p = Palette::new();
         // Three channel entries with different timestamps.
         p.entries = vec![
-            Entry { label: "alpha".into(), subtitle: "channel".into(), badge: None, action: Action::Noop },
-            Entry { label: "beta".into(),  subtitle: "channel".into(), badge: None, action: Action::Noop },
-            Entry { label: "gamma".into(), subtitle: "channel".into(), badge: None, action: Action::Noop },
+            Entry {
+                label: "alpha".into(),
+                subtitle: "channel".into(),
+                badge: None,
+                action: Action::Noop,
+            },
+            Entry {
+                label: "beta".into(),
+                subtitle: "channel".into(),
+                badge: None,
+                action: Action::Noop,
+            },
+            Entry {
+                label: "gamma".into(),
+                subtitle: "channel".into(),
+                badge: None,
+                action: Action::Noop,
+            },
         ];
         p.channel_count = 3;
         p.channel_timestamps = vec![Some(100), Some(300), Some(200)];
 
         let out = p.filter(); // empty query → contextual order
-        // beta (ts=300) > gamma (ts=200) > alpha (ts=100)
+                              // beta (ts=300) > gamma (ts=200) > alpha (ts=100)
         assert_eq!(p.entries[out[0]].label, "beta");
         assert_eq!(p.entries[out[1]].label, "gamma");
         assert_eq!(p.entries[out[2]].label, "alpha");
@@ -516,10 +559,18 @@ mod tests {
         let gid = GroupId::new("wss://h", "chan");
         // One channel, one action.
         p.entries = vec![
-            Entry { label: "general".into(), subtitle: "channel".into(), badge: None,
-                    action: Action::SelectChannel(gid.clone()) },
-            Entry { label: "Compose message".into(), subtitle: "action".into(),
-                    badge: Some("[n]".into()), action: Action::SetFocus(Focus::Composer) },
+            Entry {
+                label: "general".into(),
+                subtitle: "channel".into(),
+                badge: None,
+                action: Action::SelectChannel(gid.clone()),
+            },
+            Entry {
+                label: "Compose message".into(),
+                subtitle: "action".into(),
+                badge: Some("[n]".into()),
+                action: Action::SetFocus(Focus::Composer),
+            },
         ];
         p.channel_count = 1;
         p.channel_timestamps = vec![Some(1000)];
@@ -532,15 +583,17 @@ mod tests {
 
         // Re-run filter with empty query — "Compose message" should now be first.
         let out = p.filter();
-        assert_eq!(p.entries[out[0]].label, "Compose message",
-            "recently confirmed entry must appear first in empty-state");
+        assert_eq!(
+            p.entries[out[0]].label, "Compose message",
+            "recently confirmed entry must appear first in empty-state"
+        );
     }
 
     /// Admin entries carry the [Admin] badge; hotkey entries carry their shortcut badge.
     #[test]
     fn test_inline_badges() {
-        use nmp_nip29::GroupId;
         use crate::app::{IdentityState, RelayState, Screen};
+        use nmp_nip29::GroupId;
 
         let gid = GroupId::new("wss://h", "room");
         let snap = TuiSnapshot {
@@ -548,6 +601,7 @@ mod tests {
             selected_channel_id: Some(gid.clone()),
             selected_messages: vec![],
             selected_members: vec![],
+            profiles: Default::default(),
             is_admin: true,
             my_pubkey: None,
             publish_outbox: vec![],
@@ -572,15 +626,23 @@ mod tests {
         p.update(&snap);
 
         // "Compose message" must have badge "[n]"
-        let compose = p.entries.iter().find(|e| e.label == "Compose message").unwrap();
+        let compose = p
+            .entries
+            .iter()
+            .find(|e| e.label == "Compose message")
+            .unwrap();
         assert_eq!(compose.badge.as_deref(), Some("[n]"));
 
         // Admin-only entries must carry the "[Admin]" badge.
         let admin_entries: Vec<_> = p.entries.iter().filter(|e| e.subtitle == "admin").collect();
         assert!(!admin_entries.is_empty(), "admin entries must exist");
         for e in &admin_entries {
-            assert_eq!(e.badge.as_deref(), Some("[Admin]"),
-                "admin entry '{}' must have [Admin] badge", e.label);
+            assert_eq!(
+                e.badge.as_deref(),
+                Some("[Admin]"),
+                "admin entry '{}' must have [Admin] badge",
+                e.label
+            );
         }
 
         // Channel entries must have no badge.

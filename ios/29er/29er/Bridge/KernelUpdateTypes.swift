@@ -33,10 +33,16 @@ struct KernelUpdateResult {
     /// sidecar was absent or malformed on this tick. Carries 29er's suggested
     /// public-group host relay URL (Rust-owned operator policy).
     let typedGroupDefaults: GroupDefaultsSnapshot?
+    /// Raw typed-projection envelopes from this frame. Keyed row-delta
+    /// projections (`refs.profile`) merge through their own host store because
+    /// their payload is not one whole value.
+    let typedProjections: [TypedProjectionEnvelope]
     /// ADR-0044 Tier-3: bare envelope scalars read directly off the
     /// `SnapshotFrame` table. `rev` is the authoritative snapshot revision;
     /// `running` mirrors the kernel's `running` flag; `lastErrorToast` is the
     /// snapshot-driven error toast (nil ⇒ none on this tick).
+    let sessionId: UInt64
+    let snapshotEpoch: UInt64
     let rev: UInt64
     let running: Bool
     let lastErrorToast: String?

@@ -1,6 +1,7 @@
 //! 29er-tui — a native Rust Ratatui shell over `nmp-app-29er`.
 pub mod actions;
 pub mod app;
+pub mod components;
 pub mod terminal;
 pub mod ui;
 

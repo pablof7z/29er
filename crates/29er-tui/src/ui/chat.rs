@@ -1,21 +1,47 @@
-//! Right pane message history (issue #7): newest-at-bottom, per-author color,
-//! own-message alignment, wrapping, auto-scroll, new-message indicator.
-//! Uses tui-scrollview for scroll state management.
+//! Right pane message history — Slack-style grouped layout:
+//! consecutive messages from one author collapse under a single header
+//! (avatar dot + name + time), with a left gutter, day dividers between
+//! calendar days, a read-marker separator, auto-scroll, and a new-message
+//! indicator. Message bodies render through the NMP content renderer
+//! (`components::nostr_content::NostrContentView`) so mentions, links,
+//! hashtags, media, markdown, and embedded Nostr entities render properly —
+//! no shell-side content parsing. Uses tui-scrollview for scroll state.
+use std::collections::HashMap;
+
+use crate::actions::Action;
+use crate::app::{Focus, RelayState, TuiProfile, TuiSnapshot};
+use crate::components::nostr_content::{
+    content_render_data::{ContentProfileRenderData, ContentRenderData},
+    content_tree_wire::ContentTreeWire,
+    nostr_content_view::NostrContentView,
+    tokenize_message,
+};
+use crate::ui;
+use crate::Component;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
+use nmp_nip29::projection::GroupChatMessage;
 use ratatui::layout::{Alignment, Rect, Size};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 use tui_scrollview::{ScrollView, ScrollViewState};
-use nmp_nip29::projection::GroupChatMessage;
-use crate::actions::Action;
-use crate::app::{Focus, RelayState, TuiSnapshot};
-use crate::ui;
-use crate::Component;
+
+/// Messages from the same author within this many seconds collapse into one
+/// Slack-style group (single header). A larger gap starts a fresh group.
+const GROUP_GAP_SECS: u64 = 7 * 60;
+/// Left indent (columns) for message bodies, aligning them under the author
+/// name and leaving room for the avatar gutter on the header line.
+const GUTTER: u16 = 2;
 
 pub struct ChatComponent {
     messages: Vec<GroupChatMessage>,
+    /// Per-message tokenized content tree, keyed by event id. Built in
+    /// `update` from the shared `nmp-content` substrate so `draw` is pure
+    /// rendering and never re-tokenizes on every frame.
+    trees: HashMap<String, ContentTreeWire>,
+    profiles: HashMap<String, TuiProfile>,
+    render_data: ContentRenderData,
     my_pubkey: Option<String>,
     title: String,
     has_room: bool,
@@ -46,10 +72,32 @@ impl Default for ChatComponent {
     }
 }
 
+/// One laid-out row in the scroll buffer. Built once per draw so the height
+/// (measure) pass and the render pass stay in lock-step.
+enum Row<'a> {
+    /// Centered day divider (`── Today ──`).
+    Day(String),
+    /// Group header: avatar dot + author name + time.
+    Header {
+        name: String,
+        color: Color,
+        time: String,
+    },
+    /// A message body, rendered via the NMP content renderer.
+    Body(&'a GroupChatMessage),
+    /// The "you've read to here" separator.
+    ReadMarker,
+    /// A single blank spacer row between groups / dividers.
+    Gap,
+}
+
 impl ChatComponent {
     pub fn new() -> Self {
         Self {
             messages: Vec::new(),
+            trees: HashMap::new(),
+            profiles: HashMap::new(),
+            render_data: ContentRenderData::default(),
             my_pubkey: None,
             title: " chat ".to_string(),
             has_room: false,
@@ -90,6 +138,30 @@ impl ChatComponent {
         self.prev_msg_count = new_count;
 
         self.messages = s.selected_messages.clone();
+        // Tokenize any messages we have not seen yet, and drop trees for
+        // messages no longer present (e.g. channel switch). The `GroupChatMessage`
+        // projection carries no tags, so emoji-tag resolution is a no-op here.
+        let live: std::collections::HashSet<&str> =
+            self.messages.iter().map(|m| m.id.as_str()).collect();
+        self.trees.retain(|id, _| live.contains(id.as_str()));
+        for m in &self.messages {
+            if !self.trees.contains_key(&m.id) {
+                if let Some(tree) = tokenize_message(&m.content, &[], m.kind) {
+                    self.trees.insert(m.id.clone(), tree);
+                }
+            }
+        }
+
+        self.profiles = s.profiles.clone();
+        self.render_data =
+            ContentRenderData::from_profiles(self.profiles.values().map(|profile| {
+                ContentProfileRenderData {
+                    pubkey: profile.pubkey.clone(),
+                    display_name: profile.display_name.clone(),
+                    npub: profile.npub.clone(),
+                    picture_url: profile.picture_url.clone(),
+                }
+            }));
         self.my_pubkey = s.my_pubkey.clone();
         self.last_read_message_id = s.last_read_message_id.clone();
         self.focused = matches!(s.focus, Focus::Chat | Focus::Composer);
@@ -109,72 +181,150 @@ impl ChatComponent {
             .unwrap_or(false)
     }
 
-    /// Estimate the number of visual rows a body text takes at a given column width.
-    /// Uses character count as a proxy for display width (good for ASCII/Latin text).
-    fn body_line_count(content: &str, width: u16) -> u16 {
+    fn author_name(&self, pubkey: &str) -> String {
+        if self.is_own(pubkey) {
+            return "you".to_string();
+        }
+        self.profiles
+            .get(pubkey)
+            .and_then(|profile| profile.display_name.as_deref())
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| ui::short_pubkey(pubkey))
+    }
+
+    /// Estimate visual rows for raw fallback text (when tokenization failed).
+    fn raw_line_count(content: &str, width: u16) -> u16 {
         if width == 0 {
             return 1;
         }
         let chars = content.chars().count() as u16;
-        ((chars + width - 1) / width).max(1)
+        chars.div_ceil(width).max(1)
     }
 
-    /// Total height of a single rendered message block (header + body + blank).
-    fn message_height(m: &GroupChatMessage, width: u16) -> u16 {
-        1 /* header */ + Self::body_line_count(&m.content, width) + 1 /* blank separator */
-    }
-
-    /// Render one message into the scroll-view buffer at row `y`.
-    fn render_message_into(
-        &self,
-        sv: &mut ScrollView,
-        m: &GroupChatMessage,
-        y: u16,
-        width: u16,
-    ) {
-        let own = self.is_own(&m.pubkey);
-
-        // Header line.
-        let header: Line<'static> = if own {
-            Line::from(vec![
-                Span::styled(
-                    ui::clock_time(m.created_at),
-                    Style::default().fg(ui::OVERLAY0),
-                ),
-                Span::raw("  "),
-                Span::styled(
-                    "you",
-                    Style::default().fg(ui::GREEN).add_modifier(Modifier::BOLD),
-                ),
-            ])
-            .alignment(Alignment::Right)
-        } else {
-            Line::from(vec![
-                Span::styled(
-                    ui::short_pubkey(&m.pubkey),
-                    Style::default()
-                        .fg(ui::author_color(&m.pubkey))
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw("  "),
-                Span::styled(
-                    ui::clock_time(m.created_at),
-                    Style::default().fg(ui::OVERLAY0),
-                ),
-            ])
-        };
-        sv.render_widget(Paragraph::new(header), Rect::new(0, y, width, 1));
-
-        // Body (wrapped).
-        let body_h = Self::body_line_count(&m.content, width);
-        let body_color = if own { ui::SUBTEXT0 } else { ui::TEXT };
-        let body_span = Span::styled(m.content.clone(), Style::default().fg(body_color));
-        let mut body_para = Paragraph::new(Line::from(body_span)).wrap(Wrap { trim: false });
-        if own {
-            body_para = body_para.alignment(Alignment::Right);
+    /// Rendered height of a message body at `body_width` — via the content
+    /// renderer when a tree is available, else the raw-text estimate.
+    fn body_height(&self, m: &GroupChatMessage, body_width: u16) -> u16 {
+        match self.trees.get(&m.id) {
+            Some(tree) => NostrContentView::new(tree)
+                .render_data(Some(&self.render_data))
+                .preferred_height(body_width as usize),
+            None => Self::raw_line_count(&m.content, body_width),
         }
-        sv.render_widget(body_para, Rect::new(0, y + 1, width, body_h));
-        // blank separator row is left empty (just advance y in the caller)
+    }
+
+    /// Build the ordered row layout (oldest → newest) with Slack-style grouping
+    /// and day dividers. Borrows messages immutably; trees are looked up by id
+    /// at render time.
+    fn build_rows<'a>(&self, msgs: &[&'a GroupChatMessage]) -> Vec<Row<'a>> {
+        let mut rows: Vec<Row> = Vec::new();
+        let mut prev_author: Option<&str> = None;
+        let mut prev_day: Option<i64> = None;
+        let mut prev_ts: u64 = 0;
+
+        for m in msgs {
+            let day = ui::day_index(m.created_at);
+            let new_day = prev_day != Some(day);
+            if new_day {
+                if !rows.is_empty() {
+                    rows.push(Row::Gap);
+                }
+                rows.push(Row::Day(ui::day_label(m.created_at)));
+                prev_author = None; // always re-show the header after a divider
+            }
+
+            let same_author = prev_author == Some(m.pubkey.as_str());
+            let close_in_time = m.created_at.saturating_sub(prev_ts) <= GROUP_GAP_SECS;
+            if !(same_author && close_in_time) {
+                if !new_day && !rows.is_empty() {
+                    rows.push(Row::Gap);
+                }
+                rows.push(Row::Header {
+                    name: self.author_name(&m.pubkey),
+                    color: if self.is_own(&m.pubkey) {
+                        ui::GREEN
+                    } else {
+                        ui::author_color(&m.pubkey)
+                    },
+                    time: ui::clock_time(m.created_at),
+                });
+            }
+
+            rows.push(Row::Body(m));
+
+            if self.last_read_message_id.as_deref() == Some(m.id.as_str()) {
+                rows.push(Row::ReadMarker);
+            }
+
+            prev_author = Some(m.pubkey.as_str());
+            prev_day = Some(day);
+            prev_ts = m.created_at;
+        }
+        rows
+    }
+
+    fn row_height(&self, row: &Row, content_width: u16) -> u16 {
+        match row {
+            Row::Day(_) | Row::Header { .. } | Row::ReadMarker | Row::Gap => 1,
+            Row::Body(m) => self.body_height(m, content_width.saturating_sub(GUTTER).max(1)),
+        }
+    }
+
+    fn render_row(&self, sv: &mut ScrollView, row: &Row, y: u16, content_width: u16) {
+        match row {
+            Row::Day(label) => {
+                let line = Line::from(Span::styled(
+                    format!("\u{2500}\u{2500} {label} \u{2500}\u{2500}"),
+                    Style::default().fg(ui::OVERLAY0),
+                ))
+                .alignment(Alignment::Center);
+                sv.render_widget(Paragraph::new(line), Rect::new(0, y, content_width, 1));
+            }
+            Row::Header { name, color, time } => {
+                let header = Line::from(vec![
+                    Span::styled("\u{25cf} ", Style::default().fg(*color)),
+                    Span::styled(
+                        name.clone(),
+                        Style::default().fg(*color).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw("  "),
+                    Span::styled(time.clone(), Style::default().fg(ui::OVERLAY0)),
+                ]);
+                sv.render_widget(Paragraph::new(header), Rect::new(0, y, content_width, 1));
+            }
+            Row::ReadMarker => {
+                let sep = Paragraph::new(Line::from(Span::styled(
+                    "\u{2500}\u{2500} You've read to here \u{2500}\u{2500}",
+                    Style::default().fg(ui::OVERLAY0),
+                )))
+                .alignment(Alignment::Center);
+                sv.render_widget(sep, Rect::new(0, y, content_width, 1));
+            }
+            Row::Gap => {}
+            Row::Body(m) => {
+                let body_w = content_width.saturating_sub(GUTTER).max(1);
+                let h = self.body_height(m, body_w);
+                let rect = Rect::new(GUTTER, y, body_w, h);
+                match self.trees.get(&m.id) {
+                    Some(tree) => {
+                        sv.render_widget(
+                            NostrContentView::new(tree).render_data(Some(&self.render_data)),
+                            rect,
+                        );
+                    }
+                    None => {
+                        // Tokenization fell through — render the raw content so
+                        // no message is ever dropped.
+                        sv.render_widget(
+                            Paragraph::new(m.content.clone())
+                                .style(Style::default().fg(ui::TEXT))
+                                .wrap(Wrap { trim: false }),
+                            rect,
+                        );
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -249,23 +399,15 @@ impl Component for ChatComponent {
         // Reserve 1 column for the vertical scrollbar (auto-shown by ScrollView).
         let content_width = inner.width.saturating_sub(1).max(1);
 
-        // Messages stored newest-first; render oldest→newest (top→bottom).
+        // Messages stored newest-first; lay out oldest→newest (top→bottom).
         let msgs_in_order: Vec<&GroupChatMessage> = self.messages.iter().rev().collect();
+        let rows = self.build_rows(&msgs_in_order);
 
-        // Locate the read-marker message in render order (oldest first).
-        // The separator is drawn immediately AFTER this message.
-        let sep_after_idx: Option<usize> = self.last_read_message_id.as_ref().and_then(|marker| {
-            msgs_in_order.iter().position(|m| &m.id == marker)
-        });
-
-        // Calculate total content height (oldest message at top, newest at bottom).
-        // Add 1 row for the separator when applicable.
-        let total_height: u16 = (msgs_in_order
+        let total_height: u16 = rows
             .iter()
-            .map(|m| Self::message_height(m, content_width))
+            .map(|r| self.row_height(r, content_width))
             .sum::<u16>()
-            + if sep_after_idx.is_some() { 1 } else { 0 })
-        .max(1);
+            .max(1);
 
         self.last_inner_height = inner.height;
         self.last_total_height = total_height;
@@ -273,23 +415,13 @@ impl Component for ChatComponent {
         // Render the border block first.
         f.render_widget(make_block(), area);
 
-        // Build the scroll-view and populate it.
+        // Build the scroll-view and populate it row by row.
         let mut scroll_view = ScrollView::new(Size::new(content_width, total_height));
         let mut y: u16 = 0;
-        for (idx, m) in msgs_in_order.iter().enumerate() {
-            let h = Self::message_height(m, content_width);
-            self.render_message_into(&mut scroll_view, m, y, content_width);
+        for row in &rows {
+            let h = self.row_height(row, content_width);
+            self.render_row(&mut scroll_view, row, y, content_width);
             y += h;
-            // Insert the "You've read to here" separator after the marked message.
-            if sep_after_idx == Some(idx) {
-                let sep = Paragraph::new(Line::from(Span::styled(
-                    "\u{2500}\u{2500} You've read to here \u{2500}\u{2500}",
-                    Style::default().fg(ui::OVERLAY0),
-                )))
-                .alignment(Alignment::Center);
-                scroll_view.render_widget(sep, Rect::new(0, y, content_width, 1));
-                y += 1;
-            }
         }
 
         // Render the scroll-view into the inner area.
@@ -305,7 +437,10 @@ impl Component for ChatComponent {
             .alignment(Alignment::Right);
             // Place at the last row of inner area (above any horizontal scrollbar).
             let ind_y = inner.y + inner.height.saturating_sub(1);
-            f.render_widget(ind, Rect::new(inner.x, ind_y, inner.width.saturating_sub(1), 1));
+            f.render_widget(
+                ind,
+                Rect::new(inner.x, ind_y, inner.width.saturating_sub(1), 1),
+            );
         }
     }
 
@@ -388,16 +523,58 @@ mod tests {
     fn long_message_wraps_to_multiple_lines() {
         let mut c = ChatComponent::new();
         let long = "x ".repeat(80);
-        c.update(&snap(vec![msg("abcd", 100, &long)], true, Some("wss://h".into())));
+        c.update(&snap(
+            vec![msg("abcd", 100, &long)],
+            true,
+            Some("wss://h".into()),
+        ));
         let out = render(&mut c, 40, 12);
         assert!(out.matches('x').count() > 40);
+    }
+
+    #[test]
+    fn consecutive_same_author_messages_share_one_header() {
+        let mut c = ChatComponent::new();
+        c.update(&snap(
+            vec![
+                msg("abcd", 100, "first"),
+                msg("abcd", 110, "second"),
+                msg("abcd", 120, "third"),
+            ],
+            true,
+            Some("wss://h".into()),
+        ));
+        let out = render(&mut c, 50, 20);
+        // One avatar dot (one header) for the whole run, all three bodies shown.
+        assert_eq!(
+            out.matches('\u{25cf}').count(),
+            1,
+            "expected a single grouped header"
+        );
+        assert!(out.contains("first") && out.contains("second") && out.contains("third"));
+    }
+
+    #[test]
+    fn author_change_starts_new_group() {
+        let mut c = ChatComponent::new();
+        c.update(&snap(
+            vec![msg("aaaa", 100, "hi"), msg("bbbb", 130, "yo")],
+            true,
+            Some("wss://h".into()),
+        ));
+        let out = render(&mut c, 50, 20);
+        assert_eq!(out.matches('\u{25cf}').count(), 2, "expected two headers");
     }
 
     #[test]
     fn new_message_indicator_shown_when_scrolled_up() {
         let mut c = ChatComponent::new();
         // Start with one message.
-        c.update(&snap(vec![msg("pk1", 1, "first")], true, Some("wss://h".into())));
+        c.update(&snap(
+            vec![msg("pk1", 1, "first")],
+            true,
+            Some("wss://h".into()),
+        ));
         // Simulate user scrolling up.
         c.at_bottom = false;
         // New message arrives.
@@ -412,7 +589,11 @@ mod tests {
     #[test]
     fn auto_scroll_resets_on_channel_change() {
         let mut c = ChatComponent::new();
-        c.update(&snap(vec![msg("pk1", 1, "hi")], true, Some("wss://h".into())));
+        c.update(&snap(
+            vec![msg("pk1", 1, "hi")],
+            true,
+            Some("wss://h".into()),
+        ));
         c.at_bottom = false;
         c.new_since_scroll = 5;
         // Switch channel.
@@ -432,6 +613,7 @@ mod tests {
             selected_channel_id: room.map(|r| nmp_nip29::GroupId::new("wss://h", r)),
             selected_messages: messages,
             selected_members: vec![],
+            profiles: Default::default(),
             is_admin: false,
             my_pubkey: None,
             publish_outbox: vec![],

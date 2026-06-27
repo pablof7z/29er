@@ -568,29 +568,28 @@ struct GroupTimelineView: View {
 
     private func messageStream(proxy: ScrollViewProxy) -> some View {
         ScrollView {
-            LazyVStack(spacing: 8) {
-                ForEach(visibleMessages) { message in
-                    let pending = outboxItem(for: message.id)
-                    GroupMessageRow(
-                        message: message,
-                        senderTitle: memberTitle(for: message.pubkey),
-                        isOwnMessage: message.pubkey == model.activeAccountPubkey,
-                        pendingStatus: pending?.status,
-                        canRetry: pending?.canRetry ?? false,
-                        onRetry: {
-                            if let pending {
-                                model.retryPublish(pending)
+            LazyVStack(alignment: .leading, spacing: 6) {
+                ForEach(chatStream) { item in
+                    switch item {
+                    case let .dayDivider(_, label):
+                        ChatDayDivider(label: label)
+                            .padding(.vertical, 4)
+                    case let .group(group):
+                        SlackMessageGroupView(
+                            group: group,
+                            senderTitle: senderTitle(for: group.pubkey),
+                            timeLabel: Self.clockTime(group.messages[0].createdAt),
+                            outboxItem: { outboxItem(for: $0) },
+                            onRetry: { model.retryPublish($0) },
+                            onReact: { message in
+                                model.reactToGroupMessage(
+                                    groupId: groupId,
+                                    eventId: message.id,
+                                    eventAuthorPubkey: message.pubkey
+                                )
                             }
-                        },
-                        onReact: {
-                            model.reactToGroupMessage(
-                                groupId: groupId,
-                                eventId: message.id,
-                                eventAuthorPubkey: message.pubkey
-                            )
-                        }
-                    )
-                    .id(message.id)
+                        )
+                    }
                 }
 
                 Color.clear
@@ -601,6 +600,101 @@ struct GroupTimelineView: View {
             .padding(.vertical, 10)
         }
         .onAppear { scrollToBottom(proxy, animated: false) }
+        .onChange(of: visibleMessages.count) { _, _ in
+            scrollToBottom(proxy, animated: true)
+        }
+    }
+
+    // MARK: Slack-style grouping
+
+    /// One entry in the rendered chat stream: either a day divider or a run of
+    /// consecutive same-author messages collapsed under a single header.
+    private enum ChatStreamItem: Identifiable {
+        case dayDivider(id: String, label: String)
+        case group(MessageGroup)
+
+        var id: String {
+            switch self {
+            case let .dayDivider(id, _): return "day-\(id)"
+            case let .group(group): return group.id
+            }
+        }
+    }
+
+    /// A consecutive run of messages from one author within the grouping window.
+    /// `fileprivate` so the file-private `SlackMessageGroupView` can name it.
+    fileprivate struct MessageGroup: Identifiable {
+        let id: String // first message's event id
+        let pubkey: String
+        let messages: [GroupChatMessage]
+    }
+
+    /// Messages from the same author within this window collapse into one group.
+    private static let groupingWindowSeconds: UInt64 = 7 * 60
+
+    /// Fold the chronological message list into day dividers + author groups.
+    private var chatStream: [ChatStreamItem] {
+        _ = model.profileRefsRevision
+        var items: [ChatStreamItem] = []
+        var bucket: [GroupChatMessage] = []
+        var currentAuthor: String?
+        var currentDay: Int64?
+        var prevTs: UInt64 = 0
+
+        func flush() {
+            if let first = bucket.first {
+                items.append(.group(MessageGroup(id: first.id, pubkey: first.pubkey, messages: bucket)))
+            }
+            bucket.removeAll(keepingCapacity: true)
+        }
+
+        for message in visibleMessages {
+            let day = Int64(message.createdAt / 86_400)
+            if currentDay != day {
+                flush()
+                items.append(.dayDivider(id: String(day), label: Self.dayLabel(message.createdAt)))
+                currentAuthor = nil
+            }
+            let sameAuthor = currentAuthor == message.pubkey
+            let closeInTime = message.createdAt >= prevTs
+                && message.createdAt - prevTs <= Self.groupingWindowSeconds
+            if !(sameAuthor && closeInTime) {
+                flush()
+            }
+            bucket.append(message)
+            currentAuthor = message.pubkey
+            currentDay = day
+            prevTs = message.createdAt
+        }
+        flush()
+        return items
+    }
+
+    /// Day-divider label: "Today" / "Yesterday" / "Sat, Jun 27 2026".
+    private static func dayLabel(_ unixSeconds: UInt64) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(unixSeconds))
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("EEE MMM d yyyy")
+        return formatter.string(from: date)
+    }
+
+    /// Group-header clock time (locale short time, e.g. "10:32 AM").
+    private static func clockTime(_ unixSeconds: UInt64) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(unixSeconds)))
+    }
+
+    private func senderTitle(for pubkey: String) -> String {
+        if pubkey == model.activeAccountPubkey { return "You" }
+        if let profile = model.profile(forPubkey: pubkey) {
+            return profile.display
+        }
+        return memberTitle(for: pubkey)
     }
 
     private var composer: some View {
@@ -1276,70 +1370,106 @@ private struct MemberListSheet: View {
     }
 }
 
-private struct GroupMessageRow: View {
-    let message: GroupChatMessage
+/// A centered day separator ("Today" / "Sat, Jun 27 2026").
+private struct ChatDayDivider: View {
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            VStack { Divider() }
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize()
+            VStack { Divider() }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("chat-day-divider")
+    }
+}
+
+/// Slack-style group: one avatar + name + time header for a run of consecutive
+/// messages from a single author, with each message body stacked beneath and
+/// rendered through the NMP content renderer.
+private struct SlackMessageGroupView: View {
+    let group: MessageGroup
     let senderTitle: String
-    let isOwnMessage: Bool
-    let pendingStatus: String?
-    let canRetry: Bool
-    let onRetry: () -> Void
+    let timeLabel: String
+    let outboxItem: (String) -> PublishOutboxItem?
+    let onRetry: (PublishOutboxItem) -> Void
+    let onReact: (GroupChatMessage) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            NostrAvatar(
+                pubkey: group.pubkey,
+                size: 36,
+                consumerID: "group-chat-author.\(group.pubkey)"
+            )
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(senderTitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(timeLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                ForEach(group.messages) { message in
+                    SlackMessageBody(
+                        message: message,
+                        pending: outboxItem(message.id),
+                        onRetry: onRetry,
+                        onReact: { onReact(message) }
+                    )
+                    .id(message.id)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    // Re-declare the parent's grouping payload so this file-private view can name
+    // its parameter type. (Mirrors `GroupTimelineView.MessageGroup`.)
+    typealias MessageGroup = GroupTimelineView.MessageGroup
+}
+
+/// One message body within a Slack group: NMP-rendered content (no bubble),
+/// inline pending/retry status, and the per-message context menu.
+private struct SlackMessageBody: View {
+    let message: GroupChatMessage
+    let pending: PublishOutboxItem?
+    let onRetry: (PublishOutboxItem) -> Void
     let onReact: () -> Void
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            if isOwnMessage {
-                Spacer(minLength: 42)
-            } else {
-                ChatAvatar(seed: message.pubkey)
-            }
+        VStack(alignment: .leading, spacing: 3) {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: isOwnMessage ? .trailing : .leading, spacing: 4) {
+            if let pending {
                 HStack(spacing: 6) {
-                    if !isOwnMessage {
-                        Text(senderTitle)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    Text(message.createdAt.relativeTimeFromUnixSeconds)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-
-                    if let pendingStatus {
-                        if canRetry {
-                            Button(action: onRetry) {
-                                Image(systemName: "arrow.clockwise.circle.fill")
-                                    .font(.caption.weight(.semibold))
-                                    .symbolRenderingMode(.hierarchical)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Retry message")
+                    if pending.canRetry {
+                        Button { onRetry(pending) } label: {
+                            Image(systemName: "arrow.clockwise.circle.fill")
+                                .font(.caption.weight(.semibold))
+                                .symbolRenderingMode(.hierarchical)
                         }
-
-                        Text(pendingStatus.pendingDisplayLabel)
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.tertiary)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Retry message")
                     }
+                    Text(pending.status.pendingDisplayLabel)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.tertiary)
                 }
-
-                Text(message.content)
-                    .font(.body)
-                    .foregroundStyle(isOwnMessage ? .white : .primary)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .fill(isOwnMessage ? Color.accentColor : Color(.secondarySystemBackground))
-                    )
-            }
-
-            if !isOwnMessage {
-                Spacer(minLength: 42)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .contextMenu {
             Button(action: onReact) {
                 Label("React", systemImage: "heart")
@@ -1357,6 +1487,19 @@ private struct GroupMessageRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("group-chat-message-\(message.id)")
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let tree = NostrMessageContent.tree(for: message) {
+            NostrContentView(tree: tree, font: .body)
+        } else {
+            // Tokenization fell through — never drop a message.
+            Text(message.content)
+                .font(.body)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

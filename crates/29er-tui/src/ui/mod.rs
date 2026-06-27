@@ -75,6 +75,54 @@ pub fn relative_time(created_at: u64) -> String {
     else { format!("{}d", delta / 86_400) }
 }
 
+/// Whole-day bucket (days since the Unix epoch, UTC) used to detect day
+/// boundaries between consecutive messages for Slack-style day dividers.
+#[must_use]
+pub fn day_index(created_at: u64) -> i64 {
+    (created_at / 86_400) as i64
+}
+
+/// Human day label for a day divider: "Today" / "Yesterday" relative to the
+/// current UTC day, otherwise "Sat, Jun 27 2026". Pure date math (no chrono).
+#[must_use]
+pub fn day_label(created_at: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(created_at);
+    let today = day_index(now);
+    let day = day_index(created_at);
+    match today - day {
+        0 => return "Today".to_string(),
+        1 => return "Yesterday".to_string(),
+        _ => {}
+    }
+    let (year, month, dom) = civil_from_days(day);
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    // 1970-01-01 was a Thursday; `day` counts days since the epoch.
+    let weekday = WEEKDAYS[day.rem_euclid(7) as usize];
+    let month_name = MONTHS[(month as usize).saturating_sub(1).min(11)];
+    format!("{weekday}, {month_name} {dom} {year}")
+}
+
+/// Convert days-since-Unix-epoch to a `(year, month, day)` civil date.
+/// Howard Hinnant's `civil_from_days` algorithm (UTC, proleptic Gregorian).
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32; // [1, 12]
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
 const SPINNER: [char; 10] = ['\u{280b}','\u{2819}','\u{2839}','\u{2838}','\u{283c}','\u{2834}','\u{2826}','\u{2827}','\u{2807}','\u{280f}'];
 #[must_use]
 pub fn spinner_frame(tick: usize) -> char { SPINNER[tick % SPINNER.len()] }

@@ -1,0 +1,134 @@
+schema_version = 1
+
+[[components]]
+id = "swiftui/content-core"
+version = "0.2.0"
+registry = "nmp-local"
+target = "swiftui"
+
+[[components.files]]
+path = "Components/NostrContent/NostrContentRenderer.swift"
+role = "source"
+source = "swiftui/content-core/NostrContentRenderer.swift"
+source_sha256 = "cb5a804017b92aab5e5ffa6fb54c2a173d8b65c8033e5fdc0a48d55d87ddab99"
+
+[[components.files]]
+path = "Components/NostrContent/ContentTreeWire.swift"
+role = "source"
+source = "swiftui/content-core/ContentTreeWire.swift"
+source_sha256 = "e3d931302d17a2677df247a2d4ef372c8b60b03c2f5a2bfe4d3866a683d15064"
+
+[[components]]
+id = "swiftui/content-media-grid"
+version = "0.1.0"
+registry = "nmp-local"
+target = "swiftui"
+
+[[components.files]]
+path = "Components/NostrContent/NostrMediaGrid.swift"
+role = "source"
+source = "swiftui/content-media-grid/NostrMediaGrid.swift"
+source_sha256 = "c3e51bb7b57c0eacc2c7e1c3c763fb51354003289580783cfdf6c7d275ad8a70"
+
+[[components]]
+id = "swiftui/user-avatar"
+version = "0.1.0"
+registry = "nmp-local"
+target = "swiftui"
+
+[[components.files]]
+path = "Components/NostrUser/ProfileWire.swift"
+role = "source"
+source = "swiftui/user-avatar/ProfileWire.swift"
+source_sha256 = "407e25e00b4a05d6eb7d4d7b11221e3c4dcd1591f7f07d3a81aabb161aa76c46"
+
+[[components.files]]
+path = "Components/NostrUser/NostrProfileHost.swift"
+role = "source"
+source = "swiftui/user-avatar/NostrProfileHost.swift"
+source_sha256 = "c619939b5158324e428e95ad9638cf48f74b4df3f95158eca61fe8c9b453b81b"
+
+[[components.files]]
+path = "Components/NostrUser/NostrAvatar.swift"
+role = "source"
+source = "swiftui/user-avatar/NostrAvatar.swift"
+source_sha256 = "be3a4fe36868e30d64742df622050062e5513e76484366d7890320a55cc86c32"
+
+[[components]]
+id = "swiftui/content-kind-registry"
+version = "0.1.0"
+registry = "nmp-local"
+target = "swiftui"
+
+[[components.files]]
+path = "Components/NostrContent/EmbedKindProjection.swift"
+role = "source"
+source = "swiftui/content-kind-registry/EmbedKindProjection.swift"
+source_sha256 = "0609641f2670a07ff8898f2fd9475ecbf8ea681c388a738d6845e9416900d50b"
+
+[[components.files]]
+path = "Components/NostrContent/EmbedHostEnvironment.swift"
+role = "source"
+source = "swiftui/content-kind-registry/EmbedHostEnvironment.swift"
+source_sha256 = "545554d72029cb38fd4a415cea1f2a7dc8b88b56da116eba602c66548b9d8a91"
+
+[[components.files]]
+path = "Components/NostrContent/EmbedChromeContainer.swift"
+role = "source"
+source = "swiftui/content-kind-registry/EmbedChromeContainer.swift"
+source_sha256 = "724e705e5d36e0b719be552aa56e96f48444bf15b06e708954893bbb49113251"
+
+[[components.files]]
+path = "Components/NostrContent/NostrKindRegistry.swift"
+role = "source"
+source = "swiftui/content-kind-registry/NostrKindRegistry.swift"
+source_sha256 = "6e813152427b2f4510b498216dc9ac65ee91eeecb141371225f3b8f7444c57c5"
+
+[[components.files]]
+path = "Components/NostrContent/EmbeddedEvent.swift"
+role = "source"
+source = "swiftui/content-kind-registry/EmbeddedEvent.swift"
+source_sha256 = "5d02190f132e87f63d3fb412074914c07d830754602418cee8372a6366c3d901"
+
+[[components]]
+id = "swiftui/content-view"
+version = "0.3.0"
+registry = "nmp-local"
+target = "swiftui"
+
+[[components.files]]
+path = "Components/NostrContent/NostrContentView.swift"
+role = "source"
+source = "swiftui/content-view/NostrContentView.swift"
+source_sha256 = "aa35460a29158a5ca80ea20b0cffdab2faf03031af58ffa10bee44947c3b4e2f"
+
+[[components.files]]
+path = "Components/NostrContent/NostrContentGrouping.swift"
+role = "source"
+source = "swiftui/content-view/NostrContentGrouping.swift"
+source_sha256 = "d55375c02fa86eea4b3eb77098d043c607f55abc753514f9d182cd4a70833e9e"
+
+[[components.files]]
+path = "Components/NostrContent/NostrContentHighlights.swift"
+role = "source"
+source = "swiftui/content-view/NostrContentHighlights.swift"
+source_sha256 = "98fb6423b42ee4aa5a15258e4bda345cfa461e1eb5548d4fd3bc68b27a53ff4d"
+
+[[components.files]]
+path = "Components/NostrContent/NostrContentAttributed.swift"
+role = "source"
+source = "swiftui/content-view/NostrContentAttributed.swift"
+source_sha256 = "00493922744f3823be2d2a4bb354f5996edb690248820c24e23cc53998a17cfe"
+
+[[components.files]]
+path = "Components/NostrContent/NostrContentArticleView.swift"
+role = "source"
+source = "swiftui/content-view/NostrContentArticleView.swift"
+source_sha256 = "5bb06f270553ee70c668b858be758d2261c8f6f71659b89512e2ab0c7fd984b3"
+
+[[components.files]]
+path = "Components/NostrContent/NostrSelectableText.swift"
+role = "source"
+source = "swiftui/content-view/NostrSelectableText.swift"
+source_sha256 = "85f8db21a3f53d728b30dd521406e3e5841dd9175b88481bcadfd2a0fc720355"
+

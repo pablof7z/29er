@@ -257,6 +257,22 @@ final class KernelHandle {
     func retryPublish(handle: String) {
         handle.withCString { nmp_app_retry_publish(raw, $0) }
     }
+
+    func resolveProfileRef(pubkey: String, consumerID: String) {
+        pubkey.withCString { pubkeyPtr in
+            consumerID.withCString { consumerPtr in
+                nmp_app_resolve_profile_ref(raw, pubkeyPtr, consumerPtr)
+            }
+        }
+    }
+
+    func releaseProfileRef(pubkey: String, consumerID: String) {
+        pubkey.withCString { pubkeyPtr in
+            consumerID.withCString { consumerPtr in
+                nmp_app_release_profile_ref(raw, pubkeyPtr, consumerPtr)
+            }
+        }
+    }
 }
 
 final class KernelUpdateSink {
@@ -332,8 +348,6 @@ extension KernelHandle {
                 // 29er S01 consumes only the discovered-groups + active-account
                 // sidecars. New typed slots are added here as 29er grows
                 // (mirroring Chirp's `KernelBridge+Decoding.swift`).
-                _ = sessionId
-                _ = snapshotEpoch
                 let typedDiscoveredGroups = TypedDiscoveredGroupsDecoder.decode(from: envelopes)
                 let typedGroupTree = TypedGroupTreeDecoder.decode(from: envelopes)
                 let typedGroupChat = TypedGroupChatDecoder.decode(from: envelopes)
@@ -352,6 +366,9 @@ extension KernelHandle {
                         typedPublishOutbox: typedPublishOutbox,
                         typedActiveAccount: typedActiveAccount,
                         typedGroupDefaults: typedGroupDefaults,
+                        typedProjections: envelopes,
+                        sessionId: sessionId,
+                        snapshotEpoch: snapshotEpoch,
                         rev: rev,
                         running: running,
                         lastErrorToast: lastErrorToast,

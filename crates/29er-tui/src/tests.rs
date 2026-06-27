@@ -8,7 +8,9 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::Terminal;
 
-use crate::app::{ChannelListItem, ChannelTier, Focus, IdentityState, RelayState, Screen, TuiSnapshot};
+use crate::app::{
+    ChannelListItem, ChannelTier, Focus, IdentityState, RelayState, Screen, TuiSnapshot,
+};
 use crate::ui::chat::ChatComponent;
 use crate::ui::login::LoginComponent;
 use crate::ui::room_list::RoomListComponent;
@@ -26,7 +28,11 @@ fn render_component<C: Component>(c: &mut C, w: u16, h: u16) -> String {
     t.draw(|f| c.draw(f, f.area())).unwrap();
     let buf = t.backend().buffer().clone();
     (0..h)
-        .map(|y| (0..w).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>())
+        .map(|y| {
+            (0..w)
+                .map(|x| buf[(x, y)].symbol().to_string())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -63,6 +69,7 @@ fn base_snapshot() -> TuiSnapshot {
         selected_channel_id: None,
         selected_messages: vec![],
         selected_members: vec![],
+        profiles: Default::default(),
         is_admin: false,
         my_pubkey: None,
         publish_outbox: vec![],
@@ -96,9 +103,18 @@ fn test_room_list_renders_without_panic() {
     snap.channel_tree = vec![fake_channel("general"), fake_channel("dev")];
     c.update(&snap);
     let out = render_component(&mut c, 80, 24);
-    assert!(out.chars().any(|ch| !ch.is_whitespace()), "buffer should not be blank");
-    assert!(out.contains("channels"), "border title 'channels' missing from room list");
-    assert!(out.contains("general"), "channel name 'general' missing from room list");
+    assert!(
+        out.chars().any(|ch| !ch.is_whitespace()),
+        "buffer should not be blank"
+    );
+    assert!(
+        out.contains("channels"),
+        "border title 'channels' missing from room list"
+    );
+    assert!(
+        out.contains("general"),
+        "channel name 'general' missing from room list"
+    );
 }
 
 /// `ChatComponent` renders `GroupChatMessage` content into the cell buffer.

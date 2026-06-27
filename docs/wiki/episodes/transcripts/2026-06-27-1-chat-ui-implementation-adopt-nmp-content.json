@@ -1,0 +1,10 @@
+[
+  [
+    "user",
+    "chat UI should show up in a slack-type UX it also needs to use the NMP content renderer since we need to properly support rendering embeds like nostr entities and stuff like that do this in the RIGHT way -- no hacks research and then explain to me how you will do this"
+  ],
+  [
+    "assistant",
+    "The agent confirmed iOS already has the chat data pipeline and proposed a 3-phase plan: vendor the NMP renderer, update TUI and iOS with Slack-style views and embed rendering, then verify—ensuring all content parsing goes through the NMP library with entity resolution via the kernel seam."
+  ]
+]

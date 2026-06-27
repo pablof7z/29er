@@ -218,6 +218,27 @@ char *nmp_app_29er_dispatch_action_bytes(void *app, const char *namespace, const
 // stale handles (D6).
 void nmp_app_retry_publish(void *app, const char *handle);
 
+// ADR-0063 typed profile-ref adapters. Registry profile/avatar components claim
+// visible pubkeys through these fire-and-forget seams; the resolved kind:0 rows
+// return in the keyed `refs.profile` projection.
+void nmp_app_resolve_profile_ref(void *app, const char *key, const char *consumer_id);
+void nmp_app_release_profile_ref(void *app, const char *key, const char *consumer_id);
+
+// ── nmp-content pure tokenizer (Layer A content renderer) ─────────────────
+//
+// Tokenize Nostr event content into the FFI-stable `ContentTreeWire` JSON the
+// SwiftUI `NostrContentView` renders. Pure function — resolves no entities and
+// mutates no kernel state (mentions/embeds resolve via the separate
+// `nmp_app_resolve_ref` seam). `tags_json`, when non-NULL, is a JSON
+// `[[string]]` event-tag array used for NIP-30 emoji resolution.
+//
+//   mode: 0 = plain · 1 = markdown · 2 = auto (markdown vs plain by `kind`)
+//
+// Returns a heap-allocated `{"ok":true,"tree":{…}}` (or
+// `{"ok":false,"error":"…"}`) JSON string that MUST be freed via
+// `nmp_free_string`. Never returns NULL for valid pointers (D6).
+char *nmp_content_tokenize_text(const char *content, const char *tags_json, int mode, uint32_t kind);
+
 // Release a Rust-heap C string returned by ANY NMP FFI function. Null-safe.
 // This is the ONLY correct freer — the host's free(3) must NOT be used.
 void nmp_free_string(char *ptr);

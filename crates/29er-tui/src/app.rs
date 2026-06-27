@@ -1,6 +1,6 @@
 //! NMP composition root + projection-backed view-model for the TUI.
-use std::collections::HashMap;
-use std::ffi::{CStr, CString};
+use std::collections::{HashMap, HashSet};
+use std::ffi::{c_void, CStr, CString};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -10,6 +10,7 @@ use nmp_app_29er::{
     nmp_app_29er_register, nmp_app_29er_register_group_chat, nmp_app_29er_unregister,
     TwentyNinerHandle,
 };
+use nmp_core::refs::{RefProfileStore, REFS_PROFILE_KEY};
 use nmp_core::{KernelEventObserver, KernelEventObserverId};
 use nmp_ffi::{nmp_free_string, NmpApp};
 use nmp_nip29::projection::{
@@ -38,19 +39,23 @@ pub struct GroupMemberRow {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Screen { Login, App }
+pub enum Screen {
+    Login,
+    App,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Focus {
-    RoomList,   // primary sidebar (was ChannelList)
+    RoomList, // primary sidebar (was ChannelList)
     Chat,
     Composer,
-    Palette,    // command palette overlay
-    Modal,      // form/dialog overlay
+    Palette, // command palette overlay
+    Modal,   // form/dialog overlay
 }
 impl Focus {
     /// Forward Tab cycle: only cycles through the three base panels.
-    #[must_use] pub fn next(self) -> Self {
+    #[must_use]
+    pub fn next(self) -> Self {
         match self {
             Focus::RoomList => Focus::Chat,
             Focus::Chat => Focus::Composer,
@@ -59,7 +64,8 @@ impl Focus {
         }
     }
     /// Reverse Shift+Tab cycle.
-    #[must_use] pub fn prev(self) -> Self {
+    #[must_use]
+    pub fn prev(self) -> Self {
         match self {
             Focus::RoomList => Focus::Composer,
             Focus::Chat => Focus::RoomList,
@@ -70,13 +76,26 @@ impl Focus {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum IdentityState { LoggedOut, LoggingIn, LoggedIn { npub: String } }
+pub enum IdentityState {
+    LoggedOut,
+    LoggingIn,
+    LoggedIn { npub: String },
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RelayState { Disconnected, Connecting, Connected, Error(String) }
+pub enum RelayState {
+    Disconnected,
+    Connecting,
+    Connected,
+    Error(String),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OutboxStatus { Pending, Confirmed, Failed }
+pub enum OutboxStatus {
+    Pending,
+    Confirmed,
+    Failed,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FormKind {
@@ -135,6 +154,14 @@ pub struct PublishOutboxItem {
     pub dispatched_at: std::time::Instant,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TuiProfile {
+    pub pubkey: String,
+    pub display_name: Option<String>,
+    pub npub: Option<String>,
+    pub picture_url: Option<String>,
+}
+
 /// The immutable per-frame view-model. Contains ZERO Ratatui types (issue #3).
 #[derive(Clone, Debug)]
 pub struct TuiSnapshot {
@@ -142,6 +169,7 @@ pub struct TuiSnapshot {
     pub selected_channel_id: Option<GroupId>,
     pub selected_messages: Vec<GroupChatMessage>,
     pub selected_members: Vec<GroupMemberRow>,
+    pub profiles: HashMap<String, TuiProfile>,
     pub is_admin: bool,
     pub my_pubkey: Option<String>,
     pub publish_outbox: Vec<PublishOutboxItem>,
@@ -176,13 +204,18 @@ pub struct ProjectionView {
     pub channel_tree: Vec<ChannelListItem>,
     pub selected_messages: Vec<GroupChatMessage>,
     pub selected_members: Vec<GroupMemberRow>,
+    pub profiles: HashMap<String, TuiProfile>,
     pub is_admin: bool,
     pub my_pubkey: Option<String>,
     pub identity_state: IdentityState,
     /// Last time any snapshot data was observed; used for heartbeat relay-state inference.
     pub last_data_at: Option<Instant>,
 }
-impl Default for IdentityState { fn default() -> Self { IdentityState::LoggedOut } }
+impl Default for IdentityState {
+    fn default() -> Self {
+        IdentityState::LoggedOut
+    }
+}
 
 /// Maximum number of live `GroupChatProjection` observers kept in `App::chats`.
 /// The least-recently-used entry is evicted (and its NMP observer unregistered)
@@ -198,6 +231,10 @@ struct ChatEntry {
     last_accessed: Instant,
 }
 
+struct ProfileUpdateBridge {
+    shared: Arc<SharedProjections>,
+}
+
 /// Send+Sync read-side state shared between App (main thread) and the poller.
 pub struct SharedProjections {
     pub group_tree: Arc<GroupTreeProjection>,
@@ -209,6 +246,7 @@ pub struct SharedProjections {
     pub active_account: Mutex<ActiveAccountSlot>,
     pub selected_chat: Mutex<Option<Arc<GroupChatProjection>>>,
     pub selected_group: Mutex<Option<GroupId>>,
+    pub profile_refs: Mutex<RefProfileStore>,
     /// Set on each snapshot poll that returns non-empty data; drives relay-state indicator.
     pub last_update_at: Mutex<Option<std::time::Instant>>,
 }
@@ -217,16 +255,31 @@ impl SharedProjections {
         let discovered = self.discovered.snapshot();
         let tree_state = self.group_tree.snapshot();
         // Resolve my_pubkey first so it can be passed to tier computation.
-        let me = self.active_account.lock().ok().and_then(|s| s.lock().ok().and_then(|v| v.clone()));
+        let me = self
+            .active_account
+            .lock()
+            .ok()
+            .and_then(|s| s.lock().ok().and_then(|v| v.clone()));
         let channel_tree = derive_channel_tree(&discovered, &tree_state, me.as_deref());
-        let selected_messages = self.selected_chat.lock().ok()
-            .and_then(|c| c.as_ref().map(|c| c.snapshot().messages)).unwrap_or_default();
+        let selected_messages = self
+            .selected_chat
+            .lock()
+            .ok()
+            .and_then(|c| c.as_ref().map(|c| c.snapshot().messages))
+            .unwrap_or_default();
         // The per-member roster API was removed in v0.8.0; no source yet.
         let members: Vec<GroupMemberRow> = Vec::new();
         // Derive admin status for the selected group from the joined-groups
         // projection (relay-signed 39002), the canonical v0.8.0 source.
-        let selected_local = self.selected_group.lock().ok().and_then(|g| g.as_ref().map(|g| g.local_id.clone()));
-        let is_admin = match (selected_local, self.joined.lock().ok().and_then(|j| j.clone())) {
+        let selected_local = self
+            .selected_group
+            .lock()
+            .ok()
+            .and_then(|g| g.as_ref().map(|g| g.local_id.clone()));
+        let is_admin = match (
+            selected_local,
+            self.joined.lock().ok().and_then(|j| j.clone()),
+        ) {
             (Some(local), Some(joined)) => joined
                 .snapshot()
                 .groups
@@ -235,15 +288,40 @@ impl SharedProjections {
             _ => false,
         };
         let identity_state = match &me {
-            Some(pk) => IdentityState::LoggedIn { npub: nmp_core::display::to_npub(pk) },
+            Some(pk) => IdentityState::LoggedIn {
+                npub: nmp_core::display::to_npub(pk),
+            },
             None => IdentityState::LoggingIn,
         };
         let has_data = !channel_tree.is_empty() || !selected_messages.is_empty();
         if has_data {
-            if let Ok(mut ts) = self.last_update_at.lock() { *ts = Some(std::time::Instant::now()); }
+            if let Ok(mut ts) = self.last_update_at.lock() {
+                *ts = Some(std::time::Instant::now());
+            }
         }
+        let profiles = self
+            .profile_refs
+            .lock()
+            .ok()
+            .map(|store| {
+                store
+                    .profiles()
+                    .into_iter()
+                    .map(|(pubkey, card)| (pubkey.clone(), TuiProfile::from_card(pubkey, card)))
+                    .collect()
+            })
+            .unwrap_or_default();
         let last_data_at = self.last_update_at.lock().ok().and_then(|ts| *ts);
-        ProjectionView { channel_tree, selected_messages, selected_members: members, is_admin, my_pubkey: me, identity_state, last_data_at }
+        ProjectionView {
+            channel_tree,
+            selected_messages,
+            selected_members: members,
+            profiles,
+            is_admin,
+            my_pubkey: me,
+            identity_state,
+            last_data_at,
+        }
     }
 }
 
@@ -253,7 +331,9 @@ pub fn spawn_poller(shared: Arc<SharedProjections>, tx: UnboundedSender<Projecti
         let mut ticker = tokio::time::interval(Duration::from_millis(250));
         loop {
             ticker.tick().await;
-            if tx.send(shared.project()).is_err() { break; }
+            if tx.send(shared.project()).is_err() {
+                break;
+            }
         }
     });
 }
@@ -265,6 +345,8 @@ pub struct App {
     shared: Arc<SharedProjections>,
     poll_tx: UnboundedSender<ProjectionView>,
     chats: HashMap<String, ChatEntry>,
+    profile_update_bridge: Option<Box<ProfileUpdateBridge>>,
+    claimed_profile_authors: HashSet<String>,
     latest: ProjectionView,
     screen: Screen,
     focus: Focus,
@@ -302,18 +384,38 @@ impl App {
             active_account: Mutex::new(Arc::new(Mutex::new(None))),
             selected_chat: Mutex::new(None),
             selected_group: Mutex::new(None),
+            profile_refs: Mutex::new(RefProfileStore::new()),
             last_update_at: Mutex::new(None),
         });
         Self {
-            app_ptr: std::ptr::null_mut(), handle: std::ptr::null_mut(), relay_url,
-            shared, poll_tx, chats: HashMap::new(), latest: ProjectionView::default(),
-            screen: Screen::Login, focus: Focus::RoomList, focus_stack: Vec::new(),
-            selected_index: 0, selected_channel: None, outbox: Vec::new(), errors: Vec::new(),
-            palette_open: false, active_form: None, message_scroll: 0,
-            login_error: None, help_open: false, should_quit: false,
+            app_ptr: std::ptr::null_mut(),
+            handle: std::ptr::null_mut(),
+            relay_url,
+            shared,
+            poll_tx,
+            chats: HashMap::new(),
+            profile_update_bridge: None,
+            claimed_profile_authors: HashSet::new(),
+            latest: ProjectionView::default(),
+            screen: Screen::Login,
+            focus: Focus::RoomList,
+            focus_stack: Vec::new(),
+            selected_index: 0,
+            selected_channel: None,
+            outbox: Vec::new(),
+            errors: Vec::new(),
+            palette_open: false,
+            active_form: None,
+            message_scroll: 0,
+            login_error: None,
+            help_open: false,
+            should_quit: false,
             status_message: None,
             read_markers: HashMap::new(),
-            spinner_tick: 0, connecting_since: None, connected_at: None, relay_error: None,
+            spinner_tick: 0,
+            connecting_since: None,
+            connected_at: None,
+            relay_error: None,
         }
     }
 
@@ -330,12 +432,17 @@ impl App {
         }
         match self.init_nmp(&nsec) {
             Ok(()) => {
-                self.screen = Screen::App; self.focus = Focus::RoomList;
-                self.focus_stack.clear(); self.login_error = None;
+                self.screen = Screen::App;
+                self.focus = Focus::RoomList;
+                self.focus_stack.clear();
+                self.login_error = None;
                 self.connecting_since = Some(std::time::Instant::now());
-                self.connected_at = None; self.relay_error = None;
+                self.connected_at = None;
+                self.relay_error = None;
             }
-            Err(e) => { self.login_error = Some(format!("Sign-in failed: {e}")); }
+            Err(e) => {
+                self.login_error = Some(format!("Sign-in failed: {e}"));
+            }
         }
         // `nsec` is dropped here.
     }
@@ -347,17 +454,32 @@ impl App {
         let storage_str = storage.to_string_lossy().into_owned();
         unsafe {
             let app = nmp_ffi::nmp_app_new();
-            if app.is_null() { anyhow::bail!("nmp_app_new returned null"); }
+            if app.is_null() {
+                anyhow::bail!("nmp_app_new returned null");
+            }
             let c_storage = CString::new(storage_str)?;
             nmp_ffi::nmp_app_set_storage_path(app, c_storage.as_ptr());
             let mut handle: *mut TwentyNinerHandle = std::ptr::null_mut();
             let status = nmp_app_29er_register(app, &mut handle as *mut *mut TwentyNinerHandle);
-            if status != 0 { nmp_ffi::nmp_app_free(app); anyhow::bail!("register failed ({status})"); }
+            if status != 0 {
+                nmp_ffi::nmp_app_free(app);
+                anyhow::bail!("register failed ({status})");
+            }
             nmp_app_29er_declare_consumed_projections(app);
+            let mut profile_bridge = Box::new(ProfileUpdateBridge {
+                shared: Arc::clone(&self.shared),
+            });
+            let profile_context =
+                profile_bridge.as_mut() as *mut ProfileUpdateBridge as *mut c_void;
+            nmp_ffi::nmp_app_set_update_callback(app, profile_context, Some(on_nmp_update));
             let app_ref = &*app;
             // v0.8.0: `register_event_observer` is now `register_live_event_tap`.
-            let _ = app_ref.register_live_event_tap(Arc::clone(&self.shared.group_tree) as Arc<dyn KernelEventObserver>);
-            let _ = app_ref.register_live_event_tap(Arc::clone(&self.shared.discovered) as Arc<dyn KernelEventObserver>);
+            let _ = app_ref.register_live_event_tap(
+                Arc::clone(&self.shared.group_tree) as Arc<dyn KernelEventObserver>
+            );
+            let _ = app_ref.register_live_event_tap(
+                Arc::clone(&self.shared.discovered) as Arc<dyn KernelEventObserver>
+            );
             // The `JoinedGroupsProjection` captures the active pubkey at
             // construction, which is not known until sign-in resolves. Wire it
             // from an identity-change observer (registered BEFORE sign-in so we
@@ -367,15 +489,25 @@ impl App {
             let joined_shared = Arc::clone(&self.shared);
             let joined_relay = relay.clone();
             app_ref.register_identity_change_observer(move |pubkey| {
-                let Some(pk) = pubkey.filter(|p| !p.is_empty()) else { return; };
-                let Ok(mut slot) = joined_shared.joined.lock() else { return; };
-                if slot.is_some() { return; }
-                let proj = Arc::new(JoinedGroupsProjection::new_for_host(pk, joined_relay.clone()));
+                let Some(pk) = pubkey.filter(|p| !p.is_empty()) else {
+                    return;
+                };
+                let Ok(mut slot) = joined_shared.joined.lock() else {
+                    return;
+                };
+                if slot.is_some() {
+                    return;
+                }
+                let proj = Arc::new(JoinedGroupsProjection::new_for_host(
+                    pk,
+                    joined_relay.clone(),
+                ));
                 // SAFETY: the App owns `app` for the whole session and frees it
                 // only in `Drop` after the listener thread is gone. (The deref
                 // is covered by the enclosing `unsafe` block in `init_nmp`.)
                 let app = &*(joined_app_addr as *const NmpApp);
-                let _ = app.register_live_event_tap(Arc::clone(&proj) as Arc<dyn KernelEventObserver>);
+                let _ =
+                    app.register_live_event_tap(Arc::clone(&proj) as Arc<dyn KernelEventObserver>);
                 *slot = Some(proj);
             });
             let c_relay = CString::new(relay.clone())?;
@@ -384,9 +516,12 @@ impl App {
             nmp_ffi::nmp_app_start(app, 80, 4);
             let c_nsec = CString::new(nsec)?;
             nmp_ffi::nmp_app_signin_nsec(app, c_nsec.as_ptr(), 1);
-            if let Ok(mut slot) = self.shared.active_account.lock() { *slot = app_ref.active_account_handle(); }
+            if let Ok(mut slot) = self.shared.active_account.lock() {
+                *slot = app_ref.active_account_handle();
+            }
             self.app_ptr = app;
             self.handle = handle;
+            self.profile_update_bridge = Some(profile_bridge);
         }
         let discover_body = serde_json::json!({ "relay_url": relay }).to_string();
         self.dispatch_json("nmp.nip29.discover", &discover_body);
@@ -396,19 +531,25 @@ impl App {
 
     /// Store the latest poller view; clamp selection; reconcile the outbox.
     pub fn ingest_projection(&mut self, view: ProjectionView) {
-        let was_connected = self.latest.last_data_at
+        let was_connected = self
+            .latest
+            .last_data_at
             .map(|t| t.elapsed() < Duration::from_secs(30))
             .unwrap_or(false);
         self.latest = view;
+        self.sync_visible_profile_refs();
         // Record the first moment we see fresh relay data (drives the 2s Connected flash).
-        let is_connected_now = self.latest.last_data_at
+        let is_connected_now = self
+            .latest
+            .last_data_at
             .map(|t| t.elapsed() < Duration::from_secs(30))
             .unwrap_or(false);
         if !was_connected && is_connected_now && self.connected_at.is_none() {
             self.connected_at = Some(std::time::Instant::now());
         }
-        if self.latest.channel_tree.is_empty() { self.selected_index = 0; }
-        else if self.selected_index >= self.latest.channel_tree.len() {
+        if self.latest.channel_tree.is_empty() {
+            self.selected_index = 0;
+        } else if self.selected_index >= self.latest.channel_tree.len() {
             self.selected_index = self.latest.channel_tree.len() - 1;
         }
         self.reconcile_outbox();
@@ -459,6 +600,7 @@ impl App {
             selected_channel_id: self.selected_channel.clone(),
             selected_messages: self.latest.selected_messages.clone(),
             selected_members: self.latest.selected_members.clone(),
+            profiles: self.latest.profiles.clone(),
             is_admin: self.latest.is_admin,
             my_pubkey: self.latest.my_pubkey.clone(),
             publish_outbox: self.outbox.clone(),
@@ -485,7 +627,9 @@ impl App {
             screen: self.screen,
             help_open: self.help_open,
             status_message: self.status_message.as_ref().map(|(msg, _)| msg.clone()),
-            last_read_message_id: self.selected_channel.as_ref()
+            last_read_message_id: self
+                .selected_channel
+                .as_ref()
                 .and_then(|ch| self.read_markers.get(&ch.local_id).cloned()),
             spinner_tick: self.spinner_tick,
             connecting_since: self.connecting_since,
@@ -493,26 +637,77 @@ impl App {
         }
     }
 
+    fn sync_visible_profile_refs(&mut self) {
+        if self.app_ptr.is_null() {
+            return;
+        }
+        let visible: HashSet<String> = self
+            .latest
+            .selected_messages
+            .iter()
+            .map(|message| message.pubkey.clone())
+            .filter(|pubkey| !pubkey.is_empty())
+            .collect();
+        for pubkey in visible.difference(&self.claimed_profile_authors) {
+            self.resolve_profile_ref(pubkey);
+        }
+        for pubkey in self.claimed_profile_authors.difference(&visible) {
+            self.release_profile_ref(pubkey);
+        }
+        self.claimed_profile_authors = visible;
+    }
+
+    fn resolve_profile_ref(&self, pubkey: &str) {
+        if self.app_ptr.is_null() {
+            return;
+        }
+        let Ok(key) = CString::new(pubkey) else {
+            return;
+        };
+        let Ok(consumer) = CString::new("29er-tui.chat-author") else {
+            return;
+        };
+        nmp_ffi::nmp_app_resolve_profile_ref(self.app_ptr, key.as_ptr(), consumer.as_ptr());
+    }
+
+    fn release_profile_ref(&self, pubkey: &str) {
+        if self.app_ptr.is_null() {
+            return;
+        }
+        let Ok(key) = CString::new(pubkey) else {
+            return;
+        };
+        let Ok(consumer) = CString::new("29er-tui.chat-author") else {
+            return;
+        };
+        nmp_ffi::nmp_app_release_profile_ref(self.app_ptr, key.as_ptr(), consumer.as_ptr());
+    }
+
     pub fn select_channel(&mut self, group: GroupId) {
         // Freeze the read marker for the channel we are leaving so that messages
         // arriving while the user is away will appear after the separator on return.
         if let Some(old_ch) = &self.selected_channel {
             if let Some(last_msg) = self.latest.selected_messages.first() {
-                self.read_markers.insert(old_ch.local_id.clone(), last_msg.id.clone());
+                self.read_markers
+                    .insert(old_ch.local_id.clone(), last_msg.id.clone());
             }
         }
         let key = group.local_id.clone();
         if !self.chats.contains_key(&key) {
             // LRU eviction: drop the least-recently-used entry when at capacity.
             if self.chats.len() >= CHAT_LRU_LIMIT {
-                let lru_key = self.chats.iter()
+                let lru_key = self
+                    .chats
+                    .iter()
                     .min_by_key(|(_, e)| e.last_accessed)
                     .map(|(k, _)| k.clone());
                 if let Some(lru) = lru_key {
                     if let Some(evicted) = self.chats.remove(&lru) {
                         if let Some(obs_id) = evicted.observer_id {
                             if !self.app_ptr.is_null() {
-                                unsafe { (&*self.app_ptr).unregister_event_observer(obs_id); }
+                                unsafe {
+                                    (&*self.app_ptr).unregister_event_observer(obs_id);
+                                }
                             }
                         }
                     }
@@ -521,23 +716,37 @@ impl App {
             let chat = Arc::new(GroupChatProjection::new(group.clone()));
             let observer_id = if !self.app_ptr.is_null() {
                 let obs_id = unsafe {
-                    (&*self.app_ptr).register_live_event_tap(Arc::clone(&chat) as Arc<dyn KernelEventObserver>)
+                    (&*self.app_ptr)
+                        .register_live_event_tap(Arc::clone(&chat) as Arc<dyn KernelEventObserver>)
                 };
                 if let Ok(json) = serde_json::to_string(&group) {
-                    if let Ok(c) = CString::new(json) { nmp_app_29er_register_group_chat(self.app_ptr, c.as_ptr()); }
+                    if let Ok(c) = CString::new(json) {
+                        nmp_app_29er_register_group_chat(self.app_ptr, c.as_ptr());
+                    }
                 }
                 Some(obs_id)
             } else {
                 None
             };
-            self.chats.insert(key.clone(), ChatEntry { projection: chat, observer_id, last_accessed: Instant::now() });
+            self.chats.insert(
+                key.clone(),
+                ChatEntry {
+                    projection: chat,
+                    observer_id,
+                    last_accessed: Instant::now(),
+                },
+            );
         }
         if let Some(entry) = self.chats.get_mut(&key) {
             entry.last_accessed = Instant::now();
             let chat = Arc::clone(&entry.projection);
-            if let Ok(mut slot) = self.shared.selected_chat.lock() { *slot = Some(chat); }
+            if let Ok(mut slot) = self.shared.selected_chat.lock() {
+                *slot = Some(chat);
+            }
         }
-        if let Ok(mut g) = self.shared.selected_group.lock() { *g = Some(group.clone()); }
+        if let Ok(mut g) = self.shared.selected_group.lock() {
+            *g = Some(group.clone());
+        }
         self.shared.group_tree.mark_read(&group.local_id);
         self.selected_channel = Some(group);
         self.message_scroll = 0;
@@ -549,8 +758,13 @@ impl App {
 
     pub fn send_message(&mut self, body: String, mention_pubkeys: Vec<String>) {
         let trimmed = body.trim().to_string();
-        if trimmed.is_empty() { return; }
-        let Some(group) = self.selected_channel.clone() else { self.errors.push("No channel selected".to_string()); return; };
+        if trimmed.is_empty() {
+            return;
+        }
+        let Some(group) = self.selected_channel.clone() else {
+            self.errors.push("No channel selected".to_string());
+            return;
+        };
         // Assign an optimistic local id immediately so the item is identifiable
         // before NMP echoes back a correlation_id.
         let optimistic_id = generate_local_id();
@@ -558,7 +772,8 @@ impl App {
             "group": group,
             "content": trimmed,
             "mention_pubkeys": mention_pubkeys,
-        }).to_string();
+        })
+        .to_string();
         let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
         let mut item = PublishOutboxItem {
             correlation_id: optimistic_id,
@@ -578,21 +793,40 @@ impl App {
     }
 
     pub fn retry_outbox(&mut self, correlation_id: String) {
-        let Some(idx) = self.outbox.iter().position(|i| i.correlation_id == correlation_id) else { return; };
+        let Some(idx) = self
+            .outbox
+            .iter()
+            .position(|i| i.correlation_id == correlation_id)
+        else {
+            return;
+        };
         let (content, local_id, mention_pubkeys) = {
             let it = &self.outbox[idx];
-            (it.content.clone(), it.group_local_id.clone(), it.mention_pubkeys.clone())
+            (
+                it.content.clone(),
+                it.group_local_id.clone(),
+                it.mention_pubkeys.clone(),
+            )
         };
-        let Some(group) = self.selected_channel.clone().filter(|g| g.local_id == local_id) else { return; };
+        let Some(group) = self
+            .selected_channel
+            .clone()
+            .filter(|g| g.local_id == local_id)
+        else {
+            return;
+        };
         let json = serde_json::json!({
             "group": group,
             "content": content,
             "mention_pubkeys": mention_pubkeys,
-        }).to_string();
+        })
+        .to_string();
         let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
         let item = &mut self.outbox[idx];
-        item.status = OutboxStatus::Pending; item.error = None;
-        item.event_id = None; item.dispatched_at = Instant::now();
+        item.status = OutboxStatus::Pending;
+        item.error = None;
+        item.event_id = None;
+        item.dispatched_at = Instant::now();
         Self::apply_dispatch_result(item, result);
     }
 
@@ -611,9 +845,15 @@ impl App {
                         item.error = Some(err.to_string());
                     }
                 }
-                Err(_) => { item.status = OutboxStatus::Failed; item.error = Some("bad dispatch reply".to_string()); }
+                Err(_) => {
+                    item.status = OutboxStatus::Failed;
+                    item.error = Some("bad dispatch reply".to_string());
+                }
             },
-            None => { item.status = OutboxStatus::Failed; item.error = Some("dispatch failed".to_string()); }
+            None => {
+                item.status = OutboxStatus::Failed;
+                item.error = Some("dispatch failed".to_string());
+            }
         }
     }
 
@@ -635,7 +875,9 @@ impl App {
         self.close_form();
     }
     pub fn put_user(&mut self, group: GroupId, target_pubkey: String, role: Option<String>) {
-        let body = serde_json::json!({ "group": group, "target_pubkey": target_pubkey, "role": role }).to_string();
+        let body =
+            serde_json::json!({ "group": group, "target_pubkey": target_pubkey, "role": role })
+                .to_string();
         self.set_status_message("Updating member\u{2026}".to_string());
         self.dispatch_json("nmp.nip29.put_user", &body);
         self.close_form();
@@ -645,7 +887,8 @@ impl App {
         let body = serde_json::json!({
             "group": { "host_relay_url": parent.host_relay_url, "local_id": local_id },
             "name": name, "visibility": "public", "access": "open", "parent": parent.local_id,
-        }).to_string();
+        })
+        .to_string();
         self.set_status_message("Creating channel\u{2026}".to_string());
         self.dispatch_json("nmp.nip29.create_public_group", &body);
         self.close_form();
@@ -656,14 +899,24 @@ impl App {
         self.dispatch_json("nmp.nip29.set_parent", &body);
         self.close_form();
     }
-    pub fn show_members(&mut self, group: GroupId) { let _ = group; }
+    pub fn show_members(&mut self, group: GroupId) {
+        let _ = group;
+    }
 
     fn dispatch_json(&mut self, namespace: &str, body: &str) -> Option<String> {
-        if self.app_ptr.is_null() { return None; }
-        let (Ok(ns), Ok(b)) = (CString::new(namespace), CString::new(body)) else { return None; };
+        if self.app_ptr.is_null() {
+            return None;
+        }
+        let (Ok(ns), Ok(b)) = (CString::new(namespace), CString::new(body)) else {
+            return None;
+        };
         let res = nmp_app_29er_dispatch_action_bytes(self.app_ptr, ns.as_ptr(), b.as_ptr());
-        if res.is_null() { return None; }
-        let out = unsafe { CStr::from_ptr(res) }.to_string_lossy().into_owned();
+        if res.is_null() {
+            return None;
+        }
+        let out = unsafe { CStr::from_ptr(res) }
+            .to_string_lossy()
+            .into_owned();
         nmp_free_string(res);
         Some(out)
     }
@@ -672,7 +925,9 @@ impl App {
     /// If a mention channel is found it is immediately selected.
     pub fn jump_to_next_mention(&mut self) {
         let len = self.latest.channel_tree.len();
-        if len == 0 { return; }
+        if len == 0 {
+            return;
+        }
         for i in 1..=len {
             let idx = (self.selected_index + i) % len;
             if self.latest.channel_tree[idx].tier == ChannelTier::Mention {
@@ -686,20 +941,39 @@ impl App {
 
     pub fn navigate(&mut self, delta: isize) {
         let len = self.latest.channel_tree.len();
-        if len == 0 { return; }
-        self.selected_index = (self.selected_index as isize + delta).rem_euclid(len as isize) as usize;
+        if len == 0 {
+            return;
+        }
+        self.selected_index =
+            (self.selected_index as isize + delta).rem_euclid(len as isize) as usize;
     }
     pub fn navigate_top(&mut self) {
-        if !self.latest.channel_tree.is_empty() { self.selected_index = 0; }
+        if !self.latest.channel_tree.is_empty() {
+            self.selected_index = 0;
+        }
     }
     pub fn navigate_bottom(&mut self) {
         let len = self.latest.channel_tree.len();
-        if len > 0 { self.selected_index = len - 1; }
+        if len > 0 {
+            self.selected_index = len - 1;
+        }
     }
-    pub fn channel_at_cursor(&self) -> Option<GroupId> { self.latest.channel_tree.get(self.selected_index).map(|c| c.group_id.clone()) }
-    pub fn scroll_messages(&mut self, delta: i32) { let n = self.message_scroll as i32 + delta; self.message_scroll = n.max(0) as u16; }
-    pub fn focus(&self) -> Focus { self.focus }
-    pub fn set_focus(&mut self, f: Focus) { self.focus = f; }
+    pub fn channel_at_cursor(&self) -> Option<GroupId> {
+        self.latest
+            .channel_tree
+            .get(self.selected_index)
+            .map(|c| c.group_id.clone())
+    }
+    pub fn scroll_messages(&mut self, delta: i32) {
+        let n = self.message_scroll as i32 + delta;
+        self.message_scroll = n.max(0) as u16;
+    }
+    pub fn focus(&self) -> Focus {
+        self.focus
+    }
+    pub fn set_focus(&mut self, f: Focus) {
+        self.focus = f;
+    }
     /// Forward Tab cycle (RoomList → Chat → Composer → RoomList). No-op in Palette/Modal.
     pub fn cycle_focus(&mut self) {
         if matches!(self.focus, Focus::RoomList | Focus::Chat | Focus::Composer) {
@@ -713,12 +987,21 @@ impl App {
         }
     }
     /// Push current focus onto the stack (e.g. before opening palette or modal).
-    pub fn push_focus(&mut self) { self.focus_stack.push(self.focus); }
+    pub fn push_focus(&mut self) {
+        self.focus_stack.push(self.focus);
+    }
     /// Pop previous focus from the stack. Returns `true` if something was restored.
     pub fn pop_focus(&mut self) -> bool {
-        if let Some(f) = self.focus_stack.pop() { self.focus = f; true } else { false }
+        if let Some(f) = self.focus_stack.pop() {
+            self.focus = f;
+            true
+        } else {
+            false
+        }
     }
-    pub fn screen(&self) -> Screen { self.screen }
+    pub fn screen(&self) -> Screen {
+        self.screen
+    }
     /// Open the command palette, pushing current focus onto the stack.
     pub fn set_palette(&mut self, open: bool) {
         if open && self.focus != Focus::Palette {
@@ -732,7 +1015,9 @@ impl App {
             }
         }
     }
-    pub fn palette_open(&self) -> bool { self.palette_open }
+    pub fn palette_open(&self) -> bool {
+        self.palette_open
+    }
     /// Open a form, collapsing any open palette and pushing focus onto the stack.
     pub fn open_form(&mut self, f: FormKind) {
         // If palette is the current focus, close it and restore underlying focus first.
@@ -753,12 +1038,24 @@ impl App {
             self.focus = self.focus_stack.pop().unwrap_or(Focus::RoomList);
         }
     }
-    pub fn active_form(&self) -> Option<&FormKind> { self.active_form.as_ref() }
-    pub fn open_help(&mut self) { self.help_open = true; }
-    pub fn close_help(&mut self) { self.help_open = false; }
-    pub fn is_help_open(&self) -> bool { self.help_open }
-    pub fn quit(&mut self) { self.should_quit = true; }
-    pub fn should_quit(&self) -> bool { self.should_quit }
+    pub fn active_form(&self) -> Option<&FormKind> {
+        self.active_form.as_ref()
+    }
+    pub fn open_help(&mut self) {
+        self.help_open = true;
+    }
+    pub fn close_help(&mut self) {
+        self.help_open = false;
+    }
+    pub fn is_help_open(&self) -> bool {
+        self.help_open
+    }
+    pub fn quit(&mut self) {
+        self.should_quit = true;
+    }
+    pub fn should_quit(&self) -> bool {
+        self.should_quit
+    }
 
     // ── optimistic UX helpers ────────────────────────────────────────────────
 
@@ -801,22 +1098,83 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
-        if !self.handle.is_null() { nmp_app_29er_unregister(self.handle); }
-        if !self.app_ptr.is_null() { nmp_ffi::nmp_app_free(self.app_ptr); }
+        let claimed: Vec<String> = self.claimed_profile_authors.iter().cloned().collect();
+        for pubkey in claimed {
+            self.release_profile_ref(&pubkey);
+        }
+        self.claimed_profile_authors.clear();
+        if !self.app_ptr.is_null() {
+            nmp_ffi::nmp_app_set_update_callback(self.app_ptr, std::ptr::null_mut(), None);
+        }
+        self.profile_update_bridge = None;
+        if !self.handle.is_null() {
+            nmp_app_29er_unregister(self.handle);
+        }
+        if !self.app_ptr.is_null() {
+            nmp_ffi::nmp_app_free(self.app_ptr);
+        }
+    }
+}
+
+impl TuiProfile {
+    fn from_card(pubkey: String, card: nmp_core::typed_projections::ProfileCardModel) -> Self {
+        let display_name = card
+            .display_name
+            .or(card.name)
+            .filter(|value| !value.is_empty());
+        Self {
+            pubkey: pubkey.clone(),
+            display_name,
+            npub: Some(nmp_core::display::to_npub(&pubkey)),
+            picture_url: card.picture_url.filter(|value| !value.is_empty()),
+        }
+    }
+}
+
+extern "C" fn on_nmp_update(context: *mut c_void, payload: *const u8, len: usize) {
+    if context.is_null() || payload.is_null() {
+        return;
+    }
+    let bridge = unsafe { &*(context as *const ProfileUpdateBridge) };
+    let bytes = unsafe { std::slice::from_raw_parts(payload, len) };
+    let Ok(envelope) = nmp_core::decode_snapshot_envelope(bytes) else {
+        return;
+    };
+    let Ok(typed) = nmp_core::decode_snapshot_typed_projections(bytes) else {
+        return;
+    };
+    let Some(entry) = typed.iter().find(|entry| entry.key == REFS_PROFILE_KEY) else {
+        return;
+    };
+    if let Ok(mut store) = bridge.shared.profile_refs.lock() {
+        store.apply_sidecar(&entry.payload, envelope.session_id, envelope.snapshot_epoch);
     }
 }
 
 fn generate_local_id() -> String {
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     format!("ch-{n:x}")
 }
 
 fn name_for(d: &DiscoveredGroupsSnapshot, id: &str) -> String {
-    d.groups.iter().find(|g| g.group_id == id).and_then(|g| g.name.clone())
-        .filter(|n| !n.is_empty()).unwrap_or_else(|| id.to_string())
+    d.groups
+        .iter()
+        .find(|g| g.group_id == id)
+        .and_then(|g| g.name.clone())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| id.to_string())
 }
 
-fn make_item(g: &DiscoveredGroup, depth: usize, tree: &GroupTreeMessageState, is_branch: bool, _my_pubkey: Option<&str>) -> ChannelListItem {
+fn make_item(
+    g: &DiscoveredGroup,
+    depth: usize,
+    tree: &GroupTreeMessageState,
+    is_branch: bool,
+    _my_pubkey: Option<&str>,
+) -> ChannelListItem {
     let last = tree.last_message_for(&g.group_id);
     let unread = tree.unread_for(&g.group_id);
     let tier = if unread > 0 {
@@ -833,12 +1191,20 @@ fn make_item(g: &DiscoveredGroup, depth: usize, tree: &GroupTreeMessageState, is
         let recently_active = last
             .map(|m| m.created_at >= now.saturating_sub(3600))
             .unwrap_or(false);
-        if recently_active { ChannelTier::Activity } else { ChannelTier::Normal }
+        if recently_active {
+            ChannelTier::Activity
+        } else {
+            ChannelTier::Normal
+        }
     };
     ChannelListItem {
         group_id: GroupId::new(g.host_relay_url.clone(), g.group_id.clone()),
         local_id: g.group_id.clone(),
-        name: g.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| g.group_id.clone()),
+        name: g
+            .name
+            .clone()
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| g.group_id.clone()),
         depth,
         unread,
         member_count: g.member_count,
@@ -854,42 +1220,68 @@ fn make_item(g: &DiscoveredGroup, depth: usize, tree: &GroupTreeMessageState, is
 /// channel list (issue #3). Roots and children are ordered alphabetically.
 /// `my_pubkey` is forwarded to `make_item` for mention-tier detection.
 #[must_use]
-pub fn derive_channel_tree(discovered: &DiscoveredGroupsSnapshot, tree_state: &GroupTreeMessageState, my_pubkey: Option<&str>) -> Vec<ChannelListItem> {
+pub fn derive_channel_tree(
+    discovered: &DiscoveredGroupsSnapshot,
+    tree_state: &GroupTreeMessageState,
+    my_pubkey: Option<&str>,
+) -> Vec<ChannelListItem> {
     use std::collections::{BTreeMap, BTreeSet};
-    let known: BTreeSet<&str> = discovered.groups.iter().map(|g| g.group_id.as_str()).collect();
+    let known: BTreeSet<&str> = discovered
+        .groups
+        .iter()
+        .map(|g| g.group_id.as_str())
+        .collect();
     let mut parent_of: BTreeMap<&str, &str> = BTreeMap::new();
     let mut children_of: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for g in &discovered.groups {
         if let Some(p) = g.parent.as_deref() {
             if p != g.group_id && known.contains(p) {
                 parent_of.insert(&g.group_id, p);
-                children_of.entry(p).or_default().insert(&g.group_id as &str);
+                children_of
+                    .entry(p)
+                    .or_default()
+                    .insert(&g.group_id as &str);
             }
         }
         for c in &g.children {
             let c = c.as_str();
             if c != g.group_id && known.contains(c) {
-                children_of.entry(&g.group_id as &str).or_default().insert(c);
+                children_of
+                    .entry(&g.group_id as &str)
+                    .or_default()
+                    .insert(c);
                 parent_of.entry(c).or_insert(&g.group_id as &str);
             }
         }
     }
-    let by_id: BTreeMap<&str, &DiscoveredGroup> = discovered.groups.iter().map(|g| (g.group_id.as_str(), g)).collect();
-    let mut roots: Vec<&str> = discovered.groups.iter().map(|g| g.group_id.as_str())
-        .filter(|id| !parent_of.contains_key(id)).collect();
+    let by_id: BTreeMap<&str, &DiscoveredGroup> = discovered
+        .groups
+        .iter()
+        .map(|g| (g.group_id.as_str(), g))
+        .collect();
+    let mut roots: Vec<&str> = discovered
+        .groups
+        .iter()
+        .map(|g| g.group_id.as_str())
+        .filter(|id| !parent_of.contains_key(id))
+        .collect();
     roots.sort_by_key(|id| name_for(discovered, id).to_lowercase());
     let mut out = Vec::new();
     let mut stack: Vec<(&str, usize)> = roots.iter().rev().map(|id| (*id, 0usize)).collect();
     let mut visited: BTreeSet<&str> = BTreeSet::new();
     while let Some((id, depth)) = stack.pop() {
-        if !visited.insert(id) { continue; }
+        if !visited.insert(id) {
+            continue;
+        }
         if let Some(g) = by_id.get(id) {
             let branch = children_of.get(id).map(|c| !c.is_empty()).unwrap_or(false);
             out.push(make_item(g, depth, tree_state, branch, my_pubkey));
             if let Some(children) = children_of.get(id) {
                 let mut kids: Vec<&str> = children.iter().copied().collect();
                 kids.sort_by_key(|cid| name_for(discovered, cid).to_lowercase());
-                for cid in kids.into_iter().rev() { stack.push((cid, depth + 1)); }
+                for cid in kids.into_iter().rev() {
+                    stack.push((cid, depth + 1));
+                }
             }
         }
     }
@@ -905,19 +1297,39 @@ mod tests {
 
     fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
         DiscoveredGroup {
-            group_id: id.to_string(), host_relay_url: "wss://h".to_string(),
-            name: Some(id.to_string()), picture: None, about: None,
-            member_count: 3, admin_count: 1, public: true, open: true,
-            parent: parent.map(str::to_string), children: children.iter().map(|s| s.to_string()).collect(),
+            group_id: id.to_string(),
+            host_relay_url: "wss://h".to_string(),
+            name: Some(id.to_string()),
+            picture: None,
+            about: None,
+            member_count: 3,
+            admin_count: 1,
+            public: true,
+            open: true,
+            parent: parent.map(str::to_string),
+            children: children.iter().map(|s| s.to_string()).collect(),
         }
     }
     fn snap() -> DiscoveredGroupsSnapshot {
-        DiscoveredGroupsSnapshot { host_relay_url: "wss://h".to_string(),
-            groups: vec![group("root", None, &["child"]), group("child", Some("root"), &[]), group("alpha", None, &[])] }
+        DiscoveredGroupsSnapshot {
+            host_relay_url: "wss://h".to_string(),
+            groups: vec![
+                group("root", None, &["child"]),
+                group("child", Some("root"), &[]),
+                group("alpha", None, &[]),
+            ],
+        }
     }
     fn evt(id: &str, g: &str, ts: u64, c: &str) -> KernelEvent {
-        KernelEvent { id: id.to_string(), author: "pk".to_string(), kind: KIND_CHAT_MESSAGE, created_at: ts,
-            tags: vec![vec!["h".to_string(), g.to_string()]], content: c.to_string(), relay_provenance: Vec::new() }
+        KernelEvent {
+            id: id.to_string(),
+            author: "pk".to_string(),
+            kind: KIND_CHAT_MESSAGE,
+            created_at: ts,
+            tags: vec![vec!["h".to_string(), g.to_string()]],
+            content: c.to_string(),
+            relay_provenance: Vec::new(),
+        }
     }
     fn make_app() -> (App, tokio::sync::mpsc::UnboundedReceiver<ProjectionView>) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ProjectionView>();
@@ -929,8 +1341,14 @@ mod tests {
     #[test]
     fn tree_is_depth_annotated_and_alpha_ordered() {
         let items = derive_channel_tree(&snap(), &GroupTreeProjection::new().snapshot(), None);
-        let ids: Vec<_> = items.iter().map(|i| (i.local_id.as_str(), i.depth, i.is_branch)).collect();
-        assert_eq!(ids, vec![("alpha", 0, false), ("root", 0, true), ("child", 1, false)]);
+        let ids: Vec<_> = items
+            .iter()
+            .map(|i| (i.local_id.as_str(), i.depth, i.is_branch))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![("alpha", 0, false), ("root", 0, true), ("child", 1, false)]
+        );
     }
 
     #[test]
@@ -954,12 +1372,14 @@ mod tests {
         // Three-node tree: root -> child; plus an independent alpha root.
         // Expected order: alpha(d=0) < root(d=0) < child(d=1)
         let items = derive_channel_tree(&snap(), &GroupTreeProjection::new().snapshot(), None);
-        let result: Vec<_> = items.iter().map(|i| (i.local_id.as_str(), i.depth, i.is_branch)).collect();
-        assert_eq!(result, vec![
-            ("alpha", 0, false),
-            ("root",  0, true),
-            ("child", 1, false),
-        ]);
+        let result: Vec<_> = items
+            .iter()
+            .map(|i| (i.local_id.as_str(), i.depth, i.is_branch))
+            .collect();
+        assert_eq!(
+            result,
+            vec![("alpha", 0, false), ("root", 0, true), ("child", 1, false),]
+        );
     }
 
     /// T2: derive_channel_tree surfaces unread count and last-preview text
@@ -968,7 +1388,12 @@ mod tests {
     fn test_derive_channel_tree_unread_preview() {
         let proj = GroupTreeProjection::new();
         // Two messages on "child"; second is newer.
-        proj.on_kernel_event(&evt("e1", "child", 100, "first message that is kind of long text here"));
+        proj.on_kernel_event(&evt(
+            "e1",
+            "child",
+            100,
+            "first message that is kind of long text here",
+        ));
         proj.on_kernel_event(&evt("e2", "child", 200, "short"));
         let items = derive_channel_tree(&snap(), &proj.snapshot(), None);
         let child = items.iter().find(|i| i.local_id == "child").unwrap();
@@ -1003,6 +1428,7 @@ mod tests {
                 admin: true,
                 role: None,
             }],
+            profiles: HashMap::new(),
             is_admin: true,
             my_pubkey: Some("pk1".to_string()),
             publish_outbox: vec![PublishOutboxItem {
@@ -1015,7 +1441,9 @@ mod tests {
                 event_id: None,
                 dispatched_at: Instant::now(),
             }],
-            identity_state: IdentityState::LoggedIn { npub: "npub1test".to_string() },
+            identity_state: IdentityState::LoggedIn {
+                npub: "npub1test".to_string(),
+            },
             relay_state: RelayState::Connected,
             errors: vec!["oops".to_string()],
             selected_index: 3,
@@ -1047,7 +1475,9 @@ mod tests {
         assert_eq!(snap.selected_members.len(), 1);
         assert_eq!(snap.publish_outbox.len(), 1);
         assert_eq!(snap.publish_outbox[0].status, OutboxStatus::Pending);
-        assert!(matches!(snap.identity_state, IdentityState::LoggedIn { ref npub } if npub == "npub1test"));
+        assert!(
+            matches!(snap.identity_state, IdentityState::LoggedIn { ref npub } if npub == "npub1test")
+        );
         assert!(matches!(snap.active_form, Some(FormKind::JoinWithCode(_))));
         assert!(snap.login_error.is_none());
         assert_eq!(snap.status_message.as_deref(), Some("Joining room\u{2026}"));
@@ -1060,12 +1490,17 @@ mod tests {
         // Default is LoggedOut
         assert_eq!(IdentityState::default(), IdentityState::LoggedOut);
         // ProjectionView also defaults to LoggedOut
-        assert_eq!(ProjectionView::default().identity_state, IdentityState::LoggedOut);
+        assert_eq!(
+            ProjectionView::default().identity_state,
+            IdentityState::LoggedOut
+        );
 
         // LoggedOut != LoggingIn != LoggedIn
         let logged_out = IdentityState::LoggedOut;
         let logging_in = IdentityState::LoggingIn;
-        let logged_in = IdentityState::LoggedIn { npub: "npub1abc".to_string() };
+        let logged_in = IdentityState::LoggedIn {
+            npub: "npub1abc".to_string(),
+        };
         assert_ne!(logged_out, logging_in);
         assert_ne!(logging_in, logged_in);
         assert_ne!(logged_out, logged_in);
@@ -1106,7 +1541,10 @@ mod tests {
 
         // selected_channel_id in the snapshot reflects the last selection
         assert_eq!(
-            app.snapshot().selected_channel_id.as_ref().map(|g| g.local_id.as_str()),
+            app.snapshot()
+                .selected_channel_id
+                .as_ref()
+                .map(|g| g.local_id.as_str()),
             Some("channel-b"),
         );
     }
@@ -1145,8 +1583,11 @@ mod tests {
 
         let snap = app.snapshot();
         assert_eq!(snap.publish_outbox.len(), 1);
-        assert_eq!(snap.publish_outbox[0].status, OutboxStatus::Confirmed,
-            "pending item must become Confirmed once matching message with correct pubkey arrives");
+        assert_eq!(
+            snap.publish_outbox[0].status,
+            OutboxStatus::Confirmed,
+            "pending item must become Confirmed once matching message with correct pubkey arrives"
+        );
     }
 
     /// T6b_guard: reconcile_outbox does NOT confirm a Pending item when my_pubkey
@@ -1181,8 +1622,11 @@ mod tests {
         app.ingest_projection(view);
 
         let snap = app.snapshot();
-        assert_eq!(snap.publish_outbox[0].status, OutboxStatus::Pending,
-            "item must remain Pending when my_pubkey is not known");
+        assert_eq!(
+            snap.publish_outbox[0].status,
+            OutboxStatus::Pending,
+            "item must remain Pending when my_pubkey is not known"
+        );
     }
 
     /// T6b: a Failed outbox item is NOT promoted even if a matching message arrives.
@@ -1213,8 +1657,11 @@ mod tests {
         app.ingest_projection(view);
 
         let snap = app.snapshot();
-        assert_eq!(snap.publish_outbox[0].status, OutboxStatus::Failed,
-            "a Failed item must NOT be re-confirmed by reconcile");
+        assert_eq!(
+            snap.publish_outbox[0].status,
+            OutboxStatus::Failed,
+            "a Failed item must NOT be re-confirmed by reconcile"
+        );
     }
 
     /// T7: Focus::next/prev cycle RoomList -> Chat -> Composer -> RoomList.
@@ -1252,8 +1699,13 @@ mod tests {
             group_id: GroupId::new("wss://h", id),
             local_id: id.to_string(),
             name: id.to_string(),
-            depth: 0, unread: 0, member_count: 0, admin_count: 0,
-            is_branch: false, last_preview: None, last_timestamp: None,
+            depth: 0,
+            unread: 0,
+            member_count: 0,
+            admin_count: 0,
+            is_branch: false,
+            last_preview: None,
+            last_timestamp: None,
             tier: ChannelTier::Normal,
         };
         let mut view = ProjectionView::default();
@@ -1296,7 +1748,10 @@ mod tests {
 
         // tick() before expiry must NOT clear it.
         app.tick();
-        assert!(app.snapshot().status_message.is_some(), "message cleared too early");
+        assert!(
+            app.snapshot().status_message.is_some(),
+            "message cleared too early"
+        );
 
         // Back-date the timestamp to simulate 2+ seconds having passed.
         if let Some((_, ref mut ts)) = app.status_message {

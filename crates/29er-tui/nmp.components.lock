@@ -1,0 +1,104 @@
+schema_version = 1
+
+[[components]]
+id = "tui/content-core"
+version = "0.1.1"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_content/content_tree_wire.rs"
+role = "source"
+source = "tui/content-core/content_tree_wire.rs"
+source_sha256 = "7fa5902edc57dec204f8b3ba860d71d9e6b9419572e5a611005a0cceaff7af5c"
+
+[[components.files]]
+path = "src/components/nostr_content/content_render_data.rs"
+role = "source"
+source = "tui/content-core/content_render_data.rs"
+source_sha256 = "4b3204f1783b30d44f751fb5a20183b7100b7e61d214c01a2df991d7ea3fa7c0"
+
+[[components.files]]
+path = "src/components/nostr_content/ratatui_text_wrap.rs"
+role = "source"
+source = "tui/content-core/ratatui_text_wrap.rs"
+source_sha256 = "a3465ba9cc6cc0a0dcb8c9bd5d0c59680656fb3ce59e6edc4266488e27b60f9a"
+
+[[components]]
+id = "tui/content-kind-registry"
+version = "0.1.0"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_content/content_kind_registry/mod.rs"
+role = "source"
+source = "tui/content-kind-registry/mod.rs"
+source_sha256 = "15d48a47b0e6b1eeacb25e4539043305df28e9d1301b7a09df20d8701795aef6"
+
+[[components.files]]
+path = "src/components/nostr_content/content_kind_registry/kind_renderer.rs"
+role = "source"
+source = "tui/content-kind-registry/kind_renderer.rs"
+source_sha256 = "3f954c363f5961ac00ae0a52cb0abd67471bbf482c10e0057ef53f5d05c174f9"
+
+[[components.files]]
+path = "src/components/nostr_content/content_kind_registry/nostr_kind_registry.rs"
+role = "source"
+source = "tui/content-kind-registry/nostr_kind_registry.rs"
+source_sha256 = "b8fe788be88599f562ca29476eb5b46de724b652a14b4c09fe2dbee22068fc25"
+
+[[components.files]]
+path = "src/components/nostr_content/content_kind_registry/embed_chrome_container.rs"
+role = "source"
+source = "tui/content-kind-registry/embed_chrome_container.rs"
+source_sha256 = "c2fd8188e0cd8be23efa8c1982550f12a6ab920b4ce48505a8b4322fd6510636"
+
+[[components.files]]
+path = "src/components/nostr_content/content_kind_registry/embedded_event.rs"
+role = "source"
+source = "tui/content-kind-registry/embedded_event.rs"
+source_sha256 = "57aedc02c1fc7ca85cd03157f8709a553a293ca5b8e43a19ee8acbaccf1e86ff"
+
+[[components]]
+id = "tui/content-mention-chip"
+version = "0.1.1"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_content/nostr_mention_chip.rs"
+role = "source"
+source = "tui/content-mention-chip/nostr_mention_chip.rs"
+source_sha256 = "ca164148de6f2a473ccd4db04b694089350a4373e8ce17fa295c5be6338b0bc8"
+
+[[components]]
+id = "tui/content-media-grid"
+version = "0.1.1"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_content/nostr_media_grid.rs"
+role = "source"
+source = "tui/content-media-grid/nostr_media_grid.rs"
+source_sha256 = "266826e8f721a634684e54f8fbcadddbd6edbb19ac7e495258528eb0ed172a8e"
+
+[[components]]
+id = "tui/content-view"
+version = "0.2.0"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_content/nostr_content_view.rs"
+role = "source"
+source = "tui/content-view/nostr_content_view.rs"
+source_sha256 = "6a503b40bb9bdb16ec4b3ce323f884cc25dd0b598c46c8cfe47940d7eeb4bf04"
+
+[[components.files]]
+path = "src/components/nostr_content/nostr_content_widget.rs"
+role = "source"
+source = "tui/content-view/nostr_content_widget.rs"
+source_sha256 = "d8d7c964c7eb20c2e3b6f53a0eeb47ac249e6a72356f8dc04879baf4b058bdd4"
+

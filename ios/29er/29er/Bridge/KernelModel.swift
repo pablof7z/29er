@@ -68,6 +68,11 @@ final class KernelModel: ObservableObject {
     /// `groupDefaults` accessor.
     @Published var typedGroupDefaults: GroupDefaultsSnapshot?
 
+    /// Monotonic UI invalidation token for `refs.profile` row commits. The
+    /// actual rows live in `profileRefs`; this published scalar redraws views
+    /// that read the registry `NostrProfileHost` environment.
+    @Published var profileRefsRevision: UInt64 = 0
+
     // ── Identity routing (S02) ─────────────────────────────────────────────
 
     /// Root-routing state derived from `typedActiveAccount` on every tick,
@@ -132,6 +137,8 @@ final class KernelModel: ObservableObject {
     /// trigger). Until then the snapshot key is unwired and the store stays
     /// empty. Touching it every tick keeps `apply` symmetric.
     private(set) lazy var discoveredGroups = DiscoveredGroupsStore(kernel: kernel)
+
+    let profileRefs = ProfileRefStore()
 
     init() {
         if let v = ProcessInfo.processInfo.environment["NMP_VISIBLE_LIMIT"].flatMap(UInt32.init) {

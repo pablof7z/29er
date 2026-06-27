@@ -29,6 +29,14 @@ extension KernelModel {
         typedPublishOutbox = result.typedPublishOutbox
         typedActiveAccount = result.typedActiveAccount
         typedGroupDefaults = result.typedGroupDefaults
+        if let refsProfile = result.typedProjectionPayload(key: "refs.profile"),
+           profileRefs.merge(
+               payload: refsProfile,
+               sessionId: result.sessionId,
+               snapshotEpoch: result.snapshotEpoch
+           ) {
+            profileRefsRevision &+= 1
+        }
 
         // S02 — derive `identityState` from the `active_account` typed
         // projection. The first tick with `rev > 0` collapses `unknown` to
@@ -107,6 +115,8 @@ extension KernelModel {
         typedPublishOutbox = nil
         typedActiveAccount = nil
         typedGroupDefaults = nil
+        profileRefs.reset()
+        profileRefsRevision &+= 1
     }
 
     /// Active account pubkey (`nil` ⇒ no active account). Read through the
@@ -143,5 +153,12 @@ extension KernelModel {
     /// shell reads it instead of hardcoding a relay URL (D7).
     var groupDefaults: GroupDefaultsSnapshot {
         typedGroupDefaults ?? .empty
+    }
+}
+
+@MainActor
+extension KernelUpdateResult {
+    func typedProjectionPayload(key: String) -> Data? {
+        typedProjections.first(where: { $0.key == key })?.payload
     }
 }

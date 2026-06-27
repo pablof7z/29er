@@ -80,6 +80,7 @@ struct MainScaffold: View {
     var body: some View {
         NavigationStack {
             GroupTreeView()
+                .environment(\.nostrProfileHost, model)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(role: .destructive, action: model.logout) {
