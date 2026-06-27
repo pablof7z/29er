@@ -411,10 +411,9 @@ fn open_group_discovery_with_tree(
 
     // 3. 29er-owned kind:9 unread/preview reader — folding kind:9 into per-group
     //    unread + last-message preview is legitimate per-app composition. It is
-    //    sourced the doctrine-correct way: a hydrating, relay-pinned observed
-    //    projection (NOT `register_live_event_tap`, NOT a raw unhydrated/never-
-    //    closed `open_interest`). This gives the same muted -> replay-cached ->
-    //    activate-live sequence the NMP doors use, so a tree opened after kind:9
+    //    sourced through a hydrating, relay-pinned observed projection with
+    //    explicit lifecycle ownership. This gives the same muted -> replay-cached
+    //    -> activate-live sequence the NMP doors use, so a tree opened after kind:9
     //    was already cached hydrates correctly (#2088), and it is torn down via
     //    `close_observed_projection`. Tighter `#h` filtering is impossible at
     //    discovery-open time (group ids are unknown until the catalog arrives),
