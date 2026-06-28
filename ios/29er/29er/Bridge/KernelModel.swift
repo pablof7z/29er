@@ -45,7 +45,7 @@ final class KernelModel: ObservableObject {
     /// this from the NIP-29 discovery projection; Swift only renders it.
     @Published var typedGroupTree: GroupTreeSnapshot?
 
-    /// Typed `nmp.nip29.group_timeline` sidecar (`NGTL`). Rust owns the
+    /// Typed `nmp.nip29.group_events` sidecar (`NGEV`). Rust owns the
     /// selected group's event filter and newest-first ordering; Swift renders it.
     @Published var typedGroupChat: GroupChatSnapshot?
 
@@ -89,7 +89,7 @@ final class KernelModel: ObservableObject {
         selectedGroupId = groupId
     }
 
-    func openGroupTimeline(_ groupId: String) {
+    func openGroupEvents(_ groupId: String) {
         selectedGroupId = groupId
         discoveredGroups.markGroupRead(groupId: groupId)
         discoveredGroups.selectGroupMembers(groupId: groupId)

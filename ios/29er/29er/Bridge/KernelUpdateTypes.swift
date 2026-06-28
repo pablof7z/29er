@@ -17,8 +17,8 @@ struct KernelUpdateResult {
     /// Typed app-owned `nmp.29er.group_tree` projection decode (`N29T`). `nil`
     /// ⇒ discovery has not been opened or the sidecar was absent/malformed.
     let typedGroupTree: GroupTreeSnapshot?
-    /// Typed `nmp.nip29.group_timeline` projection decode (`NGTL`). `nil` ⇒ no
-    /// group timeline has been registered or the sidecar was absent/malformed.
+    /// Typed `nmp.nip29.group_events` projection decode (`NGEV`). `nil` ⇒ no
+    /// group-events view has been registered or the sidecar was absent/malformed.
     let typedGroupChat: GroupChatSnapshot?
     /// Typed `nmp.nip29.group_members` projection decode (`NGMS`). `nil` ⇒ no
     /// selected-group members sidecar was emitted or the sidecar was malformed.
