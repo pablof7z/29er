@@ -44,7 +44,7 @@ struct GroupTreeView: View {
         .navigationTitle("29er")
         .navigationBarTitleDisplayMode(.large)
         .navigationDestination(for: String.self) { groupId in
-            GroupTimelineView(groupId: groupId)
+            GroupEventsView(groupId: groupId)
         }
         .navigationDestination(for: GroupChildrenRoute.self) { route in
             GroupChildrenView(parentGroupId: route.groupId)
@@ -211,7 +211,7 @@ struct GroupRowLabel: View {
 }
 
 /// Projection-backed destination pushed by `NavigationLink(value:)`.
-struct GroupTimelineView: View {
+struct GroupEventsView: View {
     @EnvironmentObject private var model: KernelModel
     let groupId: String
 
@@ -232,7 +232,7 @@ struct GroupTimelineView: View {
     }
 
     private var visibleMessages: [GroupChatMessage] {
-        // The Rust-owned `group_timeline` projection is the single ordered, deduped
+        // The Rust-owned `group_events` projection is the single ordered, deduped
         // message list — it already folds in the active account's own sends
         // (V-83 event-store publish-back hydrates them into the projection), so
         // the shell no longer joins `publish_outbox` against chat, walks raw
@@ -470,7 +470,7 @@ struct GroupTimelineView: View {
                 .presentationDetents([.large])
             }
             .task(id: groupId) {
-                model.openGroupTimeline(groupId)
+                model.openGroupEvents(groupId)
             }
             .onChange(of: model.groupChat.messages) { _, _ in
                 scrollToBottom(proxy)

@@ -11,10 +11,11 @@ use nmp_app_29er::{
 };
 use nmp_core::substrate::{ObservedProjection, ObservedProjectionRegistrar};
 use nmp_core::{ObservedProjectionId, ObservedProjectionSink};
-use nmp_ffi::{nmp_free_string, GroupFeedHandle, NmpApp};
+use nmp_ffi::{nmp_free_string, GroupFeedToken, NmpApp};
+use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
 use nmp_nip29::projection::{
     DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot,
-    GroupTimelineEvent as GroupChatMessage, GroupTimelineProjection, JoinedGroupsProjection,
+    GroupEvent as GroupChatMessage, GroupEventsProjection, JoinedGroupsProjection,
 };
 use nmp_nip29::GroupId;
 use tokio::sync::mpsc::UnboundedSender;
@@ -184,11 +185,11 @@ pub struct ProjectionView {
 }
 impl Default for IdentityState { fn default() -> Self { IdentityState::LoggedOut } }
 
-/// A selected `GroupTimelineProjection` returned by NMP's canonical timeline
-/// door. Re-opening a group replaces the NMP singleton timeline session, so the
+/// A selected `GroupEventsProjection` returned by NMP's canonical group-events
+/// door. Re-opening a group replaces the NMP singleton group-events session, so the
 /// map is only a short-lived reader cache; it does not own observers.
 struct ChatEntry {
-    projection: Arc<GroupTimelineProjection>,
+    projection: Arc<GroupEventsProjection>,
     last_accessed: Instant,
 }
 
@@ -201,7 +202,7 @@ pub struct SharedProjections {
     /// (the projection captures the pubkey at construction).
     pub joined: Mutex<Option<Arc<JoinedGroupsProjection>>>,
     pub active_account: Mutex<ActiveAccountSlot>,
-    pub selected_chat: Mutex<Option<Arc<GroupTimelineProjection>>>,
+    pub selected_chat: Mutex<Option<Arc<GroupEventsProjection>>>,
     pub selected_group: Mutex<Option<GroupId>>,
     /// Set on each snapshot poll that returns non-empty data; drives relay-state indicator.
     pub last_update_at: Mutex<Option<std::time::Instant>>,
@@ -264,7 +265,7 @@ pub struct App {
     shared: Arc<SharedProjections>,
     poll_tx: UnboundedSender<ProjectionView>,
     chats: HashMap<String, ChatEntry>,
-    discovery_handle: Option<GroupFeedHandle>,
+    discovery_handle: Option<GroupFeedToken>,
     group_tree_observer_id: Option<ObservedProjectionId>,
     latest: ProjectionView,
     screen: Screen,
@@ -375,9 +376,7 @@ impl App {
                 80,
             ));
             if tree_observer_id.0 == 0 {
-                // SAFETY: `discovery_handle` was opened against `app`, which is
-                // still live in this function.
-                discovery_handle.close();
+                app_ref.close_group_feed_token(discovery_handle);
                 nmp_ffi::nmp_app_free(app);
                 anyhow::bail!("failed to open group-tree observer");
             }
@@ -532,7 +531,7 @@ impl App {
         }
         let key = group.local_id.clone();
         if !self.app_ptr.is_null() {
-            let chat = unsafe { (&*self.app_ptr).open_group_timeline_with_reader(group.clone()) };
+            let chat = unsafe { (&*self.app_ptr).open_group_events_with_reader(group.clone(), vec![KIND_CHAT_MESSAGE]) };
             self.chats.insert(key.clone(), ChatEntry { projection: chat, last_accessed: Instant::now() });
         }
         if let Some(entry) = self.chats.get_mut(&key) {
@@ -810,12 +809,10 @@ impl Drop for App {
                 app.close_observed_projection(id);
             }
             if let Some(handle) = self.discovery_handle.take() {
-                // SAFETY: the handle was opened against this live app and is
-                // consumed exactly once during `App` teardown.
-                unsafe { handle.close(); }
+                app.close_group_feed_token(handle);
             }
             app.close_joined_groups();
-            app.close_group_timeline();
+            app.close_group_events();
         }
         if !self.handle.is_null() { nmp_app_29er_unregister(self.handle); }
         if !self.app_ptr.is_null() { nmp_ffi::nmp_app_free(self.app_ptr); }
@@ -917,7 +914,7 @@ mod tests {
     use super::*;
     use nmp_core::substrate::KernelEvent;
     use nmp_nip29::kinds::KIND_CHAT_MESSAGE;
-    use nmp_nip29::projection::GroupTimelineEvent as GroupChatMessage;
+    use nmp_nip29::projection::GroupEvent as GroupChatMessage;
 
     fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
         DiscoveredGroup {

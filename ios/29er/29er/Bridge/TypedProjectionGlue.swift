@@ -22,9 +22,9 @@ enum TypedProjectionGlue {
         reader.hasActiveAccount ? (reader.pubkey ?? "") : nil
     }
 
-    // MARK: nmp.nip29.group_timeline → GroupChatSnapshot
+    // MARK: nmp.nip29.group_events → GroupChatSnapshot
 
-    static func groupTimeline(_ reader: nmp_nip29_GroupTimelineSnapshot) -> GroupChatSnapshot {
+    static func groupEvents(_ reader: nmp_nip29_GroupEventsSnapshot) -> GroupChatSnapshot {
         GroupChatSnapshot(
             messages: reader.events.map { row in
                 GroupChatMessage(
