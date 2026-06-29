@@ -3,7 +3,8 @@
 # at ios/29er/Vendor/NmpCore.xcframework.
 #
 # 29er links one aggregate Rust archive (`-lnmp_app_29er`) that contains
-# nmp-core, nmp-ffi, the NIP-46 signer broker, and the 29er per-app glue.
+# nmp-core, nmp-native-runtime, the NIP-46 signer broker, and the 29er per-app
+# glue (the `TwentyNinerApp` UniFFI object). Clean-break: nmp-ffi is deleted.
 # Mirrors `vendor/nmp/justfile`'s `rust-ios-sim` / `rust-ios-device` recipes
 # but produces an xcframework instead of loose archives in `target/`.
 #
@@ -88,11 +89,14 @@ framework module $name {
     module * { export * }
 }
 EOF
-    # Bridging header (umbrella). The Swift side imports NmpCore via the
-    # bridging header at Bridge/NmpCore.h; we symlink it here so the module
-    # resolves. The header lives in the app source tree, so we copy it.
-    if [[ -f "$REPO_ROOT/ios/29er/29er/Bridge/NmpCore.h" ]]; then
-        cp "$REPO_ROOT/ios/29er/29er/Bridge/NmpCore.h" "$out/$name.framework/Headers/$name.h"
+    # Umbrella header. Clean-break: the shell consumes the generated UniFFI
+    # object, so the umbrella is the generated FFI header (declares the
+    # low-level `ffi_nmp_app_29er_*` / `uniffi_nmp_app_29er_*` symbols). The
+    # static archive carries the bodies; this header just lets clang treat the
+    # framework as a valid linkage unit.
+    local ffi_header="$REPO_ROOT/ios/29er/29er/Generated/uniffi/nmp_app_29erFFI.h"
+    if [[ -f "$ffi_header" ]]; then
+        cp "$ffi_header" "$out/$name.framework/Headers/$name.h"
     else
         # Fall back to a stub so the framework is valid before the header is
         # written (xcodegen reference path).

@@ -11,10 +11,14 @@ import Foundation
 /// when and what to call; Swift only executes the request and reports the raw
 /// result (D7).
 ///
-/// There is a single C capability callback (`nmp_app_set_capability_callback`);
-/// it routes by the `namespace` field of the incoming `CapabilityRequest` —
-/// see [`handleJSON(_:)`].
-final class TwentyNinerCapabilities {
+/// There is a single capability sink (the generated `CapabilitySink`, wired via
+/// `TwentyNinerApp.setCapabilityCallback`); it routes by the `namespace` field
+/// of the incoming `CapabilityRequest` — see [`handleJSON(_:)`].
+///
+/// `@unchecked Sendable`: the Rust actor calls `onCapabilityRequest` from its
+/// worker thread (never the main thread). The owned `KeychainCapability` is
+/// internally serialized, so a synchronous capability may block here safely.
+final class TwentyNinerCapabilities: CapabilitySink, @unchecked Sendable {
     let keyring: KeychainCapability
 
     init(
@@ -32,6 +36,13 @@ final class TwentyNinerCapabilities {
     /// Idempotent: mark capabilities inactive. Does not erase stored secrets.
     func stop() {
         keyring.stop()
+    }
+
+    /// `CapabilitySink` conformance — the kernel calls this (on its worker
+    /// thread) with a `CapabilityRequest` JSON and expects a
+    /// `CapabilityEnvelope` JSON back. Delegates to [`handleJSON(_:)`].
+    func onCapabilityRequest(requestJson: String) -> String {
+        handleJSON(requestJson)
     }
 
     /// Single capability-callback entry point. Routes the raw kernel

@@ -23,8 +23,10 @@ private let gdLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupD
 // ── KernelHandle NIP-29 discovery + join extension (C-FFI surface) ────────
 
 extension KernelHandle {
-    /// Wire a NIP-29 `GroupTimelineProjection` for `groupId` into the kernel.
-    /// Pure consumption: messages surface under `nmp.nip29.group_timeline` on snapshots.
+    /// Wire a NIP-29 group's chat-message read view (kinds 9 + 11) into the
+    /// kernel. Pure consumption: messages surface under
+    /// `nmp.nip29.group_timeline` on snapshots. Singleton in Rust — re-opening
+    /// replaces the prior group-events view.
     func registerGroupChat(groupId: GroupId) {
         guard
             let data = try? JSONSerialization.data(withJSONObject: groupId.jsonObject),
@@ -33,55 +35,59 @@ extension KernelHandle {
             gdLog.error("registerGroupChat: failed to encode GroupId JSON")
             return
         }
-        json.withCString { nmp_app_29er_register_group_chat(raw, $0) }
+        app.registerGroupChat(groupIdJson: json)
         gdLog.info("registered NIP-29 group timeline projection for \(groupId.localId, privacy: .public)")
     }
 
-    /// Open a NIP-29 group-discovery session for `hostRelayUrl`.
-    ///
-    /// Returns an opaque handle the caller MUST pass to
-    /// `closeGroupDiscovery(_:)` when the session ends (screen dismissed or
-    /// relay switched). Returns `nil` when the relay URL is empty or
-    /// registration fails (D6).
-    func openGroupDiscovery(hostRelayUrl: String) -> OpaquePointer? {
-        guard !hostRelayUrl.isEmpty else { return nil }
-        let ptr = hostRelayUrl.withCString {
-            nmp_app_29er_open_group_discovery(raw, $0)
+    /// Open a NIP-29 group-discovery session for `hostRelayUrl`. The Rust object
+    /// owns the singleton session (re-opening closes the prior one first), so no
+    /// handle crosses the boundary. Returns `true` on success, `false` when the
+    /// relay URL is empty or the session failed to open (D6).
+    @discardableResult
+    func openGroupDiscovery(hostRelayUrl: String) -> Bool {
+        guard !hostRelayUrl.isEmpty else { return false }
+        let opened = app.openGroupDiscovery(hostRelayUrl: hostRelayUrl)
+        if opened {
+            gdLog.info("opened NIP-29 discovery session for \(hostRelayUrl, privacy: .public)")
         }
-        guard let ptr else { return nil }
-        gdLog.info("opened NIP-29 discovery session for \(hostRelayUrl, privacy: .public)")
-        return OpaquePointer(ptr)
+        return opened
     }
 
-    /// Close a group-discovery session previously opened with
-    /// `openGroupDiscovery(hostRelayUrl:)`.
-    ///
-    /// Unregisters the observer and removes the snapshot projection so no
-    /// stale group catalog is emitted after the session ends. The `handle`
-    /// MUST NOT be used after this call. A nil handle is a no-op.
-    func closeGroupDiscovery(_ handle: OpaquePointer?) {
-        guard let handle else { return }
-        nmp_app_29er_close_group_discovery(UnsafeMutableRawPointer(handle))
+    /// Close the current group-discovery session (if any). Unregisters the
+    /// observer and removes the snapshot projection so no stale group catalog is
+    /// emitted after the session ends. Idempotent.
+    func closeGroupDiscovery() {
+        app.closeGroupDiscovery()
         gdLog.info("closed NIP-29 discovery session")
+    }
+
+    /// Refresh group discovery after a local store reset: tear down the current
+    /// session, open a fresh one, and re-dispatch `nmp.nip29.discover`. `true`
+    /// when the new session opened.
+    @discardableResult
+    func refreshGroupDiscovery(hostRelayUrl: String) -> Bool {
+        app.refreshGroupDiscovery(hostRelayUrl: hostRelayUrl)
     }
 
     /// Mark one group's direct messages read inside the Rust group-tree
     /// projection. The tree projection owns unread aggregation; Swift only
-    /// reports the user's current read position.
-    func markGroupRead(_ handle: OpaquePointer?, groupId: String) {
-        guard let handle, !groupId.isEmpty else { return }
-        groupId.withCString {
-            nmp_app_29er_mark_group_read(UnsafeMutableRawPointer(handle), $0)
-        }
+    /// reports the user's current read position. No-op when no discovery
+    /// session is open.
+    func markGroupRead(groupId: String) {
+        guard !groupId.isEmpty else { return }
+        app.markGroupRead(groupId: groupId)
     }
 
     /// Select the group whose member rows should be emitted by the Rust
     /// `nmp.nip29.group_members` projection.
-    func selectGroupMembers(_ handle: OpaquePointer?, groupId: String) {
-        guard let handle, !groupId.isEmpty else { return }
-        groupId.withCString {
-            nmp_app_29er_select_group_members(UnsafeMutableRawPointer(handle), $0)
-        }
+    ///
+    /// NOTE: the clean-break `TwentyNinerApp` does not yet expose member-roster
+    /// selection (the `select_group_members` verb was not re-exposed in the
+    /// UniFFI migration). This is a no-op until that verb lands; the roster view
+    /// stays empty (see `GroupTreeView` `TODO(roster)`).
+    func selectGroupMembers(groupId: String) {
+        // Intentionally no-op — see doc comment.
+        _ = groupId
     }
 
     /// Dispatch a `nmp.nip29.discover` action — push the relay-pinned
@@ -236,10 +242,11 @@ extension KernelHandle {
     }
 
     /// Shared marshal for NIP-29 action dispatches. Encodes `payload` to JSON
-    /// and routes it through the 29er byte doorway
-    /// `nmp_app_29er_dispatch_action_bytes`; returns true only when Rust
-    /// accepts the typed action envelope and returns a correlation id.
-    /// Snapshot/outbox state still owns eventual delivery.
+    /// and routes it through `TwentyNinerApp.dispatchNip29Action`, which builds
+    /// the typed payload + envelope in Rust and returns a typed
+    /// `DispatchOutcome`. Returns true only when Rust accepts the action and
+    /// mints a correlation id. Snapshot/outbox state still owns eventual
+    /// delivery.
     private func dispatchNip29(
         _ namespace: String, payload: [String: Any], label: String
     ) -> Bool {
@@ -250,43 +257,16 @@ extension KernelHandle {
             gdLog.error("\(label, privacy: .public): failed to encode action payload")
             return false
         }
-        return json.withCString { jsonPtr in
-            namespace.withCString { nsPtr in
-                guard let ptr = nmp_app_29er_dispatch_action_bytes(raw, nsPtr, jsonPtr) else {
-                    gdLog.error("\(label, privacy: .public): action dispatch returned null")
-                    return false
-                }
-                defer { nmp_free_string(ptr) }
-
-                let rawResult = String(cString: ptr)
-                guard let resultData = rawResult.data(using: .utf8),
-                      let result = try? JSONDecoder().decode(Nip29DispatchResult.self, from: resultData)
-                else {
-                    gdLog.error("\(label, privacy: .public): malformed dispatch result \(rawResult, privacy: .public)")
-                    return false
-                }
-
-                if let error = result.error, !error.isEmpty {
-                    gdLog.error("\(label, privacy: .public): dispatch rejected: \(error, privacy: .public)")
-                    return false
-                }
-                guard let correlationId = result.correlationId, !correlationId.isEmpty else {
-                    gdLog.error("\(label, privacy: .public): dispatch result had no correlation id")
-                    return false
-                }
-                return true
-            }
+        let outcome = app.dispatchNip29Action(namespace: namespace, bodyJson: json)
+        if let error = outcome.error, !error.isEmpty {
+            gdLog.error("\(label, privacy: .public): dispatch rejected: \(error, privacy: .public)")
+            return false
         }
-    }
-}
-
-private struct Nip29DispatchResult: Decodable {
-    let correlationId: String?
-    let error: String?
-
-    private enum CodingKeys: String, CodingKey {
-        case correlationId = "correlation_id"
-        case error
+        guard let correlationId = outcome.correlationId, !correlationId.isEmpty else {
+            gdLog.error("\(label, privacy: .public): dispatch result had no correlation id")
+            return false
+        }
+        return true
     }
 }
 
@@ -409,39 +389,14 @@ final class DiscoveredGroupsStore: ObservableObject {
 
     private unowned let kernel: KernelHandle
 
-    /// The opaque Rust handle for the currently-open discovery session.
-    /// `nil` until the user first searches. Closed on relay switch or deinit.
-    ///
-    /// Always mutate via `setDiscoveryHandle(_:)` — it keeps `_discoveryHandleRaw`
-    /// in sync so the nonisolated `deinit` can close the handle safely.
-    private var discoveryHandle: OpaquePointer?
-
-    /// Nonisolated mirror of `discoveryHandle`. Updated in lock-step by
-    /// `setDiscoveryHandle(_:)`. Only ever read from `deinit`, which runs
-    /// after the last reference is released — no concurrent MainActor
-    /// mutation can occur at that point, making the unsafety sound.
-    nonisolated(unsafe) private var _discoveryHandleRaw: OpaquePointer?
+    /// The relay of the currently-open Rust discovery session, or `nil` when no
+    /// session is open. The Rust `TwentyNinerApp` owns the singleton session
+    /// (and reclaims it on `shutdown`), so Swift holds no opaque handle — this
+    /// is only a redundant-open guard.
+    private var openSessionRelay: String?
 
     init(kernel: KernelHandle) {
         self.kernel = kernel
-    }
-
-    deinit {
-        // Swift 6: `deinit` is nonisolated and cannot touch `@MainActor`-isolated
-        // state. `_discoveryHandleRaw` mirrors `discoveryHandle` exactly.
-        // `nmp_app_29er_close_group_discovery` is a plain C function — it takes
-        // no Swift state and needs no actor. By the time `deinit` runs there
-        // are no remaining references, so no concurrent mutation of
-        // `_discoveryHandleRaw` is possible: the unsafety is sound.
-        if let raw = _discoveryHandleRaw {
-            nmp_app_29er_close_group_discovery(UnsafeMutableRawPointer(raw))
-        }
-    }
-
-    /// Update both handle fields atomically. Always runs on the MainActor.
-    private func setDiscoveryHandle(_ handle: OpaquePointer?) {
-        discoveryHandle = handle
-        _discoveryHandleRaw = handle
     }
 
     /// Begin a discover session against `relayUrl`: open the read projection
@@ -453,14 +408,16 @@ final class DiscoveredGroupsStore: ObservableObject {
         guard !trimmed.isEmpty else { return }
 
         if trimmed != hostRelayUrl {
-            kernel.closeGroupDiscovery(discoveryHandle)
-            setDiscoveryHandle(nil)
+            if openSessionRelay != nil {
+                kernel.closeGroupDiscovery()
+                openSessionRelay = nil
+            }
             groups = []
         }
         hostRelayUrl = trimmed
 
-        if discoveryHandle == nil {
-            setDiscoveryHandle(kernel.openGroupDiscovery(hostRelayUrl: trimmed))
+        if openSessionRelay != trimmed, kernel.openGroupDiscovery(hostRelayUrl: trimmed) {
+            openSessionRelay = trimmed
         }
         isSearching = true
         kernel.discoverGroups(relayUrl: trimmed)
@@ -470,19 +427,38 @@ final class DiscoveredGroupsStore: ObservableObject {
     /// projection so no stale group catalog is emitted after the discover
     /// screen is dismissed.
     func closeSession() {
-        kernel.closeGroupDiscovery(discoveryHandle)
-        setDiscoveryHandle(nil)
+        if openSessionRelay != nil {
+            kernel.closeGroupDiscovery()
+            openSessionRelay = nil
+        }
         groups = []
         hostRelayUrl = ""
         isSearching = false
     }
 
+    /// Reopen discovery after a local database reset: re-dispatch discover
+    /// against `relayUrl` through the Rust object's `refresh_group_discovery`
+    /// (which reopens the session + re-issues `nmp.nip29.discover`).
+    func refreshSessionAfterLocalDatabaseReset(relayUrl: String) {
+        let trimmed = relayUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        groups = []
+        guard !trimmed.isEmpty else {
+            hostRelayUrl = ""
+            openSessionRelay = nil
+            isSearching = false
+            return
+        }
+        hostRelayUrl = trimmed
+        isSearching = true
+        openSessionRelay = kernel.refreshGroupDiscovery(hostRelayUrl: trimmed) ? trimmed : nil
+    }
+
     func markGroupRead(groupId: String) {
-        kernel.markGroupRead(discoveryHandle, groupId: groupId)
+        kernel.markGroupRead(groupId: groupId)
     }
 
     func selectGroupMembers(groupId: String) {
-        kernel.selectGroupMembers(discoveryHandle, groupId: groupId)
+        kernel.selectGroupMembers(groupId: groupId)
     }
 
     /// Mirror the latest kernel snapshot. Called from `KernelModel.apply`

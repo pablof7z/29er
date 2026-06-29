@@ -2,11 +2,11 @@ import Foundation
 
 /// Bridges raw NIP-29 chat content to the renderable `ContentTreeWire` consumed
 /// by `NostrContentView`, using the shared `nmp-content` substrate over the
-/// `nmp_content_tokenize_text` C-ABI. This is the single place the iOS shell
-/// turns wire content into a render tree — it holds zero nostr/NIP-21 parsing
-/// knowledge (mirrors the TUI's `tokenize_message`). Live entity resolution
-/// (mention names, embedded-event cards) is layered on separately via the
-/// `nmp_app_resolve_ref` seam.
+/// generated `tokenizeContent` UniFFI function. This is the single place the
+/// iOS shell turns wire content into a render tree — it holds zero nostr/NIP-21
+/// parsing knowledge (mirrors the TUI's `tokenize_message`). Live entity
+/// resolution (mention names, embedded-event cards) is layered on separately
+/// via the `resolveProfileRef` / `resolveEventEmbed` seams.
 enum NostrMessageContent {
     /// `nmp-content` render mode: 0 = plain, 1 = markdown, 2 = auto (by kind).
     private static let modeAuto: Int32 = 2
@@ -37,23 +37,17 @@ enum NostrMessageContent {
         return tree
     }
 
-    /// Pure tokenization over the C-ABI. Auto mode dispatches markdown vs plain
-    /// by `kind` (kind 9/11 chat → plain).
+    /// Pure tokenization over the `tokenizeContent` UniFFI function. Auto mode
+    /// dispatches markdown vs plain by `kind` (kind 9/11 chat → plain).
     static func tokenize(content: String, kind: UInt32) -> ContentTreeWire? {
-        let raw: UnsafeMutablePointer<CChar>? = content.withCString { contentPtr in
-            // `tags_json` is NULL: the group-chat projection carries no tags, so
-            // there is no NIP-30 emoji map to resolve here.
-            nmp_content_tokenize_text(contentPtr, nil, modeAuto, kind)
-        }
-        guard let raw else { return nil }
-        defer { nmp_free_string(raw) }
-
-        let json = String(cString: raw)
+        // `tagsJson` is nil: the group-chat projection carries no tags, so there
+        // is no NIP-30 emoji map to resolve here.
+        let json = tokenizeContent(content: content, tagsJson: nil, mode: modeAuto, kind: kind)
         guard let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(TokenizeResult.self, from: data).tree
     }
 
-    /// Wire shape of the `nmp_content_tokenize_text` success payload.
+    /// Wire shape of the `tokenizeContent` success payload.
     private struct TokenizeResult: Decodable {
         let ok: Bool
         let tree: ContentTreeWire?

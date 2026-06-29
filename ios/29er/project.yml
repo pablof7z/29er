@@ -51,7 +51,7 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         GENERATE_INFOPLIST_FILE: NO
-        SWIFT_OBJC_BRIDGING_HEADER: 29er/Bridge/NmpCore.h
+        SWIFT_OBJC_BRIDGING_HEADER: 29er/Bridge/29er-Bridging-Header.h
         CODE_SIGN_ENTITLEMENTS: 29er/29er.entitlements
         DEVELOPMENT_TEAM: 456SHKPP26
         # 29er links one aggregate Rust archive (`-lnmp_app_29er`) that
