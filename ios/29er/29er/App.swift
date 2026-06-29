@@ -76,6 +76,7 @@ struct RootView: View {
 /// placeholder for the real kind:9 timeline.
 struct MainScaffold: View {
     @EnvironmentObject private var model: KernelModel
+    @State private var showingResetDatabaseConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -83,11 +84,35 @@ struct MainScaffold: View {
                 .environment(\.nostrProfileHost, model)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button(role: .destructive, action: model.logout) {
-                            Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                        Menu {
+                            Button(role: .destructive) {
+                                model.logout()
+                            } label: {
+                                Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                            }
+
+                            Button(role: .destructive) {
+                                showingResetDatabaseConfirmation = true
+                            } label: {
+                                Label("Reset Local Database", systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "gearshape")
                         }
-                        .accessibilityLabel("Log Out")
+                        .accessibilityLabel("Settings")
                     }
+                }
+                .confirmationDialog(
+                    "Reset Local Database?",
+                    isPresented: $showingResetDatabaseConfirmation,
+                    titleVisibility: .visible
+                ) {
+                    Button("Reset Local Database", role: .destructive) {
+                        model.resetLocalDatabaseAndRestart()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("This removes locally cached Nostr data on this device. Your saved account stays in Keychain.")
                 }
         }
     }

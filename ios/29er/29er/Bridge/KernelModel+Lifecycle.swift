@@ -76,6 +76,33 @@ extension KernelModel {
         startedKernel = true
     }
 
+    /// Reset the local kernel state and restart, then reopen group discovery.
+    /// Wired to the Settings → "Reset Local Database" action. Uses the Rust
+    /// object's `reset()` (transient kernel state) + a re-seed + restart, then
+    /// `refreshGroupDiscovery` to reopen the discover session against the
+    /// active relay. The saved account stays in Keychain (the keyring
+    /// capability is untouched).
+    func resetLocalDatabaseAndRestart() {
+        let relayToRefresh = relaySelector.activeRelayUrl
+        kernel.reset()
+        // Clear every typed projection slot so views immediately leave stale
+        // rows behind while the reset runtime restarts.
+        clearTypedProjections()
+        kernel.lastAppliedRev = 0
+        selectedGroupId = nil
+        lastErrorToast = nil
+        lastErrorCategory = nil
+        if let testRelaysJson = ProcessInfo.processInfo.environment["NMP_TEST_RELAYS"],
+           kernel.seedRelays(fromJSON: testRelaysJson) {
+            // overridden for tests
+        } else {
+            kernel.seedDefaultRelays()
+        }
+        kernel.start(visibleLimit: visibleLimit, emitHz: emitHz)
+        startedKernel = true
+        discoveredGroups.refreshSessionAfterLocalDatabaseReset(relayUrl: relayToRefresh)
+    }
+
     /// Open NIP-29 group discovery for `hostRelayUrl` (the read side of the
     /// discover screen). Delegates to `DiscoveredGroupsStore.searchGroups`
     /// which opens the read projection + dispatches the `nmp.nip29.discover`
