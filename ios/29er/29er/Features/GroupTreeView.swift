@@ -691,6 +691,23 @@ struct GroupTimelineView: View {
         !isCurrentMember
     }
 
+    /// D3 one-tap join. An OPEN group needs no invite code, so join inline
+    /// (optional reason omitted) with no intermediate sheet — the relay adds
+    /// the viewer and the next JoinedGroupsProjection tick flips `node.isMember`,
+    /// hiding the bar and enabling the composer. A CLOSED / invite-only group
+    /// still collects an invite code (and optional reason) through
+    /// `JoinGroupSheet`. The shell holds zero NIP-29 knowledge: the
+    /// `nmp.nip29.join` action owns the kind:9021 event, tags, and host pinning.
+    private func joinTapped() {
+        guard node?.isOpen == true else {
+            showingJoinSheet = true
+            return
+        }
+        if model.joinGroup(groupId: groupId, inviteCode: nil, reason: nil) {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        }
+    }
+
     private var membershipBar: some View {
         HStack(spacing: 10) {
             Label(membershipStatusLabel, systemImage: membershipStatusIcon)
@@ -703,7 +720,7 @@ struct GroupTimelineView: View {
 
             if !isCurrentMember {
                 Button {
-                    showingJoinSheet = true
+                    joinTapped()
                 } label: {
                     Label("Join", systemImage: "person.badge.plus")
                 }
@@ -922,7 +939,7 @@ struct GroupTimelineView: View {
     }
 
     private var composerPromptText: String {
-        node?.isOpen == true ? "Join to send messages" : "Invite required to send messages"
+        node?.isOpen == true ? "Tap Join to send messages" : "Invite required to send messages"
     }
 
     private var mentionSuggestionBar: some View {
