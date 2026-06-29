@@ -10,7 +10,10 @@ use std::sync::Arc;
 use nmp_core::dispatch_envelope::{encode_dispatch_envelope, DISPATCH_ENVELOPE_SCHEMA_VERSION};
 use nmp_core::substrate::{ActionPayload, ObservedProjection, ObservedProjectionRegistrar};
 use nmp_core::{ObservedProjectionId, ObservedProjectionSink, TypedProjectionData};
-use nmp_ffi::{nmp_app_add_relay, nmp_app_dispatch_action_bytes, nmp_app_remove_relay, NmpApp};
+use nmp_native_runtime::{
+    dispatch_action_bytes_typed, NmpApp, Nip29GroupDiscoverySession, Nip29GroupEventsSession,
+    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession,
+};
 use nmp_nip29::group_id::GroupId;
 use nmp_nip29::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 
@@ -100,6 +103,13 @@ pub extern "C" fn nmp_app_29er_register(
     // SAFETY: caller guarantees `app` is a valid pointer allocated by
     // `nmp_app_new` for the duration of this call. We hold an exclusive
     // `&mut *app` only across this block; no other reference aliases it.
+    // ADR-0069 explicit composition. NOTE (clean-break migration): the named
+    // installers below take `&mut impl AppHost`, and `AppHost` is implemented by
+    // `NmpAppBuilder`, NOT by the live `NmpApp`. Composition MUST move to a
+    // builder composition root *before* `start()` — the C-ABI "new() then
+    // register() then start()" three-phase init is structurally incompatible
+    // with the builder typestate. This call site is the load-bearing blocker
+    // that forces 29er onto a UniFFI composition-root crate (see migration plan).
     let _default_handles = nmp_defaults::register_defaults_with_handles(
         unsafe { &mut *app },
         nmp_defaults::NmpDefaults::default(),
@@ -223,10 +233,9 @@ pub extern "C" fn nmp_app_29er_relay_selector_remove_relay(
         return false;
     };
     if removed != crate::config::public_group_relay_url() {
-        let Ok(url) = std::ffi::CString::new(removed) else {
-            return true;
-        };
-        nmp_app_remove_relay(app, url.as_ptr());
+        // SAFETY: `app` comes from the relay-selector handle, which the caller
+        // guarantees outlives this call.
+        unsafe { &*app }.remove_relay(removed);
     }
     true
 }
@@ -244,13 +253,9 @@ fn relay_selector_args(
 }
 
 fn seed_relay(app: *mut NmpApp, relay_url: &str) {
-    let (Ok(url), Ok(role)) = (
-        std::ffi::CString::new(relay_url),
-        std::ffi::CString::new("both"),
-    ) else {
-        return;
-    };
-    nmp_app_add_relay(app, url.as_ptr(), role.as_ptr());
+    // SAFETY: `app` originates from the relay-selector handle, which the caller
+    // guarantees outlives this call.
+    unsafe { &*app }.add_relay(relay_url.to_string(), "both".to_string());
 }
 
 /// Declare that this host consumes all kernel-owned built-in Tier-2
@@ -269,7 +274,7 @@ pub extern "C" fn nmp_app_29er_declare_consumed_projections(app: *mut NmpApp) {
     }
     // SAFETY: caller guarantees `app` is a valid pointer from `nmp_app_new`,
     // live for the duration of this call. The borrow is not held past return.
-    nmp_ffi::nmp_app_consume_all_builtin_projections(unsafe { &mut *app });
+    unsafe { &*app }.consume_all_builtin_projections();
 }
 
 /// Wire a NIP-29 `GroupTimelineProjection` for a single group into `app`.
@@ -315,7 +320,10 @@ pub extern "C" fn nmp_app_29er_register_group_chat(app: *mut NmpApp, group_id_js
     // explicitly. The door registers the NGEV typed sidecar + the (muted)
     // `GroupEventsProjection`, replays the read cache, and opens the relay-pinned
     // tailing interest — superseding the old kind-hardcoded `open_group_timeline`.
-    app_ref.open_group_events(group_id, vec![KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT]);
+    let _handle = app_ref.open_nip29_group_events_session(Nip29GroupEventsSession::new(
+        group_id,
+        vec![KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
+    ));
 }
 
 #[cfg(test)]
@@ -477,7 +485,9 @@ fn open_group_discovery_with_tree(
     //    `nmp.nip29.discovered_groups` sidecar, the relay-pinned interest, and
     //    the #2088 hydrating replay. We retain the returned snapshot reader
     //    (Arc) to compose the 29er tree.
-    let (discovery_handle, discovered) = app.open_group_discovery_with_reader(relay_url.clone());
+    let (discovery_handle, discovered) = app.open_nip29_group_discovery_session_with_reader(
+        Nip29GroupDiscoverySession::new(relay_url.clone()),
+    );
 
     // 2. Viewer membership/admin truth comes from the account-scoped joined-
     //    groups door (D11 — the app crate owns membership/admin derivation, not
@@ -493,10 +503,19 @@ fn open_group_discovery_with_tree(
         .ok()
         .and_then(|slot| slot.clone())
         .unwrap_or_default();
-    let joined = if active_pubkey.is_empty() {
+    let joined_session = if active_pubkey.is_empty() {
         None
     } else {
-        app.open_joined_groups_with_reader(active_pubkey, relay_url.clone())
+        app.open_nip29_joined_groups_session_with_reader(Nip29JoinedGroupsSession::new(
+            active_pubkey,
+            relay_url.clone(),
+        ))
+    };
+    // Split the joined session into its teardown handle (for the rollback/close
+    // paths) and the projection reader (for the composite snapshot).
+    let (joined_handle, joined): (Option<Nip29JoinedGroupsHandle>, _) = match joined_session {
+        Some((handle, reader)) => (Some(handle), Some(reader)),
+        None => (None, None),
     };
 
     // 3. 29er-owned kind:9 unread/preview reader — folding kind:9 into per-group
@@ -529,11 +548,13 @@ fn open_group_discovery_with_tree(
         replay_limit: GROUP_TREE_REPLAY_LIMIT,
     });
     if tree_observer_id.0 == 0 {
-        // Roll back the doors we already opened (D6 fail-closed).
-        // SAFETY: this handle was opened against `app`, which is still live in
-        // this function.
-        unsafe { discovery_handle.close(); }
-        app.close_joined_groups();
+        // Roll back the doors we already opened (D6 fail-closed). Typed read
+        // sessions are closed by handing the handle back to the owning app
+        // (ADR-0070); both closes are idempotent.
+        app.close_nip29_group_discovery_session(discovery_handle);
+        if let Some(handle) = joined_handle {
+            app.close_nip29_joined_groups_session(handle);
+        }
         return None;
     }
 
@@ -582,12 +603,13 @@ fn open_group_discovery_with_tree(
             app.close_observed_projection(tree_observer_id);
             app.remove_snapshot_projection("nmp.29er.group_tree");
             // The NMP doors own `nmp.nip29.discovered_groups` / `…joined_groups`
-            // + their interests; close reclaims them. 29er must NOT remove those
-            // keys itself (it would race/clobber the door session).
-            // SAFETY: the discovery handle was opened against this still-live
-            // app and is consumed exactly once by this teardown closure.
-            unsafe { discovery_handle.close(); }
-            app.close_joined_groups();
+            // + their interests; closing the typed read sessions reclaims them.
+            // 29er must NOT remove those keys itself (it would race/clobber the
+            // door session).
+            app.close_nip29_group_discovery_session(discovery_handle);
+            if let Some(handle) = joined_handle {
+                app.close_nip29_joined_groups_session(handle);
+            }
         }),
     })
 }
@@ -757,20 +779,22 @@ pub extern "C" fn nmp_app_29er_dispatch_action_bytes(
         &payload,
     );
 
-    // SAFETY: `app` is a valid, non-null pointer (checked above); `envelope`
-    // is a live, fully-initialised byte buffer for the duration of the call.
-    // The doorway reads the bytes but never retains or frees them.
-    let ptr = nmp_app_dispatch_action_bytes(app, envelope.as_ptr(), envelope.len());
-    if ptr.is_null() {
-        return CString::new(r#"{"error":"action dispatch returned null"}"#)
-            .unwrap_or_else(|_| c"{}".to_owned())
-            .into_raw();
-    }
-    // The kernel returns `{"correlation_id":…}` or `{"error":…}`; echo it back
-    // verbatim so the host can free it through `nmp_free_string`. We do NOT
-    // parse it here — the host's dispatch helper does (mirroring Chirp's
-    // `GroupDiscoveryBridge.dispatchNip29Discovery`).
-    ptr
+    // Clean-break dispatch lane (ADR-0071): the typed byte doorway is now the
+    // free fn `dispatch_action_bytes_typed(&NmpApp, &[u8]) -> DispatchOutcome`
+    // (the `nmp_app_dispatch_action_bytes` C free fn was deleted with nmp-ffi).
+    // We render the typed outcome back into the same `{"correlation_id"}` /
+    // `{"error"}` JSON C-string contract the host already parses.
+    //
+    // SAFETY: `app` is a valid, non-null pointer (checked above).
+    let outcome = dispatch_action_bytes_typed(unsafe { &*app }, &envelope);
+    let json = match (outcome.correlation_id, outcome.error) {
+        (Some(id), _) => serde_json::json!({ "correlation_id": id }).to_string(),
+        (None, Some(err)) => serde_json::json!({ "error": err }).to_string(),
+        (None, None) => r#"{"error":"action dispatch returned no outcome"}"#.to_string(),
+    };
+    CString::new(json)
+        .unwrap_or_else(|_| c"{}".to_owned())
+        .into_raw()
 }
 
 /// 29er's app-level chat-send doorway. NOT a NIP-29 action namespace — it is a
@@ -867,4 +891,28 @@ fn c_string_opt(ptr: *const c_char) -> Option<String> {
             .to_string_lossy()
             .into_owned(),
     )
+}
+
+/// Free a Rust-heap C string returned by this crate's byte doorway
+/// ([`nmp_app_29er_dispatch_action_bytes`]).
+///
+/// With `nmp-ffi` deleted (#2483) the canonical `nmp_free_string` no longer
+/// exists upstream, so the 29er aggregate archive owns its own freer for the
+/// JSON outcome strings it allocates. Null-safe (D6). NOTE: this is a
+/// transitional C-ABI symbol — the UniFFI port replaces hand-managed string
+/// ownership with UniFFI's generated lifetime handling and removes it.
+///
+/// # Safety
+///
+/// `ptr` must be a pointer returned by `nmp_app_29er_dispatch_action_bytes` or
+/// null, and must not be freed twice.
+#[no_mangle]
+pub extern "C" fn nmp_free_string(ptr: *mut c_char) {
+    if ptr.is_null() {
+        return;
+    }
+    // SAFETY: `ptr` was produced by `CString::into_raw` in this crate; reclaim
+    // it with `CString::from_raw` so the allocation is freed by the same
+    // allocator that produced it.
+    unsafe { drop(std::ffi::CString::from_raw(ptr)) };
 }

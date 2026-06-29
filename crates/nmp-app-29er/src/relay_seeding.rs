@@ -23,7 +23,7 @@
 
 use std::ffi::{c_char, CStr};
 
-use nmp_ffi::{nmp_app_add_relay, NmpApp};
+use nmp_native_runtime::NmpApp;
 
 /// Seed 29er's reference relay set onto `app`.
 ///
@@ -38,15 +38,12 @@ pub extern "C" fn nmp_app_29er_seed_default_relays(app: *mut NmpApp) -> bool {
     if app.is_null() {
         return false;
     }
+    // SAFETY: `app` is non-null (checked above); the caller guarantees it is a
+    // valid `NmpApp` for the duration of this call.
+    let app_ref = unsafe { &*app };
     let mut seeded = false;
     for entry in crate::config::default_relay_bootstrap() {
-        let (Ok(url), Ok(role)) = (
-            std::ffi::CString::new(entry.url),
-            std::ffi::CString::new(entry.role),
-        ) else {
-            continue;
-        };
-        nmp_app_add_relay(app, url.as_ptr(), role.as_ptr());
+        app_ref.add_relay(entry.url.to_string(), entry.role.to_string());
         seeded = true;
     }
     seeded
@@ -93,15 +90,12 @@ fn seed_relays_from_json_str(app: *mut NmpApp, json: &str) -> bool {
     if parsed.is_empty() {
         return false;
     }
+    // SAFETY: `app` is non-null (checked above); the caller guarantees it is a
+    // valid `NmpApp` for the duration of this call.
+    let app_ref = unsafe { &*app };
     let mut seeded = false;
     for entry in &parsed {
-        let (Ok(url), Ok(role)) = (
-            std::ffi::CString::new(entry[0].as_str()),
-            std::ffi::CString::new(entry[1].as_str()),
-        ) else {
-            continue;
-        };
-        nmp_app_add_relay(app, url.as_ptr(), role.as_ptr());
+        app_ref.add_relay(entry[0].clone(), entry[1].clone());
         seeded = true;
     }
     seeded

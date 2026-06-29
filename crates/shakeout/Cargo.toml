@@ -12,9 +12,12 @@ path = "src/main.rs"
 
 [dependencies]
 nmp-core = { workspace = true }
-nmp-ffi = { workspace = true }
+nmp-native-runtime = { workspace = true }
 nmp-defaults = { workspace = true }
 nmp-nip29 = { workspace = true }
 nmp-planner = { workspace = true }
 nostr = { version = "0.44", features = ["std"] }
 serde_json = { workspace = true }
+# `SignerSource::LocalNsec` carries the nsec as `Zeroizing<String>` so the
+# plaintext secret is wiped on drop (replaces the C-ABI `nmp_app_signin_nsec`).
+zeroize = "1"

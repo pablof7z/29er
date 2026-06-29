@@ -196,7 +196,9 @@ impl ObservedProjectionSink for RelaySelectorProjection {
     }
 }
 
-pub fn register_relay_selector_runtime(app: &nmp_ffi::NmpApp) -> Arc<RelaySelectorProjection> {
+pub fn register_relay_selector_runtime(
+    app: &nmp_native_runtime::NmpApp,
+) -> Arc<RelaySelectorProjection> {
     let projection = Arc::new(RelaySelectorProjection::new(
         app.active_account_handle(),
         crate::config::public_group_relay_url().to_string(),

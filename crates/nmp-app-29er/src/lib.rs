@@ -44,14 +44,11 @@ pub use ffi::{
     nmp_app_29er_dispatch_action_bytes, nmp_app_29er_mark_group_read,
     nmp_app_29er_open_group_discovery, nmp_app_29er_register, nmp_app_29er_register_group_chat,
     nmp_app_29er_relay_selector_add_relay, nmp_app_29er_relay_selector_remove_relay,
-    nmp_app_29er_relay_selector_select_relay, nmp_app_29er_unregister, NmpRegisterStatus,
-    TwentyNinerHandle,
+    nmp_app_29er_relay_selector_select_relay, nmp_app_29er_unregister, nmp_free_string,
+    NmpRegisterStatus, TwentyNinerHandle,
 };
 
 // Relay-seeding C-ABI surface (D7 — seeding policy lives in Rust, not the
 // shell). Mirrors Chirp's `nmp_app_chirp_seed_default_relays` /
 // `nmp_app_chirp_seed_relays_from_json`.
 pub use relay_seeding::{nmp_app_29er_seed_default_relays, nmp_app_29er_seed_relays_from_json};
-// Re-export `nmp_free_string` so the 29er shell links it through this archive
-// the same way Chirp links it through `libnmp_app_chirp.a`.
-pub use nmp_ffi::nmp_free_string;

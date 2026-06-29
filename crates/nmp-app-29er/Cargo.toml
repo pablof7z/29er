@@ -21,7 +21,8 @@ lmdb-backend = ["nmp-core/lmdb-backend"]
 [dependencies]
 flatbuffers = { workspace = true }
 nmp-core = { workspace = true }
-nmp-ffi = { workspace = true, features = ["signer-broker"] }
+nmp-native-runtime = { workspace = true }
+nmp-uniffi = { workspace = true }
 nmp-defaults = { workspace = true }
 nmp-nip29 = { workspace = true }
 nmp-planner = { workspace = true }
