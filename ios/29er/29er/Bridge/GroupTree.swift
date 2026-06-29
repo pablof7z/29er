@@ -4,6 +4,10 @@ struct GroupTreeNode: Identifiable, Equatable {
     let groupId: String
     let hostRelayUrl: String
     let name: String?
+    /// Group avatar URL from the relay-signed kind:39000 `["picture", …]` tag
+    /// (emitted by the Rust group-tree projection). `nil` when the group has no
+    /// picture — the row/header falls back to initials.
+    let picture: String?
     let parentId: String?
     let childIds: [String]
     let memberCount: UInt32
@@ -26,6 +30,10 @@ struct GroupTreeNode: Identifiable, Equatable {
     var id: String { groupId }
     var displayName: String { name?.isEmpty == false ? name! : groupId }
     var hasLastMessage: Bool { lastMessageId?.isEmpty == false }
+    var pictureURL: URL? {
+        guard let picture, !picture.isEmpty else { return nil }
+        return URL(string: picture)
+    }
 }
 
 struct GroupTreeSnapshot: Equatable {

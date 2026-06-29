@@ -148,6 +148,7 @@ enum TypedProjectionGlue {
             groupId: row.groupId ?? "",
             hostRelayUrl: row.hostRelayUrl ?? "",
             name: row.name,
+            picture: row.picture,
             parentId: row.parentId,
             childIds: row.childIds.map { $0 ?? "" },
             memberCount: row.memberCount,

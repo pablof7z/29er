@@ -40,6 +40,7 @@ pub mod nmp_app_29er {
         pub const VT_UNREAD_COUNT: ::flatbuffers::VOffsetT = 32;
         pub const VT_IS_MEMBER: ::flatbuffers::VOffsetT = 34;
         pub const VT_IS_ADMIN: ::flatbuffers::VOffsetT = 36;
+        pub const VT_PICTURE: ::flatbuffers::VOffsetT = 38;
 
         #[inline]
         pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -74,6 +75,9 @@ pub mod nmp_app_29er {
             }
             if let Some(x) = args.parent_id {
                 builder.add_parent_id(x);
+            }
+            if let Some(x) = args.picture {
+                builder.add_picture(x);
             }
             if let Some(x) = args.name {
                 builder.add_name(x);
@@ -125,6 +129,16 @@ pub mod nmp_app_29er {
             unsafe {
                 self._tab
                     .get::<::flatbuffers::ForwardsUOffset<&str>>(GroupTreeNode::VT_NAME, None)
+            }
+        }
+        #[inline]
+        pub fn picture(&self) -> Option<&'a str> {
+            // Safety:
+            // Created from valid Table for this object
+            // which contains a valid value in this slot
+            unsafe {
+                self._tab
+                    .get::<::flatbuffers::ForwardsUOffset<&str>>(GroupTreeNode::VT_PICTURE, None)
             }
         }
         #[inline]
@@ -341,6 +355,11 @@ pub mod nmp_app_29er {
                 .visit_field::<u32>("unread_count", Self::VT_UNREAD_COUNT, false)?
                 .visit_field::<bool>("is_member", Self::VT_IS_MEMBER, false)?
                 .visit_field::<bool>("is_admin", Self::VT_IS_ADMIN, false)?
+                .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                    "picture",
+                    Self::VT_PICTURE,
+                    false,
+                )?
                 .finish();
             Ok(())
         }
@@ -367,6 +386,7 @@ pub mod nmp_app_29er {
         pub unread_count: u32,
         pub is_member: bool,
         pub is_admin: bool,
+        pub picture: Option<::flatbuffers::WIPOffset<&'a str>>,
     }
     impl<'a> Default for GroupTreeNodeArgs<'a> {
         #[inline]
@@ -389,6 +409,7 @@ pub mod nmp_app_29er {
                 unread_count: 0,
                 is_member: false,
                 is_admin: false,
+                picture: None,
             }
         }
     }
@@ -512,6 +533,11 @@ pub mod nmp_app_29er {
                 .push_slot::<bool>(GroupTreeNode::VT_IS_ADMIN, is_admin, false);
         }
         #[inline]
+        pub fn add_picture(&mut self, picture: ::flatbuffers::WIPOffset<&'b str>) {
+            self.fbb_
+                .push_slot_always::<::flatbuffers::WIPOffset<_>>(GroupTreeNode::VT_PICTURE, picture);
+        }
+        #[inline]
         pub fn new(
             _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
         ) -> GroupTreeNodeBuilder<'a, 'b, A> {
@@ -552,6 +578,7 @@ pub mod nmp_app_29er {
             ds.field("unread_count", &self.unread_count());
             ds.field("is_member", &self.is_member());
             ds.field("is_admin", &self.is_admin());
+            ds.field("picture", &self.picture());
             ds.finish()
         }
     }

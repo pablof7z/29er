@@ -18,6 +18,7 @@ table GroupTreeNode {
   unread_count:uint32;
   is_member:bool = false;
   is_admin:bool = false;
+  picture:string;
 }
 
 table GroupTreeSnapshot {

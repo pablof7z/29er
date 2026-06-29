@@ -223,6 +223,10 @@ struct GroupTreeNode {
     group_id: String,
     host_relay_url: String,
     name: Option<String>,
+    /// Group avatar URL, sourced verbatim from the `["picture", …]` tag on the
+    /// relay-signed kind:39000 metadata (carried through `DiscoveredGroup`).
+    /// `None` when the group has no picture; the shell renders initials.
+    picture: Option<String>,
     parent_id: Option<String>,
     child_ids: Vec<String>,
     member_count: u32,
@@ -284,6 +288,7 @@ fn encode_node<'a>(
     let group_id = fbb.create_string(&node.group_id);
     let host_relay_url = fbb.create_string(&node.host_relay_url);
     let name = node.name.as_deref().map(|value| fbb.create_string(value));
+    let picture = node.picture.as_deref().map(|value| fbb.create_string(value));
     let parent_id = node
         .parent_id
         .as_deref()
@@ -318,6 +323,7 @@ fn encode_node<'a>(
             group_id: Some(group_id),
             host_relay_url: Some(host_relay_url),
             name,
+            picture,
             parent_id,
             child_ids: Some(child_ids),
             member_count: node.member_count,
@@ -428,6 +434,7 @@ fn build_node(
         group_id: group.group_id.clone(),
         host_relay_url: group.host_relay_url.clone(),
         name: group.name.clone(),
+        picture: group.picture.clone(),
         parent_id,
         child_ids,
         member_count: group.member_count,
@@ -672,6 +679,34 @@ mod tests {
         assert!(child.is_member && !child.is_admin);
         // No joined row → membership defaults to false/false.
         assert!(!sibling.is_member && !sibling.is_admin);
+    }
+
+    #[test]
+    fn nodes_carry_group_picture_from_discovered() {
+        // The group avatar URL (kind:39000 `["picture", …]`) flows verbatim from
+        // `DiscoveredGroup.picture` onto the tree node so the shell can render it.
+        let mut snapshot = discovered();
+        snapshot.groups[0].picture = Some("https://example.com/avatar.png".to_string());
+
+        let tree = derive_group_tree(
+            &snapshot,
+            &GroupTreeMessageState::default(),
+            &GroupMembershipMap::new(),
+        );
+        let root = tree
+            .nodes
+            .iter()
+            .find(|node| node.group_id == "root")
+            .expect("root node");
+        let sibling = tree
+            .nodes
+            .iter()
+            .find(|node| node.group_id == "sibling")
+            .expect("sibling node");
+
+        assert_eq!(root.picture.as_deref(), Some("https://example.com/avatar.png"));
+        // Groups without a picture tag stay None (shell falls back to initials).
+        assert_eq!(sibling.picture, None);
     }
 
     #[test]

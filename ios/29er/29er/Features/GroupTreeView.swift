@@ -292,14 +292,12 @@ struct GroupRowLabel: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(node.groupId.pubkeyColor)
-                Text(initials)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 46, height: 46)
+            GroupAvatar(
+                pictureURL: node.pictureURL,
+                seed: node.groupId,
+                initials: initials,
+                size: 46
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(node.displayName)
@@ -534,26 +532,37 @@ struct GroupTimelineView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 1) {
-                        HStack(spacing: 5) {
-                            Text(title)
-                                .font(.headline)
-                                .lineLimit(1)
-                                .accessibilityIdentifier("room-title")
-
-                            if let node, !node.isOpen {
-                                Image(systemName: "lock.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
+                    HStack(spacing: 8) {
+                        if let node {
+                            GroupAvatar(
+                                pictureURL: node.pictureURL,
+                                seed: node.groupId,
+                                initials: title.groupInitials,
+                                size: 28
+                            )
                         }
 
-                        if let node {
-                            Text(roomChromeSubtitle(node))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .accessibilityIdentifier("room-subtitle")
+                        VStack(spacing: 1) {
+                            HStack(spacing: 5) {
+                                Text(title)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .accessibilityIdentifier("room-title")
+
+                                if let node, !node.isOpen {
+                                    Image(systemName: "lock.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
+                            if let node {
+                                Text(roomChromeSubtitle(node))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .accessibilityIdentifier("room-subtitle")
+                            }
                         }
                     }
                 }
@@ -1777,6 +1786,36 @@ private struct SlackMessageBody: View {
     }
 }
 
+/// Group avatar (D4). The picture is rendered through the NMP registry image
+/// component (`NostrImageView`, which routes the URL through the content
+/// renderer's disk-backed image loader) — never a hand-rolled `AsyncImage`.
+/// When the group has no kind:39000 picture, it falls back to a deterministic
+/// initials chip keyed on the group id.
+private struct GroupAvatar: View {
+    let pictureURL: URL?
+    let seed: String
+    let initials: String
+    let size: CGFloat
+
+    var body: some View {
+        Group {
+            if let pictureURL {
+                NostrImageView(url: pictureURL)
+            } else {
+                ZStack {
+                    Circle().fill(seed.pubkeyColor)
+                    Text(initials)
+                        .font(.system(size: size * 0.35, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .accessibilityHidden(true)
+    }
+}
+
 private struct ChatAvatar: View {
     let seed: String
 
@@ -1815,6 +1854,14 @@ private extension String {
             return words.compactMap(\.first).map { String($0).uppercased() }.joined()
         }
         return count >= 2 ? String(prefix(2)).uppercased() : ".."
+    }
+
+    /// Initials for a group avatar fallback: first letter of up to two words,
+    /// uppercased, defaulting to "#" when empty.
+    var groupInitials: String {
+        let pieces = split(separator: " ").prefix(2).compactMap { $0.first }
+        let value = String(pieces).uppercased()
+        return value.isEmpty ? "#" : value
     }
 
     var pubkeyColor: Color {
