@@ -26,20 +26,35 @@ struct LoadingView: View {
 
 /// Empty state — no data yet, but the relay/kernel is reachable and a fresh
 /// snapshot just has nothing to show. Uses `ContentUnavailableView` for the
-/// iOS-native "nothing here" presentation.
-struct EmptyStateView: View {
+/// iOS-native "nothing here" presentation. An optional `actions` builder
+/// renders a primary CTA (e.g. "Create the first room") beneath the message.
+struct EmptyStateView<Actions: View>: View {
     let title: String
     let message: String
     var systemImage: String = "rectangle.stack"
+    @ViewBuilder var actions: () -> Actions
 
     var body: some View {
-        ContentUnavailableView(
-            title,
-            systemImage: systemImage,
-            description: Text(message)
-        )
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage)
+        } description: {
+            Text(message)
+        } actions: {
+            actions()
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(.systemBackground))
+    }
+}
+
+extension EmptyStateView where Actions == EmptyView {
+    /// Convenience initializer for the action-less empty state (the common
+    /// case): callers that only need a title + message keep their existing
+    /// call site unchanged.
+    init(title: String, message: String, systemImage: String = "rectangle.stack") {
+        self.init(title: title, message: message, systemImage: systemImage) {
+            EmptyView()
+        }
     }
 }
 

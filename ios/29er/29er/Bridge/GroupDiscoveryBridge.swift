@@ -310,12 +310,19 @@ extension KernelModel {
         access: String = "open",
         parent: String? = nil
     ) -> Bool {
-        // Host relay comes from the Rust-owned `group_defaults` projection (D7),
-        // never a Swift literal. Empty until the defaults sidecar lands; the
-        // Rust create action also validates the host relay, so an empty URL is
-        // rejected there rather than silently defaulted here.
+        // Host relay comes from a Rust-owned projection (D7), never a Swift
+        // literal. A new room is created on the relay the user is currently
+        // browsing — the active relay-selector projection (`activeRelayUrl`),
+        // which follows the seeded relay set (so the `NMP_TEST_RELAYS` seam
+        // flows through to create-group, letting it target local croissant in
+        // tests). It falls back to the operator-policy suggested host relay
+        // (`group_defaults.suggestedRelayUrl`) only when no relay is selected
+        // yet. The Rust create action validates the host relay, so an empty URL
+        // is rejected there rather than silently defaulted here.
+        let activeRelayUrl = relaySelector.activeRelayUrl
+        let hostRelayUrl = activeRelayUrl.isEmpty ? groupDefaults.suggestedRelayUrl : activeRelayUrl
         let group = GroupId(
-            hostRelayUrl: groupDefaults.suggestedRelayUrl,
+            hostRelayUrl: hostRelayUrl,
             localId: localId
         )
         return kernel.createPublicGroup(

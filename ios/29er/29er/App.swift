@@ -90,16 +90,19 @@ struct MainScaffold: View {
                             } label: {
                                 Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
                             }
+                            .accessibilityIdentifier("settings-logout")
 
                             Button(role: .destructive) {
                                 showingResetDatabaseConfirmation = true
                             } label: {
                                 Label("Reset Local Database", systemImage: "trash")
                             }
+                            .accessibilityIdentifier("settings-reset-db")
                         } label: {
                             Image(systemName: "gearshape")
                         }
                         .accessibilityLabel("Settings")
+                        .accessibilityIdentifier("settings-menu")
                     }
                 }
                 .confirmationDialog(
@@ -110,7 +113,9 @@ struct MainScaffold: View {
                     Button("Reset Local Database", role: .destructive) {
                         model.resetLocalDatabaseAndRestart()
                     }
+                    .accessibilityIdentifier("reset-confirm")
                     Button("Cancel", role: .cancel) {}
+                        .accessibilityIdentifier("reset-cancel")
                 } message: {
                     Text("This removes locally cached Nostr data on this device. Your saved account stays in Keychain.")
                 }

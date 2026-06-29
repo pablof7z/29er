@@ -22,6 +22,7 @@ private let gtLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "GroupT
 struct GroupTreeView: View {
     @EnvironmentObject private var model: KernelModel
     @State private var showingRelaySelector = false
+    @State private var showingCreateGroup = false
 
     var body: some View {
         let tree = model.groupTree
@@ -36,8 +37,17 @@ struct GroupTreeView: View {
             } else if tree.roots.isEmpty {
                 EmptyStateView(
                     title: "No Rooms",
-                    message: "Rooms will appear here when this relay publishes them."
-                )
+                    message: "Rooms will appear here when this relay publishes them.",
+                    systemImage: "rectangle.stack"
+                ) {
+                    Button {
+                        showingCreateGroup = true
+                    } label: {
+                        Label("Create the first room", systemImage: "plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("create-group-button-empty")
+                }
             } else {
                 GroupTreeList(nodes: tree.roots, tree: tree)
             }
@@ -60,11 +70,35 @@ struct GroupTreeView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Relay")
+                .accessibilityIdentifier("relay-selector-button")
+            }
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    showingCreateGroup = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("New Room")
+                .accessibilityIdentifier("create-group-button")
             }
         }
         .sheet(isPresented: $showingRelaySelector) {
             RelaySelectorSheet()
                 .environmentObject(model)
+        }
+        .sheet(isPresented: $showingCreateGroup) {
+            CreateGroupSheet { localId, name, about, visibility, access in
+                model.createGroup(
+                    localId: localId,
+                    name: name,
+                    about: about,
+                    visibility: visibility,
+                    access: access,
+                    parent: nil
+                )
+            }
+            .environmentObject(model)
+            .presentationDetents([.large])
         }
         .navigationDestination(for: String.self) { groupId in
             GroupTimelineView(groupId: groupId)
@@ -128,6 +162,7 @@ private struct RelaySelectorSheet: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("relay-row-\(row.relayUrl)")
                     }
                     .onDelete(perform: removeRelays)
                 }
@@ -138,6 +173,7 @@ private struct RelaySelectorSheet: View {
                             .keyboardType(.URL)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .accessibilityIdentifier("relay-add-field")
                         Button {
                             addRelay()
                         } label: {
@@ -145,6 +181,7 @@ private struct RelaySelectorSheet: View {
                                 .font(.title3)
                         }
                         .disabled(trimmedNewRelayUrl.isEmpty)
+                        .accessibilityIdentifier("relay-add-button")
                     }
                 }
             }
@@ -155,6 +192,7 @@ private struct RelaySelectorSheet: View {
                     Button("Done") {
                         dismiss()
                     }
+                    .accessibilityIdentifier("relay-selector-done")
                 }
             }
         }
@@ -501,6 +539,7 @@ struct GroupTimelineView: View {
                             Text(title)
                                 .font(.headline)
                                 .lineLimit(1)
+                                .accessibilityIdentifier("room-title")
 
                             if let node, !node.isOpen {
                                 Image(systemName: "lock.fill")
@@ -514,6 +553,7 @@ struct GroupTimelineView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
+                                .accessibilityIdentifier("room-subtitle")
                         }
                     }
                 }
@@ -624,6 +664,7 @@ struct GroupTimelineView: View {
             }
             .labelStyle(.iconOnly)
             .accessibilityLabel(node.memberCount == 1 ? "1 member" : "\(node.memberCount) members")
+            .accessibilityIdentifier("members-button-\(groupId)")
 
             if isCurrentAdmin {
                 Button {
@@ -1430,6 +1471,108 @@ private struct AdminActionsSheet: View {
     }
 }
 
+/// Root "New Room" sheet. Mirrors the AdminActionsSheet "Room" section but
+/// creates a **top-level** group (no parent) so a signed-in user can create the
+/// first room without already being admin of an existing one. The host relay
+/// is owned by Rust (the active relay-selector projection / the group-defaults
+/// suggested relay) — this sheet only marshals the room fields.
+private struct CreateGroupSheet: View {
+    /// `(localId, name, about, visibility, access) -> accepted`.
+    let onCreate: (String, String, String?, String, String) -> Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var localId = ""
+    @State private var name = ""
+    @State private var about = ""
+    @State private var visibility = "public"
+    @State private var access = "open"
+    @State private var error: String?
+
+    private var trimmedLocalId: String {
+        localId.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedAbout: String {
+        about.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSubmit: Bool {
+        !trimmedLocalId.isEmpty && !trimmedName.isEmpty
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("New Room") {
+                    TextField("Name", text: $name)
+                        .accessibilityIdentifier("create-group-name-field")
+                    TextField("Room ID", text: $localId)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityIdentifier("create-group-local-id-field")
+                    TextField("Description", text: $about, axis: .vertical)
+                        .lineLimit(2...4)
+                        .accessibilityIdentifier("create-group-about-field")
+
+                    Picker("Visibility", selection: $visibility) {
+                        Text("Public").tag("public")
+                        Text("Private").tag("private")
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("create-group-visibility-picker")
+
+                    Picker("Access", selection: $access) {
+                        Text("Open").tag("open")
+                        Text("Closed").tag("closed")
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("create-group-access-picker")
+                }
+
+                if let error {
+                    Section {
+                        Text(error)
+                            .foregroundStyle(.red)
+                    }
+                }
+            }
+            .navigationTitle("New Room")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") {
+                        submit()
+                    }
+                    .accessibilityIdentifier("create-group-submit-button")
+                    .disabled(!canSubmit)
+                }
+            }
+        }
+    }
+
+    private func submit() {
+        let accepted = onCreate(
+            trimmedLocalId,
+            trimmedName,
+            trimmedAbout.isEmpty ? nil : trimmedAbout,
+            visibility,
+            access
+        )
+        if accepted {
+            dismiss()
+        } else {
+            error = "Could not create the room. Check the active relay and try again."
+        }
+    }
+}
+
 private struct MemberListSheet: View {
     let title: String
     let members: [GroupMember]
@@ -1470,6 +1613,8 @@ private struct MemberListSheet: View {
                         }
                         .padding(.vertical, 3)
                         .listRowBackground(Color.clear)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("member-row-\(member.pubkey)")
                     }
                     .listStyle(.insetGrouped)
                     .scrollContentBackground(.hidden)

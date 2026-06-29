@@ -52,29 +52,34 @@ struct OnboardingView: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 12)
                             .glassPanel(cornerRadius: 16, interactive: true)
+                            .accessibilityIdentifier("onboarding-nsec-field")
 
                         HStack(spacing: 12) {
                             Button(action: paste) {
                                 Label("Paste nsec", systemImage: "doc.on.clipboard")
                             }
                             .buttonStyle(.glass)
+                            .accessibilityIdentifier("onboarding-paste-button")
 
                             Button(action: submit) {
                                 Label("Sign In", systemImage: "arrow.right")
                             }
                             .buttonStyle(.glassProminent)
                             .disabled(nsecInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading)
+                            .accessibilityIdentifier("onboarding-signin-button")
                         }
 
                         if isLoading {
                             ProgressView("Signing in…")
                                 .padding(.top, 2)
+                                .accessibilityIdentifier("onboarding-loading")
                         } else if isError {
                             Text(errorText)
                                 .font(.callout)
                                 .foregroundStyle(.red)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal)
+                                .accessibilityIdentifier("onboarding-error")
                         }
                     }
                     .padding(18)
