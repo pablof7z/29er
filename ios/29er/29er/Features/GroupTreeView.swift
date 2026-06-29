@@ -361,6 +361,7 @@ struct GroupRowLabel: View {
 /// Projection-backed destination pushed by `NavigationLink(value:)`.
 struct GroupTimelineView: View {
     @EnvironmentObject private var model: KernelModel
+    @Environment(\.openURL) private var openURL
     let groupId: String
 
     @State private var draft = ""
@@ -758,6 +759,7 @@ struct GroupTimelineView: View {
                             group: group,
                             senderTitle: senderTitle(for: group.pubkey),
                             timeLabel: Self.clockTime(group.messages[0].createdAt),
+                            mentionLabel: mentionLabel,
                             outboxItem: { outboxItem(for: $0) },
                             onRetry: { model.retryPublish($0) },
                             onReact: { message in
@@ -782,6 +784,10 @@ struct GroupTimelineView: View {
         .onChange(of: visibleMessages.count) { _, _ in
             scrollToBottom(proxy, animated: true)
         }
+        // D5: install the tap-wired content renderer for every message body in
+        // the stream. Mention display labels are passed per-NostrContentView via
+        // `mentionLabel`; the embed envelope source is bound in `body`.
+        .nostrContentRenderer(contentRenderer)
     }
 
     // MARK: Slack-style grouping
@@ -874,6 +880,35 @@ struct GroupTimelineView: View {
             return profile.display
         }
         return memberTitle(for: pubkey)
+    }
+
+    /// D5 mention resolver passed into `NostrContentView`. Resolves a
+    /// `nostr:npub…` mention to the profile's @display-name via the
+    /// profile-host projection (`model.profile(forPubkey:)`), falling back to
+    /// the registry's short-hex default when the kind:0 has not resolved yet.
+    /// The shell holds zero NIP-19 knowledge: `uri.primaryId` is the hex pubkey
+    /// the Rust tokenizer already decoded from the bech32 entity.
+    private func mentionLabel(_ uri: NostrWireUri) -> String {
+        if let profile = model.profile(forPubkey: uri.primaryId) {
+            return profile.display
+        }
+        return NostrContentView.defaultMentionLabel(uri)
+    }
+
+    /// D5 content renderer installed into the environment for every message
+    /// body. Wires real tap callbacks: links/images open externally; mention,
+    /// hashtag, and event-ref taps are no-ops for now (29er has no profile /
+    /// hashtag / thread destination yet — wired when those surfaces land).
+    private var contentRenderer: NostrContentRenderer {
+        NostrContentRenderer(
+            callbacks: NostrContentCallbacks(
+                onMentionTap: { _ in },
+                onHashtagTap: { _ in },
+                onLinkTap: { url in openURL(url) },
+                onImageTap: { url in openURL(url) },
+                onEventRefTap: { _ in }
+            )
+        )
     }
 
     private var composer: some View {
@@ -1678,6 +1713,7 @@ private struct SlackMessageGroupView: View {
     let group: MessageGroup
     let senderTitle: String
     let timeLabel: String
+    let mentionLabel: (NostrWireUri) -> String
     let outboxItem: (String) -> PublishOutboxItem?
     let onRetry: (PublishOutboxItem) -> Void
     let onReact: (GroupChatMessage) -> Void
@@ -1704,6 +1740,7 @@ private struct SlackMessageGroupView: View {
                 ForEach(group.messages) { message in
                     SlackMessageBody(
                         message: message,
+                        mentionLabel: mentionLabel,
                         pending: outboxItem(message.id),
                         onRetry: onRetry,
                         onReact: { onReact(message) }
@@ -1725,9 +1762,17 @@ private struct SlackMessageGroupView: View {
 /// inline pending/retry status, and the per-message context menu.
 private struct SlackMessageBody: View {
     let message: GroupChatMessage
+    let mentionLabel: (NostrWireUri) -> String
     let pending: PublishOutboxItem?
     let onRetry: (PublishOutboxItem) -> Void
     let onReact: () -> Void
+
+    @Environment(\.nostrProfileHost) private var profileHost
+    @State private var claimedMentions: [String] = []
+
+    private var messageTree: ContentTreeWire? {
+        NostrMessageContent.tree(for: message)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -1753,6 +1798,25 @@ private struct SlackMessageBody: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+        // D5 mention resolution: claim the kind:0 of every pubkey the kernel
+        // tokenized as a mention in this message (mirrors NostrAvatar claiming
+        // the author) so `mentionLabel` resolves @display-names instead of
+        // short hex. The shell holds zero NIP-19 knowledge — it reads the
+        // already-decoded mention nodes from the content tree. Released on
+        // disappear; the claim is keyed per (message, pubkey) for ref-counting.
+        .task(id: message.id) {
+            let pubkeys = mentionPubkeys
+            for pubkey in pubkeys {
+                profileHost?.resolveProfileRef(pubkey: pubkey, consumerID: mentionConsumerID(pubkey))
+            }
+            claimedMentions = pubkeys
+        }
+        .onDisappear {
+            for pubkey in claimedMentions {
+                profileHost?.releaseProfileRef(pubkey: pubkey, consumerID: mentionConsumerID(pubkey))
+            }
+            claimedMentions = []
+        }
         .contextMenu {
             Button(action: onReact) {
                 Label("React", systemImage: "heart")
@@ -1774,8 +1838,8 @@ private struct SlackMessageBody: View {
 
     @ViewBuilder
     private var content: some View {
-        if let tree = NostrMessageContent.tree(for: message) {
-            NostrContentView(tree: tree, font: .body)
+        if let tree = messageTree {
+            NostrContentView(tree: tree, font: .body, mentionLabel: mentionLabel)
         } else {
             // Tokenization fell through — never drop a message.
             Text(message.content)
@@ -1783,6 +1847,28 @@ private struct SlackMessageBody: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// Distinct hex pubkeys the kernel tokenized as profile mentions in this
+    /// message body. Read from the content-tree arena (kernel output), never
+    /// re-parsed from raw text.
+    private var mentionPubkeys: [String] {
+        guard let tree = messageTree else { return [] }
+        var seen = Set<String>()
+        var result: [String] = []
+        for node in tree.nodes {
+            if case .mention(let uri) = node, uri.kind == .profile {
+                let pubkey = uri.primaryId
+                if !pubkey.isEmpty, seen.insert(pubkey).inserted {
+                    result.append(pubkey)
+                }
+            }
+        }
+        return result
+    }
+
+    private func mentionConsumerID(_ pubkey: String) -> String {
+        "29er.mention:\(message.id):\(pubkey)"
     }
 }
 
