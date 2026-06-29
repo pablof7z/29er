@@ -289,6 +289,7 @@ private struct GroupChildrenView: View {
 /// aggregate unread count for the group plus descendants.
 struct GroupRowLabel: View {
     let node: GroupTreeNode
+    @Environment(\.nostrProfileHost) private var profileHost
 
     var body: some View {
         HStack(spacing: 12) {
@@ -350,7 +351,19 @@ struct GroupRowLabel: View {
         else {
             return "No messages yet"
         }
-        return preview
+        // D5 previews: flatten the kind:9 body to one render-safe line so the
+        // list shows "gm @name" / "[image]" / "[note]" instead of raw
+        // `nostr:npub…` / URL tokens. Mentions resolve through the profile host
+        // (short-hex until the kind:0 lands).
+        return NostrMessageContent.flattenedPreview(
+            forId: node.lastMessageId ?? "",
+            content: preview,
+            kind: 9,
+            mentionLabel: { uri in
+                profileHost?.profile(forPubkey: uri.primaryId)?.display
+                    ?? NostrContentView.defaultMentionLabel(uri)
+            }
+        )
     }
 
     private var unreadText: String {

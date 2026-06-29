@@ -37,6 +37,108 @@ enum NostrMessageContent {
         return tree
     }
 
+    /// Tokenized tree memoized by a stable event id (preview path). The preview
+    /// content is the same immutable event body as the timeline message, so the
+    /// id-keyed cache is shared with `tree(for:)` — the group list and the open
+    /// timeline tokenize each event exactly once.
+    static func tree(forId id: String, content: String, kind: UInt32) -> ContentTreeWire? {
+        guard !id.isEmpty else { return tokenize(content: content, kind: kind) }
+        let key = id as NSString
+        if let cached = cache.object(forKey: key) {
+            return cached.tree
+        }
+        let tree = tokenize(content: content, kind: kind)
+        cache.setObject(TreeBox(tree), forKey: key)
+        return tree
+    }
+
+    /// Flatten a tokenized chat body to a single render-safe preview line for the
+    /// group list (D5 previews). Raw `nostr:` entity tokens and bare URLs are
+    /// never shown: mentions collapse to `@<label>` (resolved via `mentionLabel`,
+    /// short-hex otherwise), embedded events to `[note]`, media to `[image]` /
+    /// `[video]` / `[audio]`, and links to `[link]`. Falls back to the raw
+    /// content when tokenization fails so a preview is never dropped.
+    static func flattenedPreview(
+        forId id: String,
+        content: String,
+        kind: UInt32,
+        mentionLabel: (NostrWireUri) -> String
+    ) -> String {
+        guard let tree = tree(forId: id, content: content, kind: kind) else { return content }
+        var out = ""
+        for root in tree.roots {
+            appendFlattened(node: root, tree: tree, mentionLabel: mentionLabel, into: &out)
+        }
+        let collapsed = out
+            .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+            .joined(separator: " ")
+        return collapsed.isEmpty ? content : collapsed
+    }
+
+    private static func appendFlattened(
+        node index: UInt32,
+        tree: ContentTreeWire,
+        mentionLabel: (NostrWireUri) -> String,
+        into out: inout String
+    ) {
+        guard let node = tree.node(at: index) else { return }
+        func recurse(_ children: [UInt32]) {
+            for child in children {
+                appendFlattened(node: child, tree: tree, mentionLabel: mentionLabel, into: &out)
+            }
+        }
+        switch node {
+        case .text(let value):
+            out += value
+        case .mention(let uri):
+            out += "@\(mentionLabel(uri))"
+        case .eventRef:
+            out += "[note]"
+        case .hashtag(let tag):
+            out += "#\(tag)"
+        case .url:
+            out += "[link]"
+        case .media(_, let kind):
+            switch kind {
+            case .image: out += "[image]"
+            case .video: out += "[video]"
+            case .audio: out += "[audio]"
+            }
+        case .image:
+            out += "[image]"
+        case .emoji(let shortcode, _):
+            out += ":\(shortcode):"
+        case .invoice:
+            out += "[invoice]"
+        case .inlineCode(let value):
+            out += value
+        case .codeBlock(_, let body):
+            out += body
+        case .softBreak, .hardBreak:
+            out += " "
+        case .paragraph(let children),
+             .heading(_, let children),
+             .blockQuote(let children),
+             .emphasis(let children),
+             .strong(let children):
+            recurse(children)
+        case .link(let children, _):
+            // A markdown link with visible label text keeps the label; a bare
+            // autolink (no children) collapses to the [link] chip.
+            if children.isEmpty {
+                out += "[link]"
+            } else {
+                recurse(children)
+            }
+        case .list(_, let items):
+            for item in items { recurse(item) }
+        case .rule:
+            out += " "
+        case .placeholder:
+            break
+        }
+    }
+
     /// Pure tokenization over the `tokenizeContent` UniFFI function. Auto mode
     /// dispatches markdown vs plain by `kind` (kind 9/11 chat → plain).
     static func tokenize(content: String, kind: UInt32) -> ContentTreeWire? {
