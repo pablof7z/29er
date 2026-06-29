@@ -280,7 +280,7 @@ fn publish_relay_set(tx: &nmp_core::CommandSender, relays: Vec<String>) {
     };
     let _ = tx.send(ActorCommand::Publish(PublishCommand::UnsignedEvent {
         event,
-        correlation_id: Some(crate::ffi::mint_correlation_id()),
+        correlation_id: Some(crate::app::mint_correlation_id()),
         signer_pubkey: None,
     }));
 }

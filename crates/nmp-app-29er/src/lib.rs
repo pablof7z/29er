@@ -1,54 +1,39 @@
-//! `nmp-app-29er` — 29er per-app glue.
+//! `nmp-app-29er` — 29er per-app glue (clean-break architecture).
 //!
-//! Mirrors `nmp-app-chirp`'s minimal surface but strips to what 29er's S01
-//! slice needs: NIP-29 group discovery + the canonical NMP default action set.
-//! No DM / Marmot / Wallet / Search / Embed / home-feed projections — those
-//! land in later milestones.
+//! 29er's S01 surface: NIP-29 group discovery + the canonical NMP default
+//! action set. No DM / Marmot / Wallet / Search / Embed / home-feed projections.
 //!
-//! ## Wiring
+//! ## Shape
 //!
-//! The iOS shell links this one aggregate static library for 29er. Keeping
-//! `nmp-ffi`, the NIP-46 broker adapter, and the 29er registration in one Rust
-//! archive gives the process exactly one copy of the native C-ABI state.
+//! `nmp-ffi` is deleted (#2483). 29er no longer ships a hand-written C-ABI;
+//! instead it exposes:
 //!
-//! The shell calls [`nmp_app_29er_register`] once after [`nmp_ffi::nmp_app_new`]
-//! and before [`nmp_ffi::nmp_app_start`]. The registration:
-//!
-//! 1. Calls [`nmp_defaults::register_defaults_with_handles`] for the canonical
-//!    NMP composition (NIP-02 / NIP-17 / NIP-57 / NIP-65 action modules, the
-//!    production routing substrate, the DM-inbox + zap-receipts runtimes, the
-//!    D2 coverage hook).
-//! 2. Calls [`nmp_nip29::register::register_actions`] for the NIP-29 action
-//!    namespaces (`nmp.nip29.discover` / `nmp.nip29.join` / etc).
-//! 3. Wires the NIP-29 group-create defaults projection so the suggested
-//!    public-group relay URL surfaces under `"nmp.nip29.group_defaults"`.
+//! * [`TwentyNinerApp`] — a `uniffi::Object` that OWNS an
+//!   `nmp-native-runtime` app, composes 29er in its constructor, and exposes
+//!   29er's lifecycle + NIP-29 verbs to Swift/Kotlin. The iOS/Android shells
+//!   consume generated bindings (see `src/bin/uniffi_bindgen.rs`).
+//! * [`composition::compose_29er_runtime`] — the shared composition root, also
+//!   called by the native Rust TUI on its `NmpAppBuilder`.
+//! * Pure modules ([`compose`], [`config`], [`group_tree`], [`relay_selector`],
+//!   [`relay_seeding`]) reused verbatim by both shells.
 //!
 //! ## Doctrine
 //!
-//! * **D0** — kernel emits, this crate composes. No business logic in Swift.
-//! * **D6** — runtime FFI symbols degrade silently on null pointers, lock
-//!   poisoning, or serialization failure; init-only config symbols return
-//!   explicit status codes for ordering errors.
+//! * **D0** — kernel emits, this crate composes. No business logic in the shell.
+//! * **D6** — verbs degrade silently / fail-closed on malformed input; dispatch
+//!   surfaces failures as a populated [`DispatchOutcome::error`].
+//! * **D7** — seeding + relay policy live in Rust ([`config`] / [`relay_seeding`]).
 
+uniffi::setup_scaffolding!();
+
+pub mod app;
+pub mod composition;
 pub mod compose;
 pub mod config;
-pub mod ffi;
 pub mod group_tree;
 pub mod relay_seeding;
 pub mod relay_selector;
 
+pub use app::{dispatch_nip29_action, DispatchOutcome, TwentyNinerApp, UpdateSink};
+pub use composition::compose_29er_runtime;
 pub use compose::{compose_chat_message, ComposedGroupMessage};
-
-pub use ffi::{
-    nmp_app_29er_close_group_discovery, nmp_app_29er_declare_consumed_projections,
-    nmp_app_29er_dispatch_action_bytes, nmp_app_29er_mark_group_read,
-    nmp_app_29er_open_group_discovery, nmp_app_29er_register, nmp_app_29er_register_group_chat,
-    nmp_app_29er_relay_selector_add_relay, nmp_app_29er_relay_selector_remove_relay,
-    nmp_app_29er_relay_selector_select_relay, nmp_app_29er_unregister, nmp_free_string,
-    NmpRegisterStatus, TwentyNinerHandle,
-};
-
-// Relay-seeding C-ABI surface (D7 — seeding policy lives in Rust, not the
-// shell). Mirrors Chirp's `nmp_app_chirp_seed_default_relays` /
-// `nmp_app_chirp_seed_relays_from_json`.
-pub use relay_seeding::{nmp_app_29er_seed_default_relays, nmp_app_29er_seed_relays_from_json};

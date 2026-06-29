@@ -17,7 +17,6 @@ version = "0.1.0"
 [workspace.dependencies]
 nmp-core = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "ac69c0fb7d64cd6e0af3637a66aa055b6699b42d" }
 nmp-native-runtime = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "ac69c0fb7d64cd6e0af3637a66aa055b6699b42d" }
-nmp-uniffi = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "ac69c0fb7d64cd6e0af3637a66aa055b6699b42d" }
 nmp-defaults = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "ac69c0fb7d64cd6e0af3637a66aa055b6699b42d" }
 nmp-nip29 = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "ac69c0fb7d64cd6e0af3637a66aa055b6699b42d" }
 nmp-planner = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "ac69c0fb7d64cd6e0af3637a66aa055b6699b42d" }

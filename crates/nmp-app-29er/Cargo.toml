@@ -4,28 +4,39 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Per-app 29er glue. Calls nmp_defaults::register_defaults + nmp_nip29::register_actions, and surfaces the NIP-29 group-discovery / group-chat / discover / join C-ABI entry points the 29er iOS shell links against. Mirrors nmp-app-chirp's minimal surface; 29er carries no DM / Marmot / Wallet / Search / Embed projections in S01."
+description = "Per-app 29er glue. Composition root (substrate + social + NIP-29 actions + group defaults) plus the `TwentyNinerApp` UniFFI object the 29er iOS/Android shells consume. Clean-break: nmp-ffi is deleted — this owns its own nmp-native-runtime app and exposes 29er's NIP-29 verbs through UniFFI, not a hand-written C-ABI."
 
 [lib]
 name = "nmp_app_29er"
-# Static lib so the iOS shell links one aggregate Rust archive (`-lnmp_app_29er`)
-# that contains nmp-core, nmp-ffi, and this crate's `#[no_mangle]` symbols.
-# Doctrine D0 forbids nmp-core -> nmp-nip29, so the per-app crate composes them.
-crate-type = ["staticlib", "rlib"]
+# cdylib  — `uniffi-bindgen generate --library` reads it to emit Swift/Kotlin.
+# staticlib — the iOS shell links one aggregate Rust archive (`-lnmp_app_29er`).
+# lib (rlib) — native Rust consumers (the TUI) reuse the pure modules + the
+#   `compose_29er_runtime` composition root, and `cargo test` needs it.
+crate-type = ["lib", "cdylib", "staticlib"]
 
 [features]
 default = ["lmdb-backend"]
 # Persistent local cache / publish-intent ledger (matches Chirp's default).
 lmdb-backend = ["nmp-core/lmdb-backend"]
+# Build the `uniffi-bindgen` binary to (re)generate Swift/Kotlin bindings.
+# NOT in `default` — keeps cold builds out of the 600s watchdog budget.
+bindgen = ["uniffi/cli"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi_bindgen.rs"
+required-features = ["bindgen"]
 
 [dependencies]
 flatbuffers = { workspace = true }
 nmp-core = { workspace = true }
 nmp-native-runtime = { workspace = true }
-nmp-uniffi = { workspace = true }
 nmp-defaults = { workspace = true }
 nmp-nip29 = { workspace = true }
 nmp-planner = { workspace = true }
 nmp-signer-iface = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+uniffi = { version = "0.29" }
+# `SignerSource::LocalNsec` carries the nsec as `Zeroizing<String>`.
+zeroize = "1"

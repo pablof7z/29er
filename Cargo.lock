@@ -54,6 +54,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anstyle"
+version = "1.0.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
+
+[[package]]
 name = "anyhow"
 version = "1.0.103"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -456,6 +462,45 @@ dependencies = [
  "inout",
  "zeroize",
 ]
+
+[[package]]
+name = "clap"
+version = "4.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ddb117e43bbf7dacf0a4190fef4d345b9bad68dfc649cb349e7d17d28428e51"
+dependencies = [
+ "clap_builder",
+ "clap_derive",
+]
+
+[[package]]
+name = "clap_builder"
+version = "4.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "714a53001bf66416adb0e2ef5ac857140e7dc3a0c48fb28b2f10762fc4b5069f"
+dependencies = [
+ "anstyle",
+ "clap_lex",
+ "strsim",
+]
+
+[[package]]
+name = "clap_derive"
+version = "4.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2ce8604710f6733aa641a2b3731eaa1e8b3d9973d5e3565da11800813f997a9"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "clap_lex"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "compact_str"
@@ -1651,9 +1696,10 @@ dependencies = [
  "nmp-nip29",
  "nmp-planner",
  "nmp-signer-iface",
- "nmp-uniffi",
  "serde",
  "serde_json",
+ "uniffi",
+ "zeroize",
 ]
 
 [[package]]
@@ -1783,15 +1829,11 @@ dependencies = [
  "nmp-nip11",
  "nmp-nip18",
  "nmp-nip29",
- "nmp-nip46",
- "nmp-nip46-runtime",
  "nmp-nip47",
  "nmp-nip50",
  "nmp-nip51",
  "nmp-nip57",
  "nmp-planner",
- "nmp-signer-iface",
- "nmp-signers",
  "nmp-store",
  "nmp-wot",
  "nostr",
@@ -1952,31 +1994,6 @@ source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=ac69c0f
 dependencies = [
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "nmp-nip46"
-version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=ac69c0fb7d64cd6e0af3637a66aa055b6699b42d#ac69c0fb7d64cd6e0af3637a66aa055b6699b42d"
-dependencies = [
- "nostr",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "nmp-nip46-runtime"
-version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=ac69c0fb7d64cd6e0af3637a66aa055b6699b42d#ac69c0fb7d64cd6e0af3637a66aa055b6699b42d"
-dependencies = [
- "nmp-core",
- "nmp-network",
- "nmp-nip46",
- "nmp-signer-iface",
- "nmp-signers",
- "nostr",
- "serde_json",
- "tracing",
 ]
 
 [[package]]
@@ -2155,24 +2172,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nmp-signers"
-version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=ac69c0fb7d64cd6e0af3637a66aa055b6699b42d#ac69c0fb7d64cd6e0af3637a66aa055b6699b42d"
-dependencies = [
- "js-sys",
- "nmp-signer-iface",
- "nostr",
- "serde",
- "serde_json",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "web-time",
- "zeroize",
-]
-
-[[package]]
 name = "nmp-store"
 version = "0.8.4"
 source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=ac69c0fb7d64cd6e0af3637a66aa055b6699b42d#ac69c0fb7d64cd6e0af3637a66aa055b6699b42d"
@@ -2207,19 +2206,6 @@ dependencies = [
  "nmp-core",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "nmp-uniffi"
-version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=ac69c0fb7d64cd6e0af3637a66aa055b6699b42d#ac69c0fb7d64cd6e0af3637a66aa055b6699b42d"
-dependencies = [
- "nmp-content",
- "nmp-core",
- "nmp-native-runtime",
- "serde_json",
- "uniffi",
- "zeroize",
 ]
 
 [[package]]
@@ -3684,6 +3670,7 @@ dependencies = [
  "tui-scrollview",
  "tui-tree-widget",
  "tui-widget-list",
+ "zeroize",
 ]
 
 [[package]]
@@ -3815,7 +3802,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3291800a6b06569f7d3e15bdb6dc235e0f0c8bd3eb07177f430057feb076415f"
 dependencies = [
  "anyhow",
+ "camino",
  "cargo_metadata",
+ "clap",
  "uniffi_bindgen",
  "uniffi_core",
  "uniffi_macros",
@@ -4559,7 +4548,6 @@ version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13c156562582aa81c60cb29407084cdb54c4164760106ab78e6c5b0858cf64e"
 dependencies = [
- "serde",
  "zeroize_derive",
 ]
 
