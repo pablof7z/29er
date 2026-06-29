@@ -98,12 +98,12 @@ enum TypedGroupTimelineDecoder {
     }
 }
 
-enum TypedGroupMembersDecoder {
-    static let key = "nmp.nip29.group_members"
-    static let schemaId = "nmp.nip29.group_members"
-    static let fileIdentifier = "NGMS"
+enum TypedGroupRosterDecoder {
+    static let key = "nmp.nip29.group_roster"
+    static let schemaId = "nmp.nip29.group_roster"
+    static let fileIdentifier = "NGRS"
 
-    static func decode(from projections: [TypedProjectionEnvelope]) -> GroupMembersSnapshot? {
+    static func decode(from projections: [TypedProjectionEnvelope]) -> GroupRosterSnapshot? {
         guard let projection = projections.first(where: {
             $0.key == key && $0.schemaId == schemaId
         }), !projection.payload.isEmpty else {
@@ -112,11 +112,11 @@ enum TypedGroupMembersDecoder {
         return decode(bytes: projection.payload)
     }
 
-    static func decode(bytes: Data) -> GroupMembersSnapshot? {
+    static func decode(bytes: Data) -> GroupRosterSnapshot? {
         guard !bytes.isEmpty else { return nil }
         var buffer = ByteBuffer(data: bytes)
-        let reader: nmp_nip29_GroupMembersSnapshot = getRoot(byteBuffer: &buffer)
-        return TypedProjectionGlue.groupMembers(reader)
+        let reader: nmp_nip29_GroupRosterSnapshot = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.groupRoster(reader)
     }
 }
 

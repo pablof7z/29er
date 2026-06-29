@@ -21,8 +21,9 @@ use nmp_core::substrate::{ActionPayload, ObservedProjection, ObservedProjectionR
 use nmp_core::{ObservedProjectionId, ObservedProjectionSink, TypedProjectionData};
 use nmp_native_runtime::{
     dispatch_action_bytes_typed, new_app, Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession,
-    Nip29GroupEventsSession, Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
-    UpdateListener, DEFAULT_EMIT_HZ, DEFAULT_VISIBLE_LIMIT,
+    Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
+    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp, UpdateListener, DEFAULT_EMIT_HZ,
+    DEFAULT_VISIBLE_LIMIT,
 };
 use nmp_nip29::group_id::GroupId;
 use nmp_nip29::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
@@ -107,6 +108,14 @@ pub struct TwentyNinerApp {
     /// The single open group-discovery session (the discover screen is a
     /// singleton). `None` when no discover screen is open.
     discovery: Mutex<Option<GroupDiscoverySession>>,
+    /// The single open NIP-29 member-roster session (the member sheet / mention
+    /// roster is a singleton — one group is viewed at a time). `None` when no
+    /// group roster is open. The canonical `open_nip29_group_roster_session`
+    /// door owns the `nmp.nip29.group_roster` (`NGRS`) typed sidecar, the
+    /// relay-pinned 39001/39002/39003 interest, and hydration; 29er only holds
+    /// the handle so it can replace the prior view on group switch and reclaim
+    /// it on close.
+    roster: Mutex<Option<Nip29GroupRosterHandle>>,
 }
 
 #[uniffi::export]
@@ -125,6 +134,7 @@ impl TwentyNinerApp {
             inner,
             relay_selector: Mutex::new(Some(relay_selector)),
             discovery: Mutex::new(None),
+            roster: Mutex::new(None),
         })
     }
 
@@ -303,6 +313,42 @@ impl TwentyNinerApp {
                 group_id,
                 vec![KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
             ));
+    }
+
+    /// Open the NIP-29 member-roster read view for one group (singleton). The
+    /// canonical `open_nip29_group_roster_session` door subscribes to the
+    /// group's relay-signed 39001 (admins) / 39002 (members) / 39003 (role
+    /// catalog) snapshots and registers the `nmp.nip29.group_roster` (`NGRS`)
+    /// typed sidecar, so the next snapshot tick carries the full roster —
+    /// member pubkeys + per-member role tokens + the group's role catalog.
+    /// Re-opening for a different group replaces the prior roster view (D6).
+    /// `false` on a malformed `GroupId` JSON (fail-closed).
+    pub fn open_group_roster(&self, group_id_json: String) -> bool {
+        let Ok(group_id) = serde_json::from_str::<GroupId>(&group_id_json) else {
+            return false;
+        };
+        let Ok(mut slot) = self.roster.lock() else {
+            return false;
+        };
+        if let Some(prev) = slot.take() {
+            self.inner.close_nip29_group_roster_session(prev);
+        }
+        let handle = self
+            .inner
+            .open_nip29_group_roster_session(Nip29GroupRosterSession::new(group_id));
+        *slot = Some(handle);
+        true
+    }
+
+    /// Close the current NIP-29 member-roster view (if any). Reclaims the
+    /// `nmp.nip29.group_roster` sidecar + relay-pinned interest so no stale
+    /// roster is emitted after the view ends. Idempotent (D6).
+    pub fn close_group_roster(&self) {
+        if let Ok(mut slot) = self.roster.lock() {
+            if let Some(handle) = slot.take() {
+                self.inner.close_nip29_group_roster_session(handle);
+            }
+        }
     }
 
     /// Open a NIP-29 group-discovery session for one host relay (singleton).

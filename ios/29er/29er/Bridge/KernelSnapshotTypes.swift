@@ -40,34 +40,47 @@ struct GroupChatSnapshot: Decodable, Equatable {
     static let empty = GroupChatSnapshot(messages: [])
 }
 
-// ─── NIP-29 selected-group members read model ─────────────────────────────
+// ─── NIP-29 group roster (members + roles) read model ─────────────────────
 
-/// One member row for the currently open NIP-29 group. Raw protocol values
-/// only; Rust owns membership/admin derivation and Swift renders fallbacks.
-struct GroupMember: Decodable, Identifiable, Equatable {
+/// One roster entry for the currently open NIP-29 group, decoded from the
+/// `nmp.nip29.group_roster` (`NGRS`) typed sidecar. Raw protocol values only
+/// (ADR-0032): a hex `pubkey`, the verbatim `roles` tokens carried on the
+/// relay-signed 39001/39002 `p` tags, plus the relay-derived `isAdmin` /
+/// `isMember` flags. The display name + avatar are resolved by the registry
+/// profile host (`NostrAvatar` / `NostrProfileName`), never carried on the
+/// projection (D11) — Rust owns membership/admin derivation; Swift renders.
+struct GroupRosterMember: Identifiable, Equatable {
     let pubkey: String
-    let displayName: String?
-    let admin: Bool
-    let role: String?
+    let roles: [String]
+    let isAdmin: Bool
+    let isMember: Bool
 
     var id: String { pubkey }
 
-    var title: String {
-        if let displayName, !displayName.isEmpty {
-            return displayName
-        }
-        return pubkey.shortHex
-    }
+    /// Role-badge label: `Admin` when the latest 39001 (admins) lists this
+    /// pubkey, otherwise `Member`. Derived from the Rust-owned flags only.
+    var roleBadge: String { isAdmin ? "Admin" : "Member" }
 }
 
-/// Members for the selected group only. `groupId == nil` means no group has
-/// been selected on the Rust projection yet.
-struct GroupMembersSnapshot: Decodable, Equatable {
+/// One entry of a group's 39003 role catalog. `description` is the optional
+/// human label (3rd element of the `["role", <name>, <description>]` tag).
+struct GroupRole: Equatable {
+    let name: String
+    let description: String?
+}
+
+/// The serialised roster read model for the open group. `members` is ordered
+/// by pubkey ascending and `roles` preserves the 39003 tag order — both
+/// Rust-owned. `groupId == nil` means no roster session is open yet.
+struct GroupRosterSnapshot: Equatable {
     let hostRelayUrl: String
     let groupId: String?
-    let members: [GroupMember]
+    let members: [GroupRosterMember]
+    let roles: [GroupRole]
 
-    static let empty = GroupMembersSnapshot(hostRelayUrl: "", groupId: nil, members: [])
+    static let empty = GroupRosterSnapshot(
+        hostRelayUrl: "", groupId: nil, members: [], roles: []
+    )
 }
 
 extension String {

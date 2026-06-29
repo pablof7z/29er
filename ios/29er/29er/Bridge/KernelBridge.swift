@@ -250,7 +250,7 @@ extension KernelHandle {
                 let typedDiscoveredGroups = TypedDiscoveredGroupsDecoder.decode(from: envelopes)
                 let typedGroupTree = TypedGroupTreeDecoder.decode(from: envelopes)
                 let typedGroupChat = TypedGroupTimelineDecoder.decode(from: envelopes)
-                let typedGroupMembers = TypedGroupMembersDecoder.decode(from: envelopes)
+                let typedGroupRoster = TypedGroupRosterDecoder.decode(from: envelopes)
                 let typedPublishOutbox = TypedPublishOutboxDecoder.decode(from: envelopes)
                 let typedActiveAccount = TypedActiveAccountDecoder.decode(from: envelopes)
                 let typedGroupDefaults = TypedGroupDefaultsDecoder.decode(from: envelopes)
@@ -263,7 +263,7 @@ extension KernelHandle {
                         typedDiscoveredGroups: typedDiscoveredGroups,
                         typedGroupTree: typedGroupTree,
                         typedGroupChat: typedGroupChat,
-                        typedGroupMembers: typedGroupMembers,
+                        typedGroupRoster: typedGroupRoster,
                         typedPublishOutbox: typedPublishOutbox,
                         typedActiveAccount: typedActiveAccount,
                         typedGroupDefaults: typedGroupDefaults,

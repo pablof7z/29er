@@ -49,9 +49,9 @@ final class KernelModel: ObservableObject {
     /// selected group's event filter and newest-first ordering; Swift renders it.
     @Published var typedGroupChat: GroupChatSnapshot?
 
-    /// Typed `nmp.nip29.group_members` sidecar (`NGMS`). Rust owns selected
-    /// group membership/admin derivation; Swift renders it.
-    @Published var typedGroupMembers: GroupMembersSnapshot?
+    /// Typed `nmp.nip29.group_roster` sidecar (`NGRS`). Rust owns the open
+    /// group's membership/admin derivation and role catalog; Swift renders it.
+    @Published var typedGroupRoster: GroupRosterSnapshot?
 
     /// Typed kernel-owned `publish_outbox` sidecar (`KPBO`). Rust owns publish
     /// lifecycle, retry policy, and offline queue state; Swift renders rows.
@@ -105,12 +105,14 @@ final class KernelModel: ObservableObject {
     func openGroupTimeline(_ groupId: String) {
         selectedGroupId = groupId
         discoveredGroups.markGroupRead(groupId: groupId)
-        discoveredGroups.selectGroupMembers(groupId: groupId)
         guard let node = groupTree.allNodes[groupId] else { return }
-        kernel.registerGroupChat(groupId: GroupId(
-            hostRelayUrl: node.hostRelayUrl,
-            localId: node.groupId
-        ))
+        let group = GroupId(hostRelayUrl: node.hostRelayUrl, localId: node.groupId)
+        // Open the group's chat timeline AND its member roster: the canonical
+        // `open_nip29_group_roster_session` door (a singleton in Rust, replaced
+        // on group switch) hydrates the 39001/39002/39003 snapshots so the
+        // member sheet + @-mention autocomplete read a real roster.
+        kernel.registerGroupChat(groupId: group)
+        kernel.openGroupRoster(groupId: group)
     }
 
     @discardableResult

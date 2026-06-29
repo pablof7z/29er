@@ -25,7 +25,7 @@ extension KernelModel {
         typedDiscoveredGroups = result.typedDiscoveredGroups
         typedGroupTree = result.typedGroupTree
         typedGroupChat = result.typedGroupChat
-        typedGroupMembers = result.typedGroupMembers
+        typedGroupRoster = result.typedGroupRoster
         typedPublishOutbox = result.typedPublishOutbox
         typedActiveAccount = result.typedActiveAccount
         typedGroupDefaults = result.typedGroupDefaults
@@ -118,7 +118,7 @@ extension KernelModel {
         typedDiscoveredGroups = nil
         typedGroupTree = nil
         typedGroupChat = nil
-        typedGroupMembers = nil
+        typedGroupRoster = nil
         typedPublishOutbox = nil
         typedActiveAccount = nil
         typedGroupDefaults = nil
@@ -149,8 +149,8 @@ extension KernelModel {
         typedGroupChat ?? .empty
     }
 
-    var groupMembers: GroupMembersSnapshot {
-        typedGroupMembers ?? .empty
+    var groupRoster: GroupRosterSnapshot {
+        typedGroupRoster ?? .empty
     }
 
     var publishOutbox: [PublishOutboxItem] {

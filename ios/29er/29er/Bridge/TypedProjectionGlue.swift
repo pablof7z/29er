@@ -38,19 +38,28 @@ enum TypedProjectionGlue {
         )
     }
 
-    // MARK: nmp.nip29.group_members → GroupMembersSnapshot
+    // MARK: nmp.nip29.group_roster → GroupRosterSnapshot
 
-    static func groupMembers(_ reader: nmp_nip29_GroupMembersSnapshot) -> GroupMembersSnapshot {
-        GroupMembersSnapshot(
+    /// Map the typed `nmp.nip29.group_roster` sidecar (`NGRS` /
+    /// `nmp_nip29_GroupRosterSnapshot`) to the 29er `GroupRosterSnapshot`. Flat
+    /// field-for-field copy: a `groupId` that is `nil` when the relay has not
+    /// signed a snapshot for the open group yet (preserved, NOT `?? ""`), the
+    /// member rows (pubkey + verbatim role tokens + relay-derived admin/member
+    /// flags), and the 39003 role catalog. Raw protocol values only (D11).
+    static func groupRoster(_ reader: nmp_nip29_GroupRosterSnapshot) -> GroupRosterSnapshot {
+        GroupRosterSnapshot(
             hostRelayUrl: reader.hostRelayUrl ?? "",
             groupId: reader.groupId,
             members: reader.members.map { row in
-                GroupMember(
+                GroupRosterMember(
                     pubkey: row.pubkey ?? "",
-                    displayName: row.displayName,
-                    admin: row.admin,
-                    role: row.role
+                    roles: row.roles.map { $0 ?? "" },
+                    isAdmin: row.isAdmin,
+                    isMember: row.isMember
                 )
+            },
+            roles: reader.roles.map { role in
+                GroupRole(name: role.name ?? "", description: role.description)
             }
         )
     }

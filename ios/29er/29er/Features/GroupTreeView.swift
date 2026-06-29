@@ -421,19 +421,17 @@ struct GroupTimelineView: View {
         isCurrentMember && !model.kernelIsDead
     }
 
-    // TODO(roster): `model.groupMembers` is fed by the `select_group_members`
-    // FFI call, which is a no-op in NMP v0.8 — there is no standalone
-    // group_members projection; membership/admin/metadata fold through the
-    // JoinedGroupsProjection. So this roster is currently always empty,
-    // degrading the member-list sheet and @-mention suggestions to "no roster".
-    // Membership/admin GATING no longer depends on it (see `isCurrentMember` /
+    // The member roster for this group, sourced from the Rust-owned
+    // `nmp.nip29.group_roster` (`NGRS`) projection (opened by
+    // `openGroupTimeline`). `groupId`-gated so a stale roster from the
+    // previously-open group is never shown during a switch. Membership/admin
+    // GATING does NOT read this roster (see `isCurrentMember` /
     // `isCurrentAdmin`, which read the JoinedGroupsProjection-backed
-    // `node.isMember` / `node.isAdmin`). When a typed 29er roster projection
-    // lands, source `currentMembers` from it; until then it stays empty and the
-    // build stays green. Do NOT reintroduce a roster scan for membership truth.
-    private var currentMembers: [GroupMember] {
-        guard model.groupMembers.groupId == groupId else { return [] }
-        return model.groupMembers.members
+    // `node.isMember` / `node.isAdmin`) — the roster drives only the member
+    // sheet + @-mention autocomplete (D11: no roster scan for membership truth).
+    private var currentMembers: [GroupRosterMember] {
+        guard model.groupRoster.groupId == groupId else { return [] }
+        return model.groupRoster.members
     }
 
     /// Viewer membership truth, read straight from the Rust group-tree
@@ -508,16 +506,26 @@ struct GroupTimelineView: View {
         return node?.isOpen == true ? "person.crop.circle.badge.plus" : "lock.fill"
     }
 
-    private var mentionSuggestions: [GroupMember] {
+    private var mentionSuggestions: [GroupRosterMember] {
         let token = currentMentionToken(in: draft)
         guard let token else { return [] }
         let needle = token.lowercased()
         return currentMembers
             .filter { member in
-                needle.isEmpty ||
-                    member.title.lowercased().contains(needle) ||
-                    member.pubkey.shortHex.lowercased().contains(needle) ||
-                    member.pubkey.lowercased().contains(needle)
+                guard !needle.isEmpty else { return true }
+                // Match the raw pubkey / short-hex, plus the registry-resolved
+                // display name when the kind:0 has landed (so `@alice` finds a
+                // member whose hex you don't know). Identity rendering + name
+                // resolution stay owned by the profile host (D11).
+                if member.pubkey.lowercased().contains(needle)
+                    || member.pubkey.shortHex.lowercased().contains(needle) {
+                    return true
+                }
+                if let name = model.profile(forPubkey: member.pubkey)?.display.lowercased(),
+                   name.contains(needle) {
+                    return true
+                }
+                return false
             }
             .prefix(4)
             .map { $0 }
@@ -892,7 +900,7 @@ struct GroupTimelineView: View {
         if let profile = model.profile(forPubkey: pubkey) {
             return profile.display
         }
-        return memberTitle(for: pubkey)
+        return pubkey.shortHex
     }
 
     /// D5 mention resolver passed into `NostrContentView`. Resolves a
@@ -1006,14 +1014,26 @@ struct GroupTimelineView: View {
                     Button {
                         acceptMention(member)
                     } label: {
-                        Label(member.title, systemImage: "at")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Capsule().fill(Color(.tertiarySystemFill)))
+                        HStack(spacing: 6) {
+                            NostrAvatar(
+                                pubkey: member.pubkey,
+                                size: 20,
+                                consumerID: "mention-suggestion.\(member.pubkey)"
+                            )
+                            NostrProfileName(
+                                pubkey: member.pubkey,
+                                consumerID: "mention-suggestion-name.\(member.pubkey)",
+                                font: .caption.weight(.semibold)
+                            )
+                            .lineLimit(1)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color(.tertiarySystemFill)))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Mention \(member.title)")
+                    .accessibilityLabel("Mention member")
+                    .accessibilityIdentifier("mention-suggestion-\(member.pubkey)")
                 }
             }
             .padding(.horizontal, 12)
@@ -1075,7 +1095,7 @@ struct GroupTimelineView: View {
         return String(last.dropFirst())
     }
 
-    private func acceptMention(_ member: GroupMember) {
+    private func acceptMention(_ member: GroupRosterMember) {
         selectedMentionPubkeys.insert(member.pubkey)
         // Insert an `@<pubkey>` *placeholder* (the raw hex identifier, NOT a
         // display name). The shared `compose_chat_message` helper in
@@ -1095,10 +1115,6 @@ struct GroupTimelineView: View {
 
     private func outboxItem(for eventId: String) -> PublishOutboxItem? {
         model.publishOutbox.first { $0.eventId == eventId }
-    }
-
-    private func memberTitle(for pubkey: String) -> String {
-        currentMembers.first { $0.pubkey == pubkey }?.title ?? pubkey.shortHex
     }
 }
 
@@ -1649,41 +1665,38 @@ private struct CreateGroupSheet: View {
 
 private struct MemberListSheet: View {
     let title: String
-    let members: [GroupMember]
+    let members: [GroupRosterMember]
 
     var body: some View {
         NavigationStack {
             Group {
                 if members.isEmpty {
                     ContentUnavailableView(
-                        "No members",
+                        "No members yet",
                         systemImage: "person.2.slash",
-                        description: Text("This group has not published a member list yet.")
+                        description: Text("No one has joined this group yet.")
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(.systemGroupedBackground))
                 } else {
                     List(members) { member in
                         HStack(spacing: 10) {
-                            ChatAvatar(seed: member.pubkey)
-                                .frame(width: 30, height: 30)
+                            NostrAvatar(
+                                pubkey: member.pubkey,
+                                size: 30,
+                                consumerID: "member-row.\(member.pubkey)"
+                            )
 
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(member.title)
-                                        .font(.body.weight(.medium))
-                                        .lineLimit(1)
-                                    if member.admin {
-                                        Image(systemName: "shield.fill")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .accessibilityLabel("Admin")
-                                    }
-                                }
-                                Text(member.pubkey.shortHex)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            NostrProfileName(
+                                pubkey: member.pubkey,
+                                consumerID: "member-row-name.\(member.pubkey)",
+                                font: .body.weight(.medium)
+                            )
+                            .lineLimit(1)
+
+                            Spacer(minLength: 8)
+
+                            RoleBadge(isAdmin: member.isAdmin)
                         }
                         .padding(.vertical, 3)
                         .listRowBackground(Color.clear)
@@ -1698,6 +1711,27 @@ private struct MemberListSheet: View {
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+}
+
+/// Admin/member role pill for a roster row. `isAdmin` ⇒ the latest 39001
+/// (admins) lists this pubkey; otherwise a plain member (39002 only).
+private struct RoleBadge: View {
+    let isAdmin: Bool
+
+    var body: some View {
+        Label(isAdmin ? "Admin" : "Member", systemImage: isAdmin ? "shield.fill" : "person.fill")
+            .labelStyle(.titleAndIcon)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(
+                Capsule().fill(
+                    isAdmin ? Color.accentColor.opacity(0.18) : Color(.tertiarySystemFill)
+                )
+            )
+            .foregroundStyle(isAdmin ? Color.accentColor : Color.secondary)
+            .accessibilityIdentifier(isAdmin ? "member-role-admin" : "member-role-member")
     }
 }
 
@@ -1915,22 +1949,6 @@ private struct GroupAvatar: View {
     }
 }
 
-private struct ChatAvatar: View {
-    let seed: String
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(seed.pubkeyColor)
-            Text(seed.displayInitials)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
-        }
-        .frame(width: 32, height: 32)
-        .accessibilityHidden(true)
-    }
-}
-
 private extension String {
     var pendingDisplayLabel: String {
         switch self {
@@ -1945,14 +1963,6 @@ private extension String {
         default:
             return isEmpty ? "Queued" : self
         }
-    }
-
-    var displayInitials: String {
-        let words = split(separator: " ").prefix(2)
-        if words.count >= 2 {
-            return words.compactMap(\.first).map { String($0).uppercased() }.joined()
-        }
-        return count >= 2 ? String(prefix(2)).uppercased() : ".."
     }
 
     /// Initials for a group avatar fallback: first letter of up to two words,

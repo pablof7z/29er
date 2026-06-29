@@ -78,16 +78,30 @@ extension KernelHandle {
         app.markGroupRead(groupId: groupId)
     }
 
-    /// Select the group whose member rows should be emitted by the Rust
-    /// `nmp.nip29.group_members` projection.
-    ///
-    /// NOTE: the clean-break `TwentyNinerApp` does not yet expose member-roster
-    /// selection (the `select_group_members` verb was not re-exposed in the
-    /// UniFFI migration). This is a no-op until that verb lands; the roster view
-    /// stays empty (see `GroupTreeView` `TODO(roster)`).
-    func selectGroupMembers(groupId: String) {
-        // Intentionally no-op — see doc comment.
-        _ = groupId
+    /// Open the NIP-29 member-roster read view for `group`. The Rust
+    /// `TwentyNinerApp` owns the singleton roster session (re-opening for a new
+    /// group replaces the prior view), and the canonical
+    /// `open_nip29_group_roster_session` door owns the relay-pinned
+    /// 39001/39002/39003 interest + the `nmp.nip29.group_roster` (`NGRS`) typed
+    /// sidecar — so no handle crosses the boundary. The roster surfaces on the
+    /// next snapshot tick under `typedGroupRoster`.
+    func openGroupRoster(groupId: GroupId) {
+        guard
+            let data = try? JSONSerialization.data(withJSONObject: groupId.jsonObject),
+            let json = String(data: data, encoding: .utf8)
+        else {
+            gdLog.error("openGroupRoster: failed to encode GroupId JSON")
+            return
+        }
+        _ = app.openGroupRoster(groupIdJson: json)
+        gdLog.info("opened NIP-29 member roster for \(groupId.localId, privacy: .public)")
+    }
+
+    /// Close the current NIP-29 member-roster view (if any). Reclaims the
+    /// `nmp.nip29.group_roster` sidecar + relay-pinned interest. Idempotent.
+    func closeGroupRoster() {
+        app.closeGroupRoster()
+        gdLog.info("closed NIP-29 member roster")
     }
 
     /// Dispatch a `nmp.nip29.discover` action — push the relay-pinned
@@ -462,10 +476,6 @@ final class DiscoveredGroupsStore: ObservableObject {
 
     func markGroupRead(groupId: String) {
         kernel.markGroupRead(groupId: groupId)
-    }
-
-    func selectGroupMembers(groupId: String) {
-        kernel.selectGroupMembers(groupId: groupId)
     }
 
     /// Mirror the latest kernel snapshot. Called from `KernelModel.apply`

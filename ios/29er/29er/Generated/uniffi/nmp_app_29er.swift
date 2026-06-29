@@ -537,6 +537,13 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
     func closeGroupDiscovery() 
     
     /**
+     * Close the current NIP-29 member-roster view (if any). Reclaims the
+     * `nmp.nip29.group_roster` sidecar + relay-pinned interest so no stale
+     * roster is emitted after the view ends. Idempotent (D6).
+     */
+    func closeGroupRoster() 
+    
+    /**
      * Reconfigure rendering limits without restarting (same clamps as `start`).
      */
     func configure(visibleLimit: UInt32, emitHz: UInt32) 
@@ -597,6 +604,18 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * Closes any prior session first. `true` on success.
      */
     func openGroupDiscovery(hostRelayUrl: String)  -> Bool
+    
+    /**
+     * Open the NIP-29 member-roster read view for one group (singleton). The
+     * canonical `open_nip29_group_roster_session` door subscribes to the
+     * group's relay-signed 39001 (admins) / 39002 (members) / 39003 (role
+     * catalog) snapshots and registers the `nmp.nip29.group_roster` (`NGRS`)
+     * typed sidecar, so the next snapshot tick carries the full roster —
+     * member pubkeys + per-member role tokens + the group's role catalog.
+     * Re-opening for a different group replaces the prior roster view (D6).
+     * `false` on a malformed `GroupId` JSON (fail-closed).
+     */
+    func openGroupRoster(groupIdJson: String)  -> Bool
     
     /**
      * Refresh group discovery after a local store reset: tear down the current
@@ -832,6 +851,17 @@ open func closeGroupDiscovery()  {try! rustCall() {
 }
     
     /**
+     * Close the current NIP-29 member-roster view (if any). Reclaims the
+     * `nmp.nip29.group_roster` sidecar + relay-pinned interest so no stale
+     * roster is emitted after the view ends. Idempotent (D6).
+     */
+open func closeGroupRoster()  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_close_group_roster(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+    /**
      * Reconfigure rendering limits without restarting (same clamps as `start`).
      */
 open func configure(visibleLimit: UInt32, emitHz: UInt32)  {try! rustCall() {
@@ -941,6 +971,24 @@ open func openGroupDiscovery(hostRelayUrl: String) -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_nmp_app_29er_fn_method_twentyninerapp_open_group_discovery(self.uniffiClonePointer(),
         FfiConverterString.lower(hostRelayUrl),$0
+    )
+})
+}
+    
+    /**
+     * Open the NIP-29 member-roster read view for one group (singleton). The
+     * canonical `open_nip29_group_roster_session` door subscribes to the
+     * group's relay-signed 39001 (admins) / 39002 (members) / 39003 (role
+     * catalog) snapshots and registers the `nmp.nip29.group_roster` (`NGRS`)
+     * typed sidecar, so the next snapshot tick carries the full roster —
+     * member pubkeys + per-member role tokens + the group's role catalog.
+     * Re-opening for a different group replaces the prior roster view (D6).
+     * `false` on a malformed `GroupId` JSON (fail-closed).
+     */
+open func openGroupRoster(groupIdJson: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_open_group_roster(self.uniffiClonePointer(),
+        FfiConverterString.lower(groupIdJson),$0
     )
 })
 }
@@ -1725,6 +1773,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_close_group_discovery() != 30282) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_close_group_roster() != 54979) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_configure() != 61496) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1753,6 +1804,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_discovery() != 16378) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_roster() != 56987) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_refresh_group_discovery() != 20033) {
