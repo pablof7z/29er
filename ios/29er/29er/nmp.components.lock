@@ -16,7 +16,7 @@ source_sha256 = "cb5a804017b92aab5e5ffa6fb54c2a173d8b65c8033e5fdc0a48d55d87ddab9
 path = "Components/NostrContent/ContentTreeWire.swift"
 role = "source"
 source = "swiftui/content-core/ContentTreeWire.swift"
-source_sha256 = "e3d931302d17a2677df247a2d4ef372c8b60b03c2f5a2bfe4d3866a683d15064"
+source_sha256 = "389778718565189b2e8eba4de26a88501060addd6ec33f9fede1a02e1dc6b18f"
 
 [[components]]
 id = "swiftui/content-media-grid"
@@ -46,13 +46,13 @@ source_sha256 = "407e25e00b4a05d6eb7d4d7b11221e3c4dcd1591f7f07d3a81aabb161aa76c4
 path = "Components/NostrUser/NostrProfileHost.swift"
 role = "source"
 source = "swiftui/user-avatar/NostrProfileHost.swift"
-source_sha256 = "c619939b5158324e428e95ad9638cf48f74b4df3f95158eca61fe8c9b453b81b"
+source_sha256 = "dbbc34a5c9a26b938ca0da5e3a5198017fcba95bbdcb32a20e77b821b45aa157"
 
 [[components.files]]
 path = "Components/NostrUser/NostrAvatar.swift"
 role = "source"
 source = "swiftui/user-avatar/NostrAvatar.swift"
-source_sha256 = "be3a4fe36868e30d64742df622050062e5513e76484366d7890320a55cc86c32"
+source_sha256 = "147b846ae41afd6b55b0b1f5f33dc94d57c6c82aa9626d1f09774bd1687ffc4e"
 
 [[components]]
 id = "swiftui/content-kind-registry"

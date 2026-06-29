@@ -2,8 +2,8 @@ import SwiftUI
 import Foundation
 
 /// Circular avatar for a Nostr pubkey. Shows the profile picture when the
-/// host projection has it; falls back to a deterministic identicon derived
-/// from `pubkey`.
+/// host projection has it; falls back to a deterministic 5×5 symmetric
+/// identicon derived from `pubkey` (same algorithm as `content-core`).
 ///
 /// Replace `AsyncImage` with your own image cache (Kingfisher, Nuke, etc.)
 /// if you already have one — the identicon fallback is self-contained.
@@ -17,7 +17,7 @@ public struct NostrAvatar: View {
     public let size: CGFloat
     public let consumerID: String?
     @State private var generatedConsumerID: String
-    @State private var resolvedPubkey: String?
+    @State private var claimedPubkey: String?
 
     public init(
         pubkey: String,
@@ -32,7 +32,7 @@ public struct NostrAvatar: View {
         self._generatedConsumerID = State(
             initialValue: consumerID ?? "nostr-avatar.\(UUID().uuidString)"
         )
-        self._resolvedPubkey = State(initialValue: nil)
+        self._claimedPubkey = State(initialValue: nil)
     }
 
     public init(profile: ProfileWire, size: CGFloat = 40) {
@@ -43,7 +43,7 @@ public struct NostrAvatar: View {
         self._generatedConsumerID = State(
             initialValue: "nostr-avatar.static.\(UUID().uuidString)"
         )
-        self._resolvedPubkey = State(initialValue: nil)
+        self._claimedPubkey = State(initialValue: nil)
     }
 
     public var body: some View {
@@ -68,40 +68,38 @@ public struct NostrAvatar: View {
         .accessibilityHidden(true)
         .task(id: pubkey) {
             await MainActor.run {
-                if let resolvedPubkey, resolvedPubkey != pubkey {
+                if let claimedPubkey, claimedPubkey != pubkey {
                     profileHost?.releaseProfileRef(
-                        pubkey: resolvedPubkey,
+                        pubkey: claimedPubkey,
                         consumerID: generatedConsumerID
                     )
                 }
-                resolvedPubkey = pubkey
+                claimedPubkey = pubkey
                 profileHost?.resolveProfileRef(pubkey: pubkey, consumerID: generatedConsumerID)
             }
         }
         .onDisappear {
-            if let resolvedPubkey {
-                profileHost?.releaseProfileRef(pubkey: resolvedPubkey, consumerID: generatedConsumerID)
-                self.resolvedPubkey = nil
+            if let claimedPubkey {
+                profileHost?.releaseProfileRef(pubkey: claimedPubkey, consumerID: generatedConsumerID)
+                self.claimedPubkey = nil
             }
         }
     }
 
     private var identicon: some View {
-        ZStack {
-            Circle().fill(NostrIdenticon.color(forPubkey: pubkey))
-            Text(NostrIdenticon.initials(forPubkey: pubkey))
-                .font(.system(size: size * 0.35, weight: .semibold))
-                .foregroundStyle(.white)
-        }
+        NostrIdenticon.identiconView(forPubkey: pubkey, size: size)
     }
 }
 
 // MARK: - Identicon
 //
-// The bundled registry `NostrIdenticon` enum is intentionally *not* shipped
-// here: `swiftui/content-core` (Components/NostrContent/ContentTreeWire.swift)
-// already vendors a richer `NostrIdenticon` (5×5 grid identicon + color +
-// initials). Re-declaring it would be a duplicate public symbol. `NostrAvatar`
-// above reuses that one. This mirrors the documented registry resolution used
-// by the reference apps when both `content-core` and `user-avatar` are
-// installed together.
+// The bundled registry `NostrIdenticon` enum (the 5×5 symmetric pixel-grid
+// identicon + djb2 palette) that `swiftui/user-avatar/NostrAvatar.swift` ships
+// for STANDALONE installs is intentionally NOT re-declared here: this app also
+// installs `swiftui/content-core`, whose `ContentTreeWire.swift` already vendors
+// the identical `NostrIdenticon`. Re-declaring it would be a duplicate public
+// symbol. `NostrAvatar` above reuses that shared one via
+// `NostrIdenticon.identiconView(forPubkey:size:)`, so the avatar fallback stays
+// in lock-step with the canonical content-core identicon (#2224 parity). This
+// is the only deviation from the canonical user-avatar component, and it is the
+// documented content-core coexistence dedup — not a behavioural fork.
