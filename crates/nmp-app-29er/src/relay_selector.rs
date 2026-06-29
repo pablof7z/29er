@@ -45,6 +45,14 @@ pub struct RelaySelectorProjection {
     selected_relay: Mutex<String>,
     relay_sets: Mutex<BTreeMap<String, RelaySetEvent>>,
     fallback_relay: String,
+    /// Test-seam active-relay override (`NMP_TEST_RELAYS`). When `Some`, the
+    /// snapshot reports this relay as the sole active selection and the NIP-51
+    /// nip29 relay-set restore is suppressed, so a test session targets the
+    /// seeded relay (discovery / create / timeline) instead of leaking to the
+    /// production relay a signed-in account would otherwise restore. `None` in
+    /// production — the env is unset, so this path is never taken and normal
+    /// NIP-51 selection is unchanged.
+    test_override: Mutex<Option<String>>,
 }
 
 impl RelaySelectorProjection {
@@ -56,11 +64,47 @@ impl RelaySelectorProjection {
             selected_relay: Mutex::new(selected),
             relay_sets: Mutex::new(BTreeMap::new()),
             fallback_relay: canonical_relay_url(&fallback_relay).unwrap_or(fallback_relay),
+            test_override: Mutex::new(None),
         }
+    }
+
+    /// Pin the active relay to a test-seam relay (the `NMP_TEST_RELAYS`
+    /// override). Returns the canonical pinned URL, or `None` if `relay_url` is
+    /// not a valid relay URL. After this call `snapshot` reports the pinned
+    /// relay as the sole active selection and ignores the NIP-51 restore, so a
+    /// signed-in account's restored production nip29 relay set can never become
+    /// the active target for the session. Production never calls this (the env
+    /// seam is unset), so prod selection behaviour is unchanged.
+    pub fn pin_test_override(&self, relay_url: &str) -> Option<String> {
+        let canonical = canonical_relay_url(relay_url)?;
+        if let Ok(mut over) = self.test_override.lock() {
+            *over = Some(canonical.clone());
+        }
+        if let Ok(mut selected) = self.selected_relay.lock() {
+            *selected = canonical.clone();
+        }
+        Some(canonical)
+    }
+
+    fn test_override(&self) -> Option<String> {
+        self.test_override.lock().ok().and_then(|over| over.clone())
     }
 
     #[must_use]
     pub fn snapshot(&self) -> RelaySelectorSnapshot {
+        // Test seam: a pinned `NMP_TEST_RELAYS` override is the sole active
+        // selection and suppresses the NIP-51 production restore (see the
+        // `test_override` field doc). No-op in production (override is `None`).
+        if let Some(active) = self.test_override() {
+            return RelaySelectorSnapshot {
+                relays: vec![RelaySelectorRow {
+                    relay_url: active.clone(),
+                    selected: true,
+                    from_nip51: false,
+                }],
+                active_relay_url: active,
+            };
+        }
         let active_pubkey = self.active_pubkey();
         let selected = self
             .selected_relay
@@ -363,6 +407,39 @@ mod tests {
         let snapshot = projection.snapshot();
         assert_eq!(snapshot.active_relay_url, "wss://example.com");
         assert!(snapshot.relays[0].from_nip51);
+    }
+
+    #[test]
+    fn test_override_pins_active_and_suppresses_nip51_restore() {
+        // A signed-in account whose restored NIP-51 nip29 set points at the
+        // production relay must NOT win once the test override is pinned.
+        let active = Arc::new(Mutex::new(Some("pubkey".to_string())));
+        let projection =
+            RelaySelectorProjection::new(Arc::clone(&active), "wss://nip29.f7z.io".to_string());
+        projection.on_kernel_event(&KernelEvent {
+            id: "event".to_string(),
+            author: "pubkey".to_string(),
+            kind: KIND_NIP51_RELAY_SET,
+            created_at: 10,
+            tags: vec![
+                vec!["d".to_string(), NIP29_RELAY_SET_IDENTIFIER.to_string()],
+                vec!["relay".to_string(), "wss://nip29.f7z.io".to_string()],
+            ],
+            content: String::new(),
+            relay_provenance: Vec::new(),
+        });
+        // Before the override: the restored production relay set is active.
+        assert_eq!(projection.snapshot().active_relay_url, "wss://nip29.f7z.io");
+
+        let pinned = projection
+            .pin_test_override("ws://127.0.0.1:9888")
+            .expect("valid relay url");
+        assert_eq!(pinned, "ws://127.0.0.1:9888");
+        let snapshot = projection.snapshot();
+        assert_eq!(snapshot.active_relay_url, "ws://127.0.0.1:9888");
+        assert_eq!(snapshot.relays.len(), 1);
+        assert!(snapshot.relays[0].selected);
+        assert!(!snapshot.relays[0].from_nip51);
     }
 
     #[test]

@@ -41,6 +41,19 @@ pub fn seed_relays_from_json_str(app: &NmpApp, json: &str) -> bool {
     seeded
 }
 
+/// First relay URL in a `[["url","role"],…]` JSON array (the `NMP_TEST_RELAYS`
+/// override shape), or `None` on malformed / empty input. Used to pin the
+/// active NIP-29 relay selection to the test seam so a test session targets the
+/// seeded relay instead of restoring the production NIP-51 nip29 relay set.
+#[must_use]
+pub fn first_relay_url_from_json_str(json: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<Vec<[String; 2]>>(json).ok()?;
+    parsed.into_iter().next().map(|entry| {
+        let [url, _role] = entry;
+        url
+    })
+}
+
 #[cfg(test)]
 mod tests {
     /// Parse-only mirror of [`super::seed_relays_from_json_str`]'s reject

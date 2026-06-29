@@ -67,9 +67,19 @@ enum TypedDiscoveredGroupsDecoder {
 }
 
 enum TypedGroupTimelineDecoder {
-    static let key = "nmp.nip29.group_timeline"
-    static let schemaId = "nmp.nip29.group_timeline"
-    static let fileIdentifier = "NGTL"
+    // The canonical NMP group-events read session (`nmp-native-runtime`
+    // `open_nip29_group_events_session`) registers its typed sidecar under the
+    // key/schema `nmp.nip29.group_events` with the `NGEV` file identifier — NOT
+    // the pre-migration `nmp.nip29.group_timeline` / `NGTL` of the deleted
+    // hand-written C-ABI. The shell must decode the key the runtime actually
+    // emits, or the group timeline silently stays empty. The `NGEV`
+    // `GroupEventsSnapshot` wire layout is byte-identical to the `NGTL`
+    // `GroupTimelineSnapshot` (same vtable offsets: id/pubkey/content/createdAt/
+    // kind, schema_version + events), so the generated `NGTL` reader decodes the
+    // `NGEV` payload unchanged — only the routing key/schema strings differ.
+    static let key = "nmp.nip29.group_events"
+    static let schemaId = "nmp.nip29.group_events"
+    static let fileIdentifier = "NGEV"
 
     static func decode(from projections: [TypedProjectionEnvelope]) -> GroupChatSnapshot? {
         guard let projection = projections.first(where: {

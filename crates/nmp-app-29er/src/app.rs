@@ -246,8 +246,29 @@ impl TwentyNinerApp {
 
     /// Seed relays from a `[["url","role"],…]` JSON array (the `NMP_TEST_RELAYS`
     /// override). `false` on malformed/empty so the caller falls back.
+    ///
+    /// The override seeds BOTH the kernel connection pool AND the active NIP-29
+    /// relay selection: the first seeded relay is pinned as the relay-selector's
+    /// active relay so the test session targets it for discovery / create /
+    /// timeline, instead of restoring the production NIP-51 nip29 relay set a
+    /// signed-in account would otherwise activate. A test seam must not leak to
+    /// the production relay (this is only reached when `NMP_TEST_RELAYS` is set;
+    /// production seeds via `seed_default_relays` and is untouched).
     pub fn seed_relays_from_json(&self, json: String) -> bool {
-        crate::relay_seeding::seed_relays_from_json_str(&self.inner, &json)
+        let seeded = crate::relay_seeding::seed_relays_from_json_str(&self.inner, &json);
+        if seeded {
+            if let (Some(first), Some(selector)) = (
+                crate::relay_seeding::first_relay_url_from_json_str(&json),
+                self.relay_selector_arc(),
+            ) {
+                if let Some(pinned) = selector.pin_test_override(&first) {
+                    // Mirror the pin into the kernel as an active relay so the
+                    // pinned interest has a live socket on the seeded relay.
+                    self.inner.add_relay(pinned, "both".to_string());
+                }
+            }
+        }
+        seeded
     }
 
     /// Dispatch a pre-built `DispatchEnvelope` (the generic byte lane, ADR-0071).
