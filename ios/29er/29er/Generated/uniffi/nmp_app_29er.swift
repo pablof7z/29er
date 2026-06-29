@@ -422,6 +422,22 @@ fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
+    typealias FfiType = Int32
+    typealias SwiftType = Int32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int32, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
@@ -532,6 +548,15 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
     func declareConsumedProjections() 
     
     /**
+     * ADR-0055 Rung 3 — declare that 29er's runtime owns the NMP cache-merge
+     * layer (D3-3) so the kernel may omit `Unchanged` projections from the
+     * frame. Single-writer; call before [`Self::start`]. `true` on success
+     * (or idempotent re-call); `false` if called after start / the registry is
+     * unavailable (informational — the kernel then emits full rows).
+     */
+    func declareIncrementalApply()  -> Bool
+    
+    /**
      * Dispatch a pre-built `DispatchEnvelope` (the generic byte lane, ADR-0071).
      */
     func dispatchAction(envelope: Data)  -> DispatchOutcome
@@ -602,6 +627,17 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
     func relaySelectorSelectRelay(relayUrl: String)  -> Bool
     
     /**
+     * Release an event ref acquired through a typed event adapter. Idempotent.
+     */
+    func releaseEventRef(key: String, consumerId: String) 
+    
+    /**
+     * Release a profile ref acquired through a typed profile adapter.
+     * Idempotent (D6).
+     */
+    func releaseProfileRef(key: String, consumerId: String) 
+    
+    /**
      * Remove an identity; the actor owns the active-account transition.
      */
     func removeAccount(identityId: String) 
@@ -610,6 +646,29 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * Reset transient kernel state.
      */
     func reset() 
+    
+    /**
+     * Resolve an event embed (embed shape, CacheOk liveness). Use for embedded
+     * `nostr:nevent`/`naddr` cards in rendered content. D6 / fire-and-forget.
+     */
+    func resolveEventEmbed(key: String, consumerId: String) 
+    
+    /**
+     * Resolve a live event embed (tailing subscription).
+     */
+    func resolveEventEmbedLive(key: String, consumerId: String) 
+    
+    /**
+     * Resolve a live profile card (full-card shape, Live liveness). Use for
+     * open profile screens. D6: invalid `key` is a silent no-op.
+     */
+    func resolveProfileCardLive(key: String, consumerId: String) 
+    
+    /**
+     * Resolve a profile ref (feed-avatar shape, CacheOk liveness). Use for
+     * feed-row avatars. D6: invalid `key` is a silent no-op; fire-and-forget.
+     */
+    func resolveProfileRef(key: String, consumerId: String) 
     
     /**
      * Retry a parked publish-outbox row by its handle.
@@ -627,6 +686,19 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * override). `false` on malformed/empty so the caller falls back.
      */
     func seedRelaysFromJson(json: String)  -> Bool
+    
+    /**
+     * Register (or clear) the native keyring capability handler. Must be called
+     * before [`TwentyNinerApp::start`] so the handler is in place for the
+     * identity-restore capability requests the actor issues at startup
+     * (Keychain sign-in restore). Pass `None` to clear.
+     *
+     * After this returns, the previous sink is neither registered nor
+     * mid-invocation (the same `CapabilityCallbackGate` quiescence contract as
+     * `set_update_sink`). Re-entrancy is forbidden: calling this from inside
+     * `on_capability_request` deadlocks the gate.
+     */
+    func setCapabilityCallback(sink: CapabilitySink?) 
     
     /**
      * Set the LMDB storage directory (pre-start). Empty clears it. Returns
@@ -773,6 +845,20 @@ open func declareConsumedProjections()  {try! rustCall() {
 }
     
     /**
+     * ADR-0055 Rung 3 — declare that 29er's runtime owns the NMP cache-merge
+     * layer (D3-3) so the kernel may omit `Unchanged` projections from the
+     * frame. Single-writer; call before [`Self::start`]. `true` on success
+     * (or idempotent re-call); `false` if called after start / the registry is
+     * unavailable (informational — the kernel then emits full rows).
+     */
+open func declareIncrementalApply() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_declare_incremental_apply(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
      * Dispatch a pre-built `DispatchEnvelope` (the generic byte lane, ADR-0071).
      */
 open func dispatchAction(envelope: Data) -> DispatchOutcome  {
@@ -909,6 +995,29 @@ open func relaySelectorSelectRelay(relayUrl: String) -> Bool  {
 }
     
     /**
+     * Release an event ref acquired through a typed event adapter. Idempotent.
+     */
+open func releaseEventRef(key: String, consumerId: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_release_event_ref(self.uniffiClonePointer(),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(consumerId),$0
+    )
+}
+}
+    
+    /**
+     * Release a profile ref acquired through a typed profile adapter.
+     * Idempotent (D6).
+     */
+open func releaseProfileRef(key: String, consumerId: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_release_profile_ref(self.uniffiClonePointer(),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(consumerId),$0
+    )
+}
+}
+    
+    /**
      * Remove an identity; the actor owns the active-account transition.
      */
 open func removeAccount(identityId: String)  {try! rustCall() {
@@ -923,6 +1032,53 @@ open func removeAccount(identityId: String)  {try! rustCall() {
      */
 open func reset()  {try! rustCall() {
     uniffi_nmp_app_29er_fn_method_twentyninerapp_reset(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+    /**
+     * Resolve an event embed (embed shape, CacheOk liveness). Use for embedded
+     * `nostr:nevent`/`naddr` cards in rendered content. D6 / fire-and-forget.
+     */
+open func resolveEventEmbed(key: String, consumerId: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_resolve_event_embed(self.uniffiClonePointer(),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(consumerId),$0
+    )
+}
+}
+    
+    /**
+     * Resolve a live event embed (tailing subscription).
+     */
+open func resolveEventEmbedLive(key: String, consumerId: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_resolve_event_embed_live(self.uniffiClonePointer(),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(consumerId),$0
+    )
+}
+}
+    
+    /**
+     * Resolve a live profile card (full-card shape, Live liveness). Use for
+     * open profile screens. D6: invalid `key` is a silent no-op.
+     */
+open func resolveProfileCardLive(key: String, consumerId: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_resolve_profile_card_live(self.uniffiClonePointer(),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(consumerId),$0
+    )
+}
+}
+    
+    /**
+     * Resolve a profile ref (feed-avatar shape, CacheOk liveness). Use for
+     * feed-row avatars. D6: invalid `key` is a silent no-op; fire-and-forget.
+     */
+open func resolveProfileRef(key: String, consumerId: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_resolve_profile_ref(self.uniffiClonePointer(),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(consumerId),$0
     )
 }
 }
@@ -958,6 +1114,24 @@ open func seedRelaysFromJson(json: String) -> Bool  {
         FfiConverterString.lower(json),$0
     )
 })
+}
+    
+    /**
+     * Register (or clear) the native keyring capability handler. Must be called
+     * before [`TwentyNinerApp::start`] so the handler is in place for the
+     * identity-restore capability requests the actor issues at startup
+     * (Keychain sign-in restore). Pass `None` to clear.
+     *
+     * After this returns, the previous sink is neither registered nor
+     * mid-invocation (the same `CapabilityCallbackGate` quiescence contract as
+     * `set_update_sink`). Re-entrancy is forbidden: calling this from inside
+     * `on_capability_request` deadlocks the gate.
+     */
+open func setCapabilityCallback(sink: CapabilitySink?)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_set_capability_callback(self.uniffiClonePointer(),
+        FfiConverterOptionCallbackInterfaceCapabilitySink.lower(sink),$0
+    )
+}
 }
     
     /**
@@ -1169,6 +1343,137 @@ public func FfiConverterTypeDispatchOutcome_lower(_ value: DispatchOutcome) -> R
 
 
 /**
+ * Rust→shell capability round-trip: the kernel calls this to route a
+ * `CapabilityRequest` JSON to the platform (iOS Keychain) and expects a
+ * `CapabilityEnvelope` JSON back.
+ *
+ * # Contract
+ *
+ * * `request_json` is a pre-copied JSON string — no Rust lock is held during
+ * the call. The implementation may block; it MUST NOT call
+ * [`TwentyNinerApp::set_capability_callback`] for the same app from inside
+ * this method (reentrancy deadlocks the quiescence gate).
+ * * The returned string must be a valid `CapabilityEnvelope` JSON
+ * (`{"namespace":…,"correlation_id":…,"result_json":…}`). D6: a panic or
+ * invalid return is caught and converted to an error envelope.
+ */
+public protocol CapabilitySink: AnyObject, Sendable {
+    
+    func onCapabilityRequest(requestJson: String)  -> String
+    
+}
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceCapabilitySink {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // This creates 1-element array, since this seems to be the only way to construct a const
+    // pointer that we can pass to the Rust code.
+    static let vtable: [UniffiVTableCallbackInterfaceCapabilitySink] = [UniffiVTableCallbackInterfaceCapabilitySink(
+        onCapabilityRequest: { (
+            uniffiHandle: UInt64,
+            requestJson: RustBuffer,
+            uniffiOutReturn: UnsafeMutablePointer<RustBuffer>,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> String in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceCapabilitySink.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onCapabilityRequest(
+                     requestJson: try FfiConverterString.lift(requestJson)
+                )
+            }
+
+            
+            let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterCallbackInterfaceCapabilitySink.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface CapabilitySink: handle missing in uniffiFree")
+            }
+        }
+    )]
+}
+
+private func uniffiCallbackInitCapabilitySink() {
+    uniffi_nmp_app_29er_fn_init_callback_vtable_capabilitysink(UniffiCallbackInterfaceCapabilitySink.vtable)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceCapabilitySink {
+    fileprivate static let handleMap = UniffiHandleMap<CapabilitySink>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceCapabilitySink : FfiConverter {
+    typealias SwiftType = CapabilitySink
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceCapabilitySink_lift(_ handle: UInt64) throws -> CapabilitySink {
+    return try FfiConverterCallbackInterfaceCapabilitySink.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceCapabilitySink_lower(_ v: CapabilitySink) -> UInt64 {
+    return FfiConverterCallbackInterfaceCapabilitySink.lower(v)
+}
+
+
+
+
+/**
  * Rust→shell push interface: receives NMPU FlatBuffers update frames.
  *
  * Implementations MUST NOT call back into any [`TwentyNinerApp`] method from
@@ -1315,6 +1620,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionCallbackInterfaceCapabilitySink: FfiConverterRustBuffer {
+    typealias SwiftType = CapabilitySink?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterCallbackInterfaceCapabilitySink.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterCallbackInterfaceCapabilitySink.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionCallbackInterfaceUpdateSink: FfiConverterRustBuffer {
     typealias SwiftType = UpdateSink?
 
@@ -1335,6 +1664,26 @@ fileprivate struct FfiConverterOptionCallbackInterfaceUpdateSink: FfiConverterRu
         }
     }
 }
+/**
+ * Tokenize Nostr event content into the FFI-stable `ContentTreeWire` JSON.
+ *
+ * `mode`: `0` = plain · `1` = markdown · `2` = auto (markdown vs plain by
+ * `kind`). `tags_json`, when present, is a JSON `[[string]]` event-tag array
+ * used for NIP-30 emoji resolution.
+ *
+ * D6: never fails the call. Invalid input returns
+ * `{"ok":false,"error":"…"}`.
+ */
+public func tokenizeContent(content: String, tagsJson: String?, mode: Int32, kind: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_func_tokenize_content(
+        FfiConverterString.lower(content),
+        FfiConverterOptionString.lower(tagsJson),
+        FfiConverterInt32.lower(mode),
+        FfiConverterUInt32.lower(kind),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -1351,6 +1700,9 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_nmp_app_29er_checksum_func_tokenize_content() != 64346) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_add_relay() != 23241) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1361,6 +1713,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_declare_consumed_projections() != 22899) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_declare_incremental_apply() != 59449) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_dispatch_action() != 22346) {
@@ -1399,10 +1754,28 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_relay_selector_select_relay() != 59995) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_release_event_ref() != 4797) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_release_profile_ref() != 2878) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_remove_account() != 63148) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_reset() != 30237) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_resolve_event_embed() != 6375) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_resolve_event_embed_live() != 27932) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_resolve_profile_card_live() != 5869) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_resolve_profile_ref() != 56666) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_retry_publish() != 26016) {
@@ -1412,6 +1785,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_seed_relays_from_json() != 16941) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_set_capability_callback() != 18636) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_set_storage_path() != 27333) {
@@ -1435,10 +1811,14 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_constructor_twentyninerapp_new() != 36983) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_app_29er_checksum_method_capabilitysink_on_capability_request() != 21029) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_app_29er_checksum_method_updatesink_on_update() != 44044) {
         return InitializationResult.apiChecksumMismatch
     }
 
+    uniffiCallbackInitCapabilitySink()
     uniffiCallbackInitUpdateSink()
     return InitializationResult.ok
 }()

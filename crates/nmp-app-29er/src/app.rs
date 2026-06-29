@@ -168,6 +168,15 @@ impl TwentyNinerApp {
         self.inner.reset_runtime();
     }
 
+    /// ADR-0055 Rung 3 — declare that 29er's runtime owns the NMP cache-merge
+    /// layer (D3-3) so the kernel may omit `Unchanged` projections from the
+    /// frame. Single-writer; call before [`Self::start`]. `true` on success
+    /// (or idempotent re-call); `false` if called after start / the registry is
+    /// unavailable (informational — the kernel then emits full rows).
+    pub fn declare_incremental_apply(&self) -> bool {
+        self.inner.declare_incremental_apply().is_ok()
+    }
+
     /// Idempotent teardown: clears the sink, sends Shutdown, joins threads.
     pub fn shutdown(&self) {
         self.inner.shutdown();
@@ -374,6 +383,13 @@ impl TwentyNinerApp {
 // ── Internal (non-exported) helpers ──────────────────────────────────────────
 
 impl TwentyNinerApp {
+    /// The owned `nmp-native-runtime` app. Crate-internal accessor so sibling
+    /// modules ([`crate::capability`], [`crate::refs`]) reach the runtime
+    /// without making `inner` a public field.
+    pub(crate) fn app(&self) -> &NmpApp {
+        &self.inner
+    }
+
     fn relay_selector_arc(&self) -> Option<Arc<RelaySelectorProjection>> {
         self.relay_selector.lock().ok().and_then(|g| g.clone())
     }

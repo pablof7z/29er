@@ -29,6 +29,7 @@ required-features = ["bindgen"]
 
 [dependencies]
 flatbuffers = { workspace = true }
+nmp-content = { workspace = true }
 nmp-core = { workspace = true }
 nmp-native-runtime = { workspace = true }
 nmp-defaults = { workspace = true }

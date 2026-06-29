@@ -27,13 +27,18 @@
 uniffi::setup_scaffolding!();
 
 pub mod app;
+pub mod capability;
 pub mod composition;
 pub mod compose;
 pub mod config;
+pub mod content;
 pub mod group_tree;
+pub mod refs;
 pub mod relay_seeding;
 pub mod relay_selector;
 
 pub use app::{dispatch_nip29_action, DispatchOutcome, TwentyNinerApp, UpdateSink};
+pub use capability::CapabilitySink;
 pub use composition::compose_29er_runtime;
 pub use compose::{compose_chat_message, ComposedGroupMessage};
+pub use content::tokenize_content;
