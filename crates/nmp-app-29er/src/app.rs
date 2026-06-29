@@ -685,6 +685,7 @@ fn encode_payload_for_namespace(namespace: &str, json: &str) -> Option<Vec<u8>> 
         "nmp.nip29.create_public_group" => {
             encode::<nmp_nip29::action::CreatePublicGroupInput>(json)
         }
+        "nmp.nip29.edit_metadata" => encode::<nmp_nip29::action::EditMetadataInput>(json),
         "nmp.nip29.put_user" => encode::<nmp_nip29::action::PutUserInput>(json),
         "nmp.nip29.create_invite" => encode::<nmp_nip29::action::CreateInviteInput>(json),
         "nmp.nip29.set_parent" => encode::<nmp_nip29::action::SetParentInput>(json),
@@ -725,5 +726,18 @@ mod tests {
     fn action_encoder_fails_closed_for_unknown_or_malformed_payloads() {
         assert!(encode_payload_for_namespace("nmp.nip29.remove_everyone", "{}").is_none());
         assert!(encode_payload_for_namespace("nmp.nip29.leave", r#"{"group":42}"#).is_none());
+    }
+
+    #[test]
+    fn edit_metadata_encodes_typed_payload() {
+        let bytes = encode_payload_for_namespace(
+            "nmp.nip29.edit_metadata",
+            r#"{"group":{"host_relay_url":"wss://groups.example.com","local_id":"room"},"name":"Renamed"}"#,
+        )
+        .expect("edit_metadata encodes");
+        let input =
+            <nmp_nip29::action::EditMetadataInput as ActionPayload>::decode(&bytes).expect("decodes");
+        assert_eq!(input.group.local_id, "room");
+        assert_eq!(input.name.as_deref(), Some("Renamed"));
     }
 }

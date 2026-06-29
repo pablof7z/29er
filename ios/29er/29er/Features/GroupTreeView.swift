@@ -623,6 +623,16 @@ struct GroupTimelineView: View {
             .sheet(isPresented: $showingAdminSheet) {
                 AdminActionsSheet(
                     title: title,
+                    currentName: node?.name ?? "",
+                    currentPicture: node?.picture ?? "",
+                    onEditMetadata: { name, about, picture in
+                        model.editGroupMetadata(
+                            groupId: groupId,
+                            name: name,
+                            about: about,
+                            picture: picture
+                        )
+                    },
                     onCreateInvite: { codes in
                         model.createInvite(groupId: groupId, codes: codes)
                     },
@@ -1124,6 +1134,7 @@ private struct GroupParentCandidate: Identifiable, Hashable {
 }
 
 private enum AdminTaskMode: String, CaseIterable, Identifiable {
+    case edit
     case invites
     case people
     case room
@@ -1133,6 +1144,8 @@ private enum AdminTaskMode: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .edit:
+            return "Edit"
         case .invites:
             return "Invites"
         case .people:
@@ -1263,6 +1276,13 @@ private struct LeaveGroupSheet: View {
 
 private struct AdminActionsSheet: View {
     let title: String
+    /// Current group metadata, used to prefill the Edit form. `about` is not
+    /// carried on the `nmp.29er.group_tree` node (only name + picture are), so
+    /// it starts empty — an empty Edit field is "leave unchanged" in the Rust
+    /// edit_metadata action, so this is safe.
+    let currentName: String
+    let currentPicture: String
+    let onEditMetadata: (String?, String?, String?) -> Bool
     let onCreateInvite: ([String]) -> Bool
     let onPutUser: (String, String?, String?) -> Bool
     let onCreateChild: (String, String, String?, String, String) -> Bool
@@ -1273,6 +1293,10 @@ private struct AdminActionsSheet: View {
     private let rootParentSelection = "__root__"
 
     @Environment(\.dismiss) private var dismiss
+    @State private var editName = ""
+    @State private var editAbout = ""
+    @State private var editPicture = ""
+    @State private var editPrefilled = false
     @State private var inviteCodes = ""
     @State private var targetPubkey = ""
     @State private var role = ""
@@ -1283,8 +1307,28 @@ private struct AdminActionsSheet: View {
     @State private var childVisibility = "public"
     @State private var childAccess = "open"
     @State private var parentSelection = ""
-    @State private var mode: AdminTaskMode = .invites
+    @State private var mode: AdminTaskMode = .edit
     @State private var error: String?
+
+    private var trimmedEditName: String {
+        editName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedEditAbout: String {
+        editAbout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedEditPicture: String {
+        editPicture.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// At least one field must differ from the prefilled current metadata. The
+    /// Rust action also rejects a no-op edit (D6); this just disables Save.
+    private var canSubmitEdit: Bool {
+        (!trimmedEditName.isEmpty && trimmedEditName != currentName)
+            || !trimmedEditAbout.isEmpty
+            || (!trimmedEditPicture.isEmpty && trimmedEditPicture != currentPicture)
+    }
 
     private var parsedInviteCodes: [String] {
         inviteCodes
@@ -1333,6 +1377,8 @@ private struct AdminActionsSheet: View {
                 }
 
                 switch mode {
+                case .edit:
+                    editSection
                 case .invites:
                     inviteSection
                 case .people:
@@ -1361,7 +1407,35 @@ private struct AdminActionsSheet: View {
                 if parentSelection.isEmpty {
                     parentSelection = currentParentId ?? rootParentSelection
                 }
+                if !editPrefilled {
+                    editName = currentName
+                    editPicture = currentPicture
+                    editPrefilled = true
+                }
             }
+        }
+    }
+
+    private var editSection: some View {
+        Section("Edit Group") {
+            TextField("Name", text: $editName)
+                .accessibilityIdentifier("edit-metadata-name-field")
+            TextField("About", text: $editAbout, axis: .vertical)
+                .lineLimit(2...4)
+                .accessibilityIdentifier("edit-metadata-about-field")
+            TextField("Picture URL", text: $editPicture)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .accessibilityIdentifier("edit-metadata-picture-field")
+
+            Button {
+                submitEdit()
+            } label: {
+                Label("Save", systemImage: "square.and.arrow.down")
+            }
+            .accessibilityIdentifier("edit-metadata-save-button")
+            .disabled(!canSubmitEdit)
         }
     }
 
@@ -1493,6 +1567,23 @@ private struct AdminActionsSheet: View {
             Spacer()
         }
         .contentShape(Rectangle())
+    }
+
+    private func submitEdit() {
+        // Send only changed fields; an unchanged/empty field is `nil` so the
+        // Rust edit_metadata action leaves the relay's prior value untouched.
+        let nameArg = (trimmedEditName.isEmpty || trimmedEditName == currentName)
+            ? nil : trimmedEditName
+        let aboutArg = trimmedEditAbout.isEmpty ? nil : trimmedEditAbout
+        let pictureArg = (trimmedEditPicture.isEmpty || trimmedEditPicture == currentPicture)
+            ? nil : trimmedEditPicture
+        let accepted = onEditMetadata(nameArg, aboutArg, pictureArg)
+        if accepted {
+            error = nil
+            dismiss()
+        } else {
+            error = "Could not save group changes."
+        }
     }
 
     private func submitInvite() {

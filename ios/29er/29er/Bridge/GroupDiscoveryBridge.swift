@@ -170,6 +170,28 @@ extension KernelHandle {
         )
     }
 
+    /// Dispatch a `nmp.nip29.edit_metadata` action — edit an EXISTING group's
+    /// name / about / picture. The Rust action publishes a kind:9002 carrying
+    /// only the changed fields; an omitted (`nil`) field leaves the relay's
+    /// prior value untouched, and a no-op edit is rejected in Rust (D6). This is
+    /// distinct from `create_public_group` (which mints a new group via 9007).
+    func editGroupMetadata(
+        group: GroupId,
+        name: String? = nil,
+        about: String? = nil,
+        picture: String? = nil
+    ) -> Bool {
+        var payload: [String: Any] = ["group": group.jsonObject]
+        if let name, !name.isEmpty { payload["name"] = name }
+        if let about, !about.isEmpty { payload["about"] = about }
+        if let picture, !picture.isEmpty { payload["picture"] = picture }
+        return dispatchNip29(
+            "nmp.nip29.edit_metadata",
+            payload: payload,
+            label: "editGroupMetadata"
+        )
+    }
+
     /// Dispatch a `nmp.nip29.put_user` action — add/promote a user by pubkey.
     func putUser(
         group: GroupId,
@@ -347,6 +369,25 @@ extension KernelModel {
             visibility: visibility,
             access: access,
             parent: parent
+        )
+    }
+
+    /// Edit an existing group's metadata (admin-gated in the UI). Resolves the
+    /// `GroupId` from the group tree, then dispatches `nmp.nip29.edit_metadata`
+    /// with only the supplied fields. Returns `false` when the group is unknown
+    /// or Rust rejects the edit (e.g. a no-op).
+    func editGroupMetadata(
+        groupId: String,
+        name: String? = nil,
+        about: String? = nil,
+        picture: String? = nil
+    ) -> Bool {
+        guard let group = nip29GroupId(for: groupId) else { return false }
+        return kernel.editGroupMetadata(
+            group: group,
+            name: name,
+            about: about,
+            picture: picture
         )
     }
 
