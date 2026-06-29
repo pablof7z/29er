@@ -49,10 +49,17 @@ final class KernelHandle {
         // kernel-owned built-in Tier-2 projection. Must run before `start`; the
         // kernel narrows its built-in output to this declaration.
         app.declareConsumedProjections()
-        // ADR-0055 Rung 3 — own the cache-merge layer so the kernel may omit
-        // `Unchanged` projections. Informational: a `false` return just means
-        // full rows keep flowing. Must run before `start`.
-        _ = app.declareIncrementalApply()
+        // ADR-0055 Rung 3 (incremental apply) is intentionally NOT declared: it
+        // makes the kernel omit `Unchanged` typed projections, which requires the
+        // host to retain a per-key merge cache. 29er's `KernelModel.apply`
+        // assigns every typed slot unconditionally from the current frame and
+        // does NOT yet wire the ProjectionMergeCache (see `KernelModel+Apply`),
+        // so it relies on the kernel emitting a full frame every tick. Declaring
+        // incremental apply here would let the kernel drop the unchanged
+        // `active_account` (`KACT`) sidecar after the sign-in tick, clobbering
+        // `typedActiveAccount` to nil and collapsing `identityState` back to
+        // `.signedOut` — the user gets stuck on onboarding. Wire the merge cache
+        // (mirroring Chirp) before opting back into Rung 3.
         // Register the native keyring capability handler BEFORE `start` so the
         // kernel can route capability requests from the first tick (identity
         // restore reads from Keychain during startup). Held by `capabilities`
