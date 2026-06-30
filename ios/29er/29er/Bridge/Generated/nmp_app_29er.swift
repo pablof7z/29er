@@ -554,9 +554,9 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
 
     /**
      * Dispatch a pre-built `DispatchEnvelope` (the generic byte lane,
-     * ADR-0071). This is the one dispatch verb this PR exposes on the
-     * facade; the richer per-namespace NIP-29 convenience
-     * ([`crate::dispatch::dispatch_nip29_action`]) is PR-3's job to wire in.
+     * ADR-0071). The richer per-namespace NIP-29 convenience
+     * ([`crate::group_sessions`]'s `dispatch_nip29_action`) is built on top
+     * of this same byte lane.
      */
     func dispatchAction(envelope: Data)  -> DispatchOutcome
 
@@ -644,6 +644,14 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
     func refreshGroupDiscovery(hostRelayUrl: String)  -> Bool
 
     /**
+     * Release a profile ref previously registered via
+     * [`Self::resolve_profile_ref`] (mirrors the deleted C-ABI's
+     * `nmp_app_release_profile_ref`). Idempotent (D6): releasing an unknown
+     * or already-released `(pubkey, consumer)` pair is a silent no-op.
+     */
+    func releaseProfileRef(pubkey: String, consumer: String)
+
+    /**
      * Remove an identity; the actor owns the active-account transition.
      */
     func removeAccount(identityId: String)
@@ -657,6 +665,18 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * Reset transient kernel state.
      */
     func reset()
+
+    /**
+     * Register (or upgrade) a consumer's interest in a profile ref for
+     * `pubkey`. Hardcodes the feed-avatar shape (`ProfileShape::Ref` +
+     * `RefLiveness::CacheOk`) — the same shape `29er-tui`'s
+     * `resolve_profile_ref` uses for a chat-message author byline (mirrors
+     * the deleted C-ABI's `nmp_app_resolve_ref` typed adapter). `consumer`
+     * is the caller-chosen refcount owner key (e.g. a SwiftUI view id) and
+     * MUST be passed to [`Self::release_profile_ref`] to tear down. D6: an
+     * invalid (non-hex) `pubkey` is a silent no-op. D8: fire-and-forget.
+     */
+    func resolveProfileRef(pubkey: String, consumer: String)
 
     /**
      * Retry a parked publish-outbox row by its handle.
@@ -868,9 +888,9 @@ open func declareIncrementalApply() -> Bool  {
 
     /**
      * Dispatch a pre-built `DispatchEnvelope` (the generic byte lane,
-     * ADR-0071). This is the one dispatch verb this PR exposes on the
-     * facade; the richer per-namespace NIP-29 convenience
-     * ([`crate::dispatch::dispatch_nip29_action`]) is PR-3's job to wire in.
+     * ADR-0071). The richer per-namespace NIP-29 convenience
+     * ([`crate::group_sessions`]'s `dispatch_nip29_action`) is built on top
+     * of this same byte lane.
      */
 open func dispatchAction(envelope: Data) -> DispatchOutcome  {
     return try!  FfiConverterTypeDispatchOutcome_lift(try! rustCall() {
@@ -1013,6 +1033,20 @@ open func refreshGroupDiscovery(hostRelayUrl: String) -> Bool  {
 }
 
     /**
+     * Release a profile ref previously registered via
+     * [`Self::resolve_profile_ref`] (mirrors the deleted C-ABI's
+     * `nmp_app_release_profile_ref`). Idempotent (D6): releasing an unknown
+     * or already-released `(pubkey, consumer)` pair is a silent no-op.
+     */
+open func releaseProfileRef(pubkey: String, consumer: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_release_profile_ref(self.uniffiClonePointer(),
+        FfiConverterString.lower(pubkey),
+        FfiConverterString.lower(consumer),$0
+    )
+}
+}
+
+    /**
      * Remove an identity; the actor owns the active-account transition.
      */
 open func removeAccount(identityId: String)  {try! rustCall() {
@@ -1037,6 +1071,24 @@ open func removeRelay(url: String)  {try! rustCall() {
      */
 open func reset()  {try! rustCall() {
     uniffi_nmp_app_29er_fn_method_twentyninerapp_reset(self.uniffiClonePointer(),$0
+    )
+}
+}
+
+    /**
+     * Register (or upgrade) a consumer's interest in a profile ref for
+     * `pubkey`. Hardcodes the feed-avatar shape (`ProfileShape::Ref` +
+     * `RefLiveness::CacheOk`) — the same shape `29er-tui`'s
+     * `resolve_profile_ref` uses for a chat-message author byline (mirrors
+     * the deleted C-ABI's `nmp_app_resolve_ref` typed adapter). `consumer`
+     * is the caller-chosen refcount owner key (e.g. a SwiftUI view id) and
+     * MUST be passed to [`Self::release_profile_ref`] to tear down. D6: an
+     * invalid (non-hex) `pubkey` is a silent no-op. D8: fire-and-forget.
+     */
+open func resolveProfileRef(pubkey: String, consumer: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_resolve_profile_ref(self.uniffiClonePointer(),
+        FfiConverterString.lower(pubkey),
+        FfiConverterString.lower(consumer),$0
     )
 }
 }
@@ -1653,7 +1705,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_declare_incremental_apply() != 62830) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_dispatch_action() != 25873) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_dispatch_action() != 2939) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_dispatch_nip29_action() != 63847) {
@@ -1683,6 +1735,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_refresh_group_discovery() != 9500) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_release_profile_ref() != 20306) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_remove_account() != 63148) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1690,6 +1745,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_reset() != 30237) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_resolve_profile_ref() != 59958) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_retry_publish() != 26016) {
