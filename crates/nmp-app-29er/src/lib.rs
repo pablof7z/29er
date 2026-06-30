@@ -42,10 +42,10 @@ pub use compose::{compose_chat_message, ComposedGroupMessage};
 pub use ffi::{
     nmp_app_29er_close_group_discovery, nmp_app_29er_declare_consumed_projections,
     nmp_app_29er_dispatch_action_bytes, nmp_app_29er_mark_group_read,
-    nmp_app_29er_open_group_discovery, nmp_app_29er_register, nmp_app_29er_register_group_chat,
-    nmp_app_29er_relay_selector_add_relay, nmp_app_29er_relay_selector_remove_relay,
-    nmp_app_29er_relay_selector_select_relay, nmp_app_29er_unregister, NmpRegisterStatus,
-    TwentyNinerHandle,
+    nmp_app_29er_open_group_discovery, nmp_app_29er_refresh_group_discovery, nmp_app_29er_register,
+    nmp_app_29er_register_group_chat, nmp_app_29er_relay_selector_add_relay,
+    nmp_app_29er_relay_selector_remove_relay, nmp_app_29er_relay_selector_select_relay,
+    nmp_app_29er_unregister, NmpRegisterStatus, TwentyNinerHandle,
 };
 
 // Relay-seeding C-ABI surface (D7 — seeding policy lives in Rust, not the

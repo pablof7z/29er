@@ -2,7 +2,7 @@
 
 > Derived cache — do not hand-edit. Rebuilt by proactive-context after each capture.
 
-Last updated: 2026-06-27
+Last updated: 2026-06-28
 
 ## git-configuration (1 guide)
 
@@ -40,7 +40,13 @@ Last updated: 2026-06-27
 |------|-------|---------|------|------------|----------|-------|
 | [snapshot-system](guides/snapshot-system.md) | TUI Snapshots and State Management | The 29er app sources group discovery, membership, and chat state via NMP's open_group_discovery, open_joined_groups, and open_group_chat APIs | capture | warm | 2026-06-26 | snapshot-system |
 
-## Research Records (12 records)
+## user-settings (1 guide)
+
+| Slug | Title | Summary | Tags | Volatility | Verified | Topic |
+|------|-------|---------|------|------------|----------|-------|
+| [user-settings](guides/user-settings.md) | User Settings | A gear-icon Settings button appears in the top-right tab bar, replacing the standalone logout button | capture | warm | 2026-06-28 | user-settings |
+
+## Research Records (13 records)
 
 | Record | Date | Finding | Agent |
 |--------|------|---------|-------|
@@ -54,6 +60,7 @@ Last updated: 2026-06-27
 | [2026-06-26-2-nmp-doctrine-compliance-audit-five-architectural](research/2026-06-26-2-nmp-doctrine-compliance-audit-five-architectural.md) | 2026-06-26 | NMP doctrine compliance audit: five architectural checks (TUI/composer/publish_group_event/vendoring/tests) verified as passing | main |
 | [2026-06-26-2-opus-review-of-8-issue-epic](research/2026-06-26-2-opus-review-of-8-issue-epic.md) | 2026-06-26 | Opus review of 8-issue epic (#3-#10): all acceptance criteria passed, 1,862 lines of TUI code, 37 agents, verdict APPROVE | main |
 | [2026-06-26-3-codex-exec-evaluation-of-ux-ui](research/2026-06-26-3-codex-exec-evaluation-of-ux-ui.md) | 2026-06-26 | Codex exec evaluation of UX/UI improvements workflow: 7 blocking issues identified (test compilation, mentions dispatch, outbox confirmation, observer leak, NMP architecture violations, relay state), verdict needs-fixes | main |
+| [2026-06-27-1-audit-of-all-git-stashes-and](research/2026-06-27-1-audit-of-all-git-stashes-and.md) | 2026-06-27 | Audit of all git stashes and worktrees against main; identified relay selector feature as critical missing in stash@{0}, membership popup feature in worktree, superseded items, and historical obsolete code; provided restore/cherry-pick/discard verdicts | afeeb8bbacdf85127 |
 | [2026-06-27-1-audit-of-git-stashes-and-worktrees](research/2026-06-27-1-audit-of-git-stashes-and-worktrees.md) | 2026-06-27 | Audit of git stashes and worktrees to identify features missing from main; verdict to restore relay browser (stash@{0}), cherry-pick TUI popup membership fix, discard superseded work | afeeb8bbacdf85127 |
 | [AGENTS](research/AGENTS.md) |  |  |  |
 

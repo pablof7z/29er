@@ -65,6 +65,23 @@ extension KernelHandle {
         gdLog.info("closed NIP-29 discovery session")
     }
 
+    /// Refresh a discovery session after a local database reset. Rust owns the
+    /// projection lifecycle: close old tree/discovery projections, reopen them
+    /// for `hostRelayUrl`, and redispatch NIP-29 discovery.
+    func refreshGroupDiscovery(_ handle: OpaquePointer?, hostRelayUrl: String) -> OpaquePointer? {
+        guard !hostRelayUrl.isEmpty else { return nil }
+        let refreshed = hostRelayUrl.withCString {
+            nmp_app_29er_refresh_group_discovery(
+                raw,
+                handle.map(UnsafeMutableRawPointer.init),
+                $0
+            )
+        }
+        guard let refreshed else { return nil }
+        gdLog.info("refreshed NIP-29 discovery session for \(hostRelayUrl, privacy: .public)")
+        return OpaquePointer(refreshed)
+    }
+
     /// Mark one group's direct messages read inside the Rust group-tree
     /// projection. The tree projection owns unread aggregation; Swift only
     /// reports the user's current read position.
@@ -475,6 +492,19 @@ final class DiscoveredGroupsStore: ObservableObject {
         groups = []
         hostRelayUrl = ""
         isSearching = false
+    }
+
+    func refreshSessionAfterLocalDatabaseReset(relayUrl: String) {
+        let trimmed = relayUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            closeSession()
+            return
+        }
+        let refreshed = kernel.refreshGroupDiscovery(discoveryHandle, hostRelayUrl: trimmed)
+        setDiscoveryHandle(refreshed)
+        groups = []
+        hostRelayUrl = refreshed == nil ? "" : trimmed
+        isSearching = refreshed != nil
     }
 
     func markGroupRead(groupId: String) {

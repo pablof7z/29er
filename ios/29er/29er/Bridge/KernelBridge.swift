@@ -80,11 +80,15 @@ final class KernelHandle {
         registerCapabilityHandler(capabilities)
     }
 
-    private static func configureStoragePath(for raw: UnsafeMutableRawPointer) {
+    private static var storageDirectory: URL? {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return
+            return nil
         }
-        let directory = base.appendingPathComponent("NMP", isDirectory: true)
+        return base.appendingPathComponent("NMP", isDirectory: true)
+    }
+
+    private static func configureStoragePath(for raw: UnsafeMutableRawPointer) {
+        guard let directory = storageDirectory else { return }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let status = directory.path.withCString { nmp_app_set_storage_path(raw, $0) }
@@ -186,6 +190,17 @@ final class KernelHandle {
     }
 
     func reset() {
+        nmp_app_reset(raw)
+    }
+
+    func resetLocalDatabase() throws {
+        nmp_app_stop(raw)
+        if let directory = Self.storageDirectory {
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.removeItem(at: directory)
+            }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
         nmp_app_reset(raw)
     }
 
@@ -393,10 +408,10 @@ extension KernelHandle {
                         typedActiveAccount: typedActiveAccount,
                         typedGroupDefaults: typedGroupDefaults,
                         typedProjections: envelopes,
-                        sessionId: sessionId,
-                        snapshotEpoch: snapshotEpoch,
                         typedRelaySelector: typedRelaySelector,
                         typedRelayDiagnostics: typedRelayDiagnostics,
+                        sessionId: sessionId,
+                        snapshotEpoch: snapshotEpoch,
                         rev: rev,
                         running: running,
                         lastErrorToast: lastErrorToast,

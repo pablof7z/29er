@@ -76,6 +76,32 @@ extension KernelModel {
         startedKernel = true
     }
 
+    func resetLocalDatabaseAndRestart() {
+        do {
+            let relayToRefresh = relaySelector.activeRelayUrl
+            try kernel.resetLocalDatabase()
+            // Clear every typed projection slot so views immediately leave
+            // stale rows behind while the empty store restarts.
+            clearTypedProjections()
+            kernel.lastAppliedRev = 0
+            selectedGroupId = nil
+            lastErrorToast = nil
+            lastErrorCategory = nil
+            if let testRelaysJson = ProcessInfo.processInfo.environment["NMP_TEST_RELAYS"],
+               kernel.seedRelays(fromJSON: testRelaysJson) {
+                // overridden for tests
+            } else {
+                kernel.seedDefaultRelays()
+            }
+            kernel.start(visibleLimit: visibleLimit, emitHz: emitHz)
+            startedKernel = true
+            discoveredGroups.refreshSessionAfterLocalDatabaseReset(relayUrl: relayToRefresh)
+        } catch {
+            lastErrorCategory = "storage"
+            lastErrorToast = "Could not reset the local database: \(error.localizedDescription)"
+        }
+    }
+
     /// Open NIP-29 group discovery for `hostRelayUrl` (the read side of the
     /// discover screen). Delegates to `DiscoveredGroupsStore.searchGroups`
     /// which opens the read projection + dispatches the `nmp.nip29.discover`

@@ -461,6 +461,54 @@ pub extern "C" fn nmp_app_29er_open_group_discovery(
     }
 }
 
+/// Refresh one NIP-29 group-discovery session after a local store reset.
+///
+/// Rust owns the read-model lifecycle: consume and tear down the previous
+/// discovery handle, remove the app-owned `nmp.29er.group_tree` typed
+/// projection through that teardown, open a fresh discovery/tree composition
+/// for `host_relay_url`, and dispatch the canonical `nmp.nip29.discover`
+/// action for that relay. The shell only names the relay currently being
+/// shown and executes the native file-system capability.
+///
+/// Returns a new heap-allocated discovery handle, or NULL if `app`/relay input
+/// is invalid or the new discovery composition cannot be opened. The old handle
+/// is consumed regardless and MUST NOT be reused after this call. D6: a null
+/// old handle is accepted.
+///
+/// # Safety
+///
+/// `app` must be a valid non-null `*mut NmpApp` from `nmp_app_new()` or null.
+/// `handle` must be a valid pointer returned by
+/// [`nmp_app_29er_open_group_discovery`] / this function, or null.
+/// `host_relay_url` may be null. `app` MUST outlive both handles.
+#[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn nmp_app_29er_refresh_group_discovery(
+    app: *mut NmpApp,
+    handle: *mut TwentyNinerGroupDiscoveryHandle,
+    host_relay_url: *const c_char,
+) -> *mut TwentyNinerGroupDiscoveryHandle {
+    close_group_discovery_handle(handle);
+
+    if app.is_null() {
+        return std::ptr::null_mut();
+    }
+    let Some(relay_url) = c_string_opt(host_relay_url).filter(|s| !s.is_empty()) else {
+        return std::ptr::null_mut();
+    };
+
+    // SAFETY: caller guarantees `app` is a valid pointer from `nmp_app_new`,
+    // live for the duration of this call and the returned handle.
+    let app_ref = unsafe { &*app };
+    match open_group_discovery_with_tree(app_ref, relay_url.clone()) {
+        Some(handle) => {
+            dispatch_discover_groups(app, &relay_url);
+            Box::into_raw(Box::new(handle))
+        }
+        None => std::ptr::null_mut(),
+    }
+}
+
 /// Bounded read-cache replay budget for the 29er kind:9 group-tree observed
 /// projection. Mirrors `nmp_feed::DEFAULT_FEED_WINDOW_LIMIT` (80) — kept as a
 /// local const so this crate does not take an `nmp-feed` dependency just for
@@ -606,6 +654,10 @@ fn open_group_discovery_with_tree(
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn nmp_app_29er_close_group_discovery(handle: *mut TwentyNinerGroupDiscoveryHandle) {
+    close_group_discovery_handle(handle);
+}
+
+fn close_group_discovery_handle(handle: *mut TwentyNinerGroupDiscoveryHandle) {
     if handle.is_null() {
         return;
     }
@@ -615,6 +667,19 @@ pub extern "C" fn nmp_app_29er_close_group_discovery(handle: *mut TwentyNinerGro
     // down the observer + projection before the box is dropped.
     let handle = unsafe { *Box::from_raw(handle) };
     (handle.teardown_fn)();
+}
+
+fn dispatch_discover_groups(app: *mut NmpApp, relay_url: &str) {
+    let (Ok(namespace), Ok(body)) = (
+        std::ffi::CString::new("nmp.nip29.discover"),
+        std::ffi::CString::new(serde_json::json!({ "relay_url": relay_url }).to_string()),
+    ) else {
+        return;
+    };
+    let ptr = nmp_app_29er_dispatch_action_bytes(app, namespace.as_ptr(), body.as_ptr());
+    if !ptr.is_null() {
+        nmp_ffi::nmp_free_string(ptr);
+    }
 }
 
 /// Mark a group's direct kind:9 messages read inside the open group-tree

@@ -8,12 +8,13 @@ tags:
 volatility: warm
 confidence: medium
 created: 2026-06-26
-updated: 2026-06-26
+updated: 2026-06-28
 verified: 2026-06-26
 compiled-from: conversation
 sources:
   - session:019f02cc-8e3e-7782-9ff3-73e2a3824267
   - session:019f03c8-721e-7783-87f1-b3dbc19bfcef
+  - session:019f0d0b-8033-7cf0-a750-21b389b8daf0
 ---
 
 # TUI Snapshots and State Management
@@ -38,3 +39,7 @@ Room selection is a single snapshot-owned fact; tree navigation and all selectio
 ## Test Suite
 
 The tui-29er test suite compiles with test snapshot builders reflecting the current `TuiSnapshot` and `ChannelListItem` schema. <!-- [^019f0-5e777] -->
+
+## Reset Local Database
+
+The Reset Local Database action clears the group discovery session and rehydrates the UI with current relay data, ensuring stale channels no longer appear. <!-- [^019f0-597b2] -->

@@ -208,6 +208,7 @@ void nmp_app_29er_register_group_chat(void *app, const char *group_id_json);
 //   • D6: a null `handle` is a silent no-op.
 void *nmp_app_29er_open_group_discovery(void *app, const char *host_relay_url);
 void nmp_app_29er_close_group_discovery(void *handle);
+void *nmp_app_29er_refresh_group_discovery(void *app, void *handle, const char *host_relay_url);
 void nmp_app_29er_mark_group_read(void *handle, const char *group_id);
 void nmp_app_29er_select_group_members(void *handle, const char *group_id);
 
