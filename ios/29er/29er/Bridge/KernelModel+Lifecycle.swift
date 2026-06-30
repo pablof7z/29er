@@ -19,9 +19,10 @@ extension KernelModel {
         kernelIsDead = true
     }
 
-    /// Probe the actor liveness through the FFI (`nmp_app_is_alive`,
-    /// ADR-0028) and flip `kernelIsDead` if the actor is gone. Pulled by the
-    /// `App29er` scenePhase observer on every `.active` transition.
+    /// Probe the actor liveness through the generated `TwentyNinerApp.isAlive()`
+    /// facade method (ADR-0028) and flip `kernelIsDead` if the actor is gone.
+    /// Pulled by the `App29er` scenePhase observer on every `.active`
+    /// transition.
     func checkAlive() {
         if kernelIsDead { return }
         if !kernel.isAlive() {
@@ -124,9 +125,9 @@ extension KernelModel {
     /// (starts with `nsec1`, length >= 40) before dispatching to Rust; a
     /// malformed nsec flips `identityState` to `.invalidKey` and returns
     /// without dispatching (D004 — the nsec never reaches NMP). A valid-looking
-    /// nsec flips `identityState` to `.unknown` (loading) and dispatches
-    /// `nmp_app_signin_nsec` to the actor; the next `KACT` tick flips the
-    /// state to `.signedIn(pubkey)` on success or `.signedOut` on rejection
+    /// nsec flips `identityState` to `.unknown` (loading) and dispatches via
+    /// `TwentyNinerApp.signinNsec` to the actor; the next `KACT` tick flips
+    /// the state to `.signedIn(pubkey)` on success or `.signedOut` on rejection
     /// (the `active_account` slot stays nil).
     ///
     /// The nsec string is cleared from this stack frame immediately after
