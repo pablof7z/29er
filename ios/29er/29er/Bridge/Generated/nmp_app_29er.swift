@@ -509,25 +509,25 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
  * Arc-wrapped 29er native runtime.
  */
 public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
-    
+
     /**
      * Add a relay. `role` is an NMP relay-role token (e.g. `"both"`).
      */
-    func addRelay(url: String, role: String) 
-    
+    func addRelay(url: String, role: String)
+
     /**
      * Reconfigure rendering limits without restarting (same clamps as `start`).
      */
-    func configure(visibleLimit: UInt32, emitHz: UInt32) 
-    
+    func configure(visibleLimit: UInt32, emitHz: UInt32)
+
     /**
      * Declare that 29er consumes every kernel-owned built-in Tier-2
      * projection (full client). Pre-start; idempotent. Replaces the deleted
      * C-ABI symbol `nmp_app_consume_all_builtin_projections` /
      * `nmp_app_29er_declare_consumed_projections`.
      */
-    func declareConsumedProjections() 
-    
+    func declareConsumedProjections()
+
     /**
      * ADR-0055 Rung 3 — declare that 29er's runtime owns the NMP cache-merge
      * layer (D3-3) so the kernel may omit `Unchanged` projections from the
@@ -536,7 +536,7 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * is unavailable (informational — the kernel then emits full rows).
      */
     func declareIncrementalApply()  -> Bool
-    
+
     /**
      * Dispatch a pre-built `DispatchEnvelope` (the generic byte lane,
      * ADR-0071). This is the one dispatch verb this PR exposes on the
@@ -544,54 +544,54 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * ([`crate::dispatch::dispatch_nip29_action`]) is PR-3's job to wire in.
      */
     func dispatchAction(envelope: Data)  -> DispatchOutcome
-    
+
     /**
      * Actor-liveness probe (ADR-0028). `true` while the actor thread runs.
      */
     func isAlive()  -> Bool
-    
+
     /**
      * Report iOS scenePhase = `.background`. Fire-and-forget.
      */
-    func lifecycleBackground() 
-    
+    func lifecycleBackground()
+
     /**
      * Report iOS scenePhase = `.active`. Fire-and-forget.
      */
-    func lifecycleForeground() 
-    
+    func lifecycleForeground()
+
     /**
      * Remove an identity; the actor owns the active-account transition.
      */
-    func removeAccount(identityId: String) 
-    
+    func removeAccount(identityId: String)
+
     /**
      * Remove a relay.
      */
-    func removeRelay(url: String) 
-    
+    func removeRelay(url: String)
+
     /**
      * Reset transient kernel state.
      */
-    func reset() 
-    
+    func reset()
+
     /**
      * Retry a parked publish-outbox row by its handle.
      */
-    func retryPublish(handle: String) 
-    
+    func retryPublish(handle: String)
+
     /**
      * Seed 29er's Rust-owned default relay set (D7). `true` when ≥1 relay was
      * handed to the kernel.
      */
     func seedDefaultRelays()  -> Bool
-    
+
     /**
      * Seed relays from a `[["url","role"],…]` JSON array (the `NMP_TEST_RELAYS`
      * override). `false` on malformed/empty so the caller falls back.
      */
     func seedRelaysFromJson(json: String)  -> Bool
-    
+
     /**
      * Register (or clear) the native keyring capability handler. Must be
      * called before [`TwentyNinerApp::start`] so the handler is in place for
@@ -603,44 +603,44 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * Re-entrancy is forbidden: calling this from inside
      * `on_capability_request` deadlocks the gate.
      */
-    func setCapabilityCallback(sink: CapabilitySink?) 
-    
+    func setCapabilityCallback(sink: CapabilitySink?)
+
     /**
      * Set the LMDB storage directory (pre-start). Empty clears it. Returns
      * `true` when accepted (`NmpConfigStatus::Ok`).
      */
     func setStoragePath(path: String)  -> Bool
-    
+
     /**
      * Register (or clear) the NMPU frame observer. After return the previous
      * sink is neither registered nor mid-invocation (quiescence). Mirrors
      * `nmp-uniffi::NmpApp::set_update_sink`.
      */
-    func setUpdateSink(sink: UpdateSink?) 
-    
+    func setUpdateSink(sink: UpdateSink?)
+
     /**
      * Idempotent teardown: clears the sink, sends Shutdown, joins threads.
      */
-    func shutdown() 
-    
+    func shutdown()
+
     /**
      * Sign in with a local nsec and (when `make_active`) activate it. The
      * nsec is wiped on drop (`Zeroizing`). D004: handed to NMP once.
      */
-    func signinNsec(nsec: String, makeActive: Bool) 
-    
+    func signinNsec(nsec: String, makeActive: Bool)
+
     /**
      * Start the runtime actor. Clamp parity with `nmp-uniffi`: `visible_limit
      * == 0` → default; else clamp(1..=500). `emit_hz == 0` → default; else
      * clamp(1..=12).
      */
-    func start(visibleLimit: UInt32, emitHz: UInt32) 
-    
+    func start(visibleLimit: UInt32, emitHz: UInt32)
+
     /**
      * Pause event processing (no data loss).
      */
-    func stop() 
-    
+    func stop()
+
 }
 /**
  * Arc-wrapped 29er native runtime.
@@ -705,9 +705,9 @@ public convenience init() {
         try! rustCall { uniffi_nmp_app_29er_fn_free_twentyninerapp(pointer, $0) }
     }
 
-    
 
-    
+
+
     /**
      * Add a relay. `role` is an NMP relay-role token (e.g. `"both"`).
      */
@@ -718,7 +718,7 @@ open func addRelay(url: String, role: String)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Reconfigure rendering limits without restarting (same clamps as `start`).
      */
@@ -729,7 +729,7 @@ open func configure(visibleLimit: UInt32, emitHz: UInt32)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Declare that 29er consumes every kernel-owned built-in Tier-2
      * projection (full client). Pre-start; idempotent. Replaces the deleted
@@ -741,7 +741,7 @@ open func declareConsumedProjections()  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * ADR-0055 Rung 3 — declare that 29er's runtime owns the NMP cache-merge
      * layer (D3-3) so the kernel may omit `Unchanged` projections from the
@@ -755,7 +755,7 @@ open func declareIncrementalApply() -> Bool  {
     )
 })
 }
-    
+
     /**
      * Dispatch a pre-built `DispatchEnvelope` (the generic byte lane,
      * ADR-0071). This is the one dispatch verb this PR exposes on the
@@ -769,7 +769,7 @@ open func dispatchAction(envelope: Data) -> DispatchOutcome  {
     )
 })
 }
-    
+
     /**
      * Actor-liveness probe (ADR-0028). `true` while the actor thread runs.
      */
@@ -779,7 +779,7 @@ open func isAlive() -> Bool  {
     )
 })
 }
-    
+
     /**
      * Report iOS scenePhase = `.background`. Fire-and-forget.
      */
@@ -788,7 +788,7 @@ open func lifecycleBackground()  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Report iOS scenePhase = `.active`. Fire-and-forget.
      */
@@ -797,7 +797,7 @@ open func lifecycleForeground()  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Remove an identity; the actor owns the active-account transition.
      */
@@ -807,7 +807,7 @@ open func removeAccount(identityId: String)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Remove a relay.
      */
@@ -817,7 +817,7 @@ open func removeRelay(url: String)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Reset transient kernel state.
      */
@@ -826,7 +826,7 @@ open func reset()  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Retry a parked publish-outbox row by its handle.
      */
@@ -836,7 +836,7 @@ open func retryPublish(handle: String)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Seed 29er's Rust-owned default relay set (D7). `true` when ≥1 relay was
      * handed to the kernel.
@@ -847,7 +847,7 @@ open func seedDefaultRelays() -> Bool  {
     )
 })
 }
-    
+
     /**
      * Seed relays from a `[["url","role"],…]` JSON array (the `NMP_TEST_RELAYS`
      * override). `false` on malformed/empty so the caller falls back.
@@ -859,7 +859,7 @@ open func seedRelaysFromJson(json: String) -> Bool  {
     )
 })
 }
-    
+
     /**
      * Register (or clear) the native keyring capability handler. Must be
      * called before [`TwentyNinerApp::start`] so the handler is in place for
@@ -877,7 +877,7 @@ open func setCapabilityCallback(sink: CapabilitySink?)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Set the LMDB storage directory (pre-start). Empty clears it. Returns
      * `true` when accepted (`NmpConfigStatus::Ok`).
@@ -889,7 +889,7 @@ open func setStoragePath(path: String) -> Bool  {
     )
 })
 }
-    
+
     /**
      * Register (or clear) the NMPU frame observer. After return the previous
      * sink is neither registered nor mid-invocation (quiescence). Mirrors
@@ -901,7 +901,7 @@ open func setUpdateSink(sink: UpdateSink?)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Idempotent teardown: clears the sink, sends Shutdown, joins threads.
      */
@@ -910,7 +910,7 @@ open func shutdown()  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Sign in with a local nsec and (when `make_active`) activate it. The
      * nsec is wiped on drop (`Zeroizing`). D004: handed to NMP once.
@@ -922,7 +922,7 @@ open func signinNsec(nsec: String, makeActive: Bool)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Start the runtime actor. Clamp parity with `nmp-uniffi`: `visible_limit
      * == 0` → default; else clamp(1..=500). `emit_hz == 0` → default; else
@@ -935,7 +935,7 @@ open func start(visibleLimit: UInt32, emitHz: UInt32)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Pause event processing (no data loss).
      */
@@ -944,7 +944,7 @@ open func stop()  {try! rustCall() {
     )
 }
 }
-    
+
 
 }
 
@@ -1060,8 +1060,8 @@ public struct FfiConverterTypeDispatchOutcome: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DispatchOutcome {
         return
             try DispatchOutcome(
-                correlationId: FfiConverterOptionString.read(from: &buf), 
-                error: FfiConverterOptionString.read(from: &buf), 
+                correlationId: FfiConverterOptionString.read(from: &buf),
+                error: FfiConverterOptionString.read(from: &buf),
                 code: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -1097,9 +1097,9 @@ public func FfiConverterTypeDispatchOutcome_lower(_ value: DispatchOutcome) -> R
  * `CapabilityEnvelope` JSON back.
  */
 public protocol CapabilitySink: AnyObject, Sendable {
-    
+
     func onCapabilityRequest(requestJson: String)  -> String
-    
+
 }
 
 
@@ -1128,7 +1128,7 @@ fileprivate struct UniffiCallbackInterfaceCapabilitySink {
                 )
             }
 
-            
+
             let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
             uniffiTraitInterfaceCall(
                 callStatus: uniffiCallStatus,
@@ -1219,9 +1219,9 @@ public func FfiConverterCallbackInterfaceCapabilitySink_lower(_ v: CapabilitySin
  * within `on_update`; the runtime quiescence gate would deadlock.
  */
 public protocol UpdateSink: AnyObject, Sendable {
-    
-    func onUpdate(frame: Data) 
-    
+
+    func onUpdate(frame: Data)
+
 }
 
 
@@ -1250,7 +1250,7 @@ fileprivate struct UniffiCallbackInterfaceUpdateSink {
                 )
             }
 
-            
+
             let writeReturn = { () }
             uniffiTraitInterfaceCall(
                 callStatus: uniffiCallStatus,

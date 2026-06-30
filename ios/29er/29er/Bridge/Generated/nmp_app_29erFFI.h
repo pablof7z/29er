@@ -253,14 +253,14 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureStr
 #endif
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_CAPABILITY_SINK_METHOD0
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_CAPABILITY_SINK_METHOD0
-typedef void (*UniffiCallbackInterfaceCapabilitySinkMethod0)(uint64_t, RustBuffer, RustBuffer* _Nonnull, 
+typedef void (*UniffiCallbackInterfaceCapabilitySinkMethod0)(uint64_t, RustBuffer, RustBuffer* _Nonnull,
         RustCallStatus *_Nonnull uniffiCallStatus
     );
 
 #endif
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPDATE_SINK_METHOD0
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_UPDATE_SINK_METHOD0
-typedef void (*UniffiCallbackInterfaceUpdateSinkMethod0)(uint64_t, RustBuffer, void* _Nonnull, 
+typedef void (*UniffiCallbackInterfaceUpdateSinkMethod0)(uint64_t, RustBuffer, void* _Nonnull,
         RustCallStatus *_Nonnull uniffiCallStatus
     );
 
@@ -294,7 +294,7 @@ void uniffi_nmp_app_29er_fn_free_twentyninerapp(void*_Nonnull ptr, RustCallStatu
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_FN_CONSTRUCTOR_TWENTYNINERAPP_NEW
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_FN_CONSTRUCTOR_TWENTYNINERAPP_NEW
 void*_Nonnull uniffi_nmp_app_29er_fn_constructor_twentyninerapp_new(RustCallStatus *_Nonnull out_status
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_FN_METHOD_TWENTYNINERAPP_ADD_RELAY
@@ -695,151 +695,150 @@ void ffi_nmp_app_29er_rust_future_complete_void(uint64_t handle, RustCallStatus 
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_ADD_RELAY
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_ADD_RELAY
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_add_relay(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_CONFIGURE
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_CONFIGURE
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_configure(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_DECLARE_CONSUMED_PROJECTIONS
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_DECLARE_CONSUMED_PROJECTIONS
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_declare_consumed_projections(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_DECLARE_INCREMENTAL_APPLY
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_DECLARE_INCREMENTAL_APPLY
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_declare_incremental_apply(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_DISPATCH_ACTION
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_DISPATCH_ACTION
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_dispatch_action(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_IS_ALIVE
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_IS_ALIVE
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_is_alive(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_LIFECYCLE_BACKGROUND
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_LIFECYCLE_BACKGROUND
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_lifecycle_background(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_LIFECYCLE_FOREGROUND
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_LIFECYCLE_FOREGROUND
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_lifecycle_foreground(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_REMOVE_ACCOUNT
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_REMOVE_ACCOUNT
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_remove_account(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_REMOVE_RELAY
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_REMOVE_RELAY
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_remove_relay(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_RESET
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_RESET
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_reset(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_RETRY_PUBLISH
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_RETRY_PUBLISH
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_retry_publish(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SEED_DEFAULT_RELAYS
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SEED_DEFAULT_RELAYS
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_seed_default_relays(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SEED_RELAYS_FROM_JSON
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SEED_RELAYS_FROM_JSON
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_seed_relays_from_json(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SET_CAPABILITY_CALLBACK
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SET_CAPABILITY_CALLBACK
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_set_capability_callback(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SET_STORAGE_PATH
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SET_STORAGE_PATH
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_set_storage_path(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SET_UPDATE_SINK
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SET_UPDATE_SINK
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_set_update_sink(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SHUTDOWN
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SHUTDOWN
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_shutdown(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SIGNIN_NSEC
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_SIGNIN_NSEC
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_signin_nsec(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_START
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_START
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_start(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_STOP
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_STOP
 uint16_t uniffi_nmp_app_29er_checksum_method_twentyninerapp_stop(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_CONSTRUCTOR_TWENTYNINERAPP_NEW
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_CONSTRUCTOR_TWENTYNINERAPP_NEW
 uint16_t uniffi_nmp_app_29er_checksum_constructor_twentyninerapp_new(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_CAPABILITYSINK_ON_CAPABILITY_REQUEST
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_CAPABILITYSINK_ON_CAPABILITY_REQUEST
 uint16_t uniffi_nmp_app_29er_checksum_method_capabilitysink_on_capability_request(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_UPDATESINK_ON_UPDATE
 #define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_UPDATESINK_ON_UPDATE
 uint16_t uniffi_nmp_app_29er_checksum_method_updatesink_on_update(void
-    
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_NMP_APP_29ER_UNIFFI_CONTRACT_VERSION
 #define UNIFFI_FFIDEF_FFI_NMP_APP_29ER_UNIFFI_CONTRACT_VERSION
 uint32_t ffi_nmp_app_29er_uniffi_contract_version(void
-    
+
 );
 #endif
-

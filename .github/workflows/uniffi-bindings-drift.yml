@@ -1,0 +1,29 @@
+name: uniffi-bindings-drift
+
+# UniFFI Swift binding drift gate (PR-6, #2494). The checked-in iOS bindings
+# under ios/29er/29er/Bridge/Generated/{nmp_app_29er.swift,
+# nmp_app_29erFFI.h, nmp_app_29erFFI.modulemap} must be byte-identical to a
+# fresh `uniffi-bindgen` run over the `nmp-app-29er` facade crate.
+# Regenerate locally with:
+#   scripts/check-uniffi-bindings-drift.sh --regen
+#
+# Mirrors nostr-multi-platform's `ci/check-uniffi-bindings-drift.sh` /
+# `.github/workflows/codegen-drift.yml` pattern.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  uniffi-bindings-drift:
+    name: UniFFI Swift binding drift (nmp-app-29er facade)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Check UniFFI Swift bindings are in sync with the Rust interface
+        run: scripts/check-uniffi-bindings-drift.sh
