@@ -25,7 +25,7 @@ use nmp_nip29::projection::{
     GroupEvent as GroupChatMessage, GroupEventsProjection, JoinedGroupsProjection,
 };
 use nmp_nip29::GroupId;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::watch;
 
 type ActiveAccountSlot = Arc<Mutex<Option<String>>>;
 
@@ -205,7 +205,7 @@ pub struct TuiSnapshot {
     pub connected_at: Option<std::time::Instant>,
 }
 
-/// Projection-derived fields produced on the poller thread and sent over mpsc.
+/// Projection-derived fields delivered through the pushed update channel.
 #[derive(Clone, Debug, Default)]
 pub struct ProjectionView {
     pub channel_tree: Vec<ChannelListItem>,
@@ -224,15 +224,17 @@ impl Default for IdentityState {
     }
 }
 
-/// Bridges typed update-frame bytes pushed by `nmp_native_runtime::NmpApp`'s
-/// update sink (registered via [`nmp_uniffi_support::set_update_sink`]) into
-/// [`SharedProjections::profile_refs`], so visible chat-message authors'
-/// profile cards (display name / avatar) resolve. See [`on_nmp_update`].
-struct ProfileUpdateBridge {
+/// Bridges NMP update-frame pushes into the TUI's latest projection channel.
+///
+/// The update listener is the explicit Rust->shell reactivity seam: whenever
+/// NMP emits an update frame, the TUI re-reads its Rust-owned projection readers
+/// once and replaces the latest UI projection. There is no timer-driven refresh.
+struct ProjectionUpdateBridge {
     shared: Arc<SharedProjections>,
+    projection_tx: watch::Sender<ProjectionView>,
 }
 
-/// Send+Sync read-side state shared between App (main thread) and the poller.
+/// Send+Sync read-side state shared between App and the NMP update listener.
 pub struct SharedProjections {
     pub group_tree: Arc<GroupTreeProjection>,
     pub discovered: Mutex<Option<Arc<DiscoveredGroupsProjection>>>,
@@ -249,7 +251,7 @@ pub struct SharedProjections {
     pub selected_chat: Mutex<Option<Arc<GroupEventsProjection>>>,
     pub selected_group: Mutex<Option<GroupId>>,
     pub profile_refs: Mutex<RefProfileStore>,
-    /// Set on each snapshot poll that returns non-empty data; drives relay-state indicator.
+    /// Set on each pushed snapshot that returns non-empty data; drives relay-state indicator.
     pub last_update_at: Mutex<Option<std::time::Instant>>,
 }
 impl SharedProjections {
@@ -332,19 +334,6 @@ impl SharedProjections {
     }
 }
 
-/// Spawn the 4Hz background poller (issue #10). Captures only Send Arcs.
-pub fn spawn_poller(shared: Arc<SharedProjections>, tx: UnboundedSender<ProjectionView>) {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(Duration::from_millis(250));
-        loop {
-            ticker.tick().await;
-            if tx.send(shared.project()).is_err() {
-                break;
-            }
-        }
-    });
-}
-
 pub struct App {
     /// `None` until [`Self::init_nmp`] succeeds. `Arc`-shared (not the old
     /// `*mut NmpApp`) so the identity-change observer closure — which runs on
@@ -353,7 +342,7 @@ pub struct App {
     app: Option<Arc<NmpApp>>,
     relay_url: String,
     shared: Arc<SharedProjections>,
-    poll_tx: UnboundedSender<ProjectionView>,
+    projection_tx: watch::Sender<ProjectionView>,
     /// The currently-open group-events (chat) session. Singleton: opening a
     /// new one (in [`Self::select_channel`]) replaces this at the kernel
     /// level, so there is no per-group cache to maintain here.
@@ -394,7 +383,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(relay_url: impl Into<String>, poll_tx: UnboundedSender<ProjectionView>) -> Self {
+    pub fn new(relay_url: impl Into<String>, projection_tx: watch::Sender<ProjectionView>) -> Self {
         let relay_url = relay_url.into();
         let shared = Arc::new(SharedProjections {
             group_tree: Arc::new(GroupTreeProjection::new()),
@@ -408,14 +397,28 @@ impl App {
             last_update_at: Mutex::new(None),
         });
         Self {
-            app: None, relay_url,
-            shared, poll_tx, group_events_handle: None, latest: ProjectionView::default(),
-            discovery_handle: None, claimed_profile_authors: HashSet::new(),
+            app: None,
+            relay_url,
+            shared,
+            projection_tx,
+            group_events_handle: None,
+            latest: ProjectionView::default(),
+            discovery_handle: None,
+            claimed_profile_authors: HashSet::new(),
             group_tree_observer_id: None,
-            screen: Screen::Login, focus: Focus::RoomList, focus_stack: Vec::new(),
-            selected_index: 0, selected_channel: None, outbox: Vec::new(), errors: Vec::new(),
-            palette_open: false, active_form: None, message_scroll: 0,
-            login_error: None, help_open: false, should_quit: false,
+            screen: Screen::Login,
+            focus: Focus::RoomList,
+            focus_stack: Vec::new(),
+            selected_index: 0,
+            selected_channel: None,
+            outbox: Vec::new(),
+            errors: Vec::new(),
+            palette_open: false,
+            active_form: None,
+            message_scroll: 0,
+            login_error: None,
+            help_open: false,
+            should_quit: false,
             status_message: None,
             read_markers: HashMap::new(),
             spinner_tick: 0,
@@ -498,6 +501,9 @@ impl App {
         // observer closure below (which runs on the actor thread) can hold a
         // safe, owned clone instead of recovering a raw pointer's address.
         let app = Arc::new(app);
+        if let Ok(mut slot) = self.shared.active_account.lock() {
+            *slot = app.active_account_handle();
+        }
 
         // The `JoinedGroupsProjection` captures the active pubkey at
         // construction, which is not known until sign-in resolves. Wire it
@@ -510,9 +516,14 @@ impl App {
         let joined_app = Arc::clone(&app);
         let joined_shared = Arc::clone(&self.shared);
         let joined_relay = relay.clone();
+        let joined_projection_tx = self.projection_tx.clone();
         app.register_identity_change_observer(move |pubkey| {
-            let Some(pk) = pubkey.filter(|p| !p.is_empty()) else { return; };
-            let Ok(mut slot) = joined_shared.joined.lock() else { return; };
+            let Some(pk) = pubkey.filter(|p| !p.is_empty()) else {
+                return;
+            };
+            let Ok(mut slot) = joined_shared.joined.lock() else {
+                return;
+            };
             if slot
                 .as_ref()
                 .map(|projection| projection.snapshot().active_pubkey == pk)
@@ -531,18 +542,19 @@ impl App {
                 *handle_slot = handle;
             }
             *slot = reader;
+            let _ = joined_projection_tx.send(joined_shared.project());
         });
 
-        // Bridge typed update-frame bytes into `SharedProjections.profile_refs`
-        // so visible chat-message authors' profile cards become resolvable
-        // (the same `refs.profile` sidecar the deleted `nmp-ffi` C-ABI used to
-        // push through `nmp_app_set_update_callback`). Ownership of the boxed
-        // sink moves into the runtime's update-listener slot; `App` does not
-        // need to hold it.
-        let profile_bridge = Box::new(ProfileUpdateBridge {
+        // Bridge every NMP update frame into the latest projection channel.
+        // The same callback also applies `refs.profile` sidecars, replacing the
+        // deleted `nmp-ffi` C-ABI update callback without reintroducing polling.
+        // Ownership of the boxed sink moves into the runtime's update-listener
+        // slot; `App` does not need to hold it.
+        let update_bridge = Box::new(ProjectionUpdateBridge {
             shared: Arc::clone(&self.shared),
+            projection_tx: self.projection_tx.clone(),
         });
-        nmp_uniffi_support::set_update_sink(&app, Some(profile_bridge), on_nmp_update);
+        nmp_uniffi_support::set_update_sink(&app, Some(update_bridge), on_nmp_update);
 
         app.add_relay(relay.clone(), "read".to_string());
         nmp_uniffi_support::start_runtime(&app, 80, 4);
@@ -550,20 +562,17 @@ impl App {
             nmp_core::SignerSource::LocalNsec(zeroize::Zeroizing::new(nsec.to_string())),
             true,
         );
-        if let Ok(mut slot) = self.shared.active_account.lock() {
-            *slot = app.active_account_handle();
-        }
         self.app = Some(app);
         self.discovery_handle = Some(discovery_handle);
         self.group_tree_observer_id = Some(tree_observer_id);
 
         let discover_body = serde_json::json!({ "relay_url": relay }).to_string();
         self.dispatch_json("nmp.nip29.discover", &discover_body);
-        spawn_poller(Arc::clone(&self.shared), self.poll_tx.clone());
+        self.refresh_projection();
         Ok(())
     }
 
-    /// Store the latest poller view; clamp selection; reconcile the outbox.
+    /// Store the latest projection view; clamp selection; reconcile the outbox.
     pub fn ingest_projection(&mut self, view: ProjectionView) {
         let was_connected = self
             .latest
@@ -732,12 +741,11 @@ impl App {
         // one replaces (and closes) the prior one, so there is no per-group
         // cache to maintain — just track the latest handle for teardown.
         if let Some(app) = &self.app {
-            let (handle, reader) = app.open_nip29_group_events_session_with_reader(
-                Nip29GroupEventsSession::new(
+            let (handle, reader) =
+                app.open_nip29_group_events_session_with_reader(Nip29GroupEventsSession::new(
                     group.clone(),
                     vec![KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
-                ),
-            );
+                ));
             self.group_events_handle = Some(handle);
             if let Ok(mut slot) = self.shared.selected_chat.lock() {
                 *slot = Some(reader);
@@ -750,7 +758,7 @@ impl App {
         self.selected_channel = Some(group);
         self.message_scroll = 0;
         self.focus = Focus::Chat;
-        // Immediately pull the projection for the newly selected channel so
+        // Explicitly pull the projection for the newly selected channel so
         // the first frame shows whatever messages are already cached.
         self.refresh_projection();
     }
@@ -786,8 +794,8 @@ impl App {
         };
         Self::apply_dispatch_result(&mut item, result);
         self.outbox.push(item);
-        // Immediately pull fresh projection data so the outbox strip renders
-        // without waiting for the next 4 Hz poll tick.
+        // Explicitly pull fresh projection data so the outbox strip renders
+        // before the runtime echoes the published event back.
         self.refresh_projection();
     }
 
@@ -1059,8 +1067,8 @@ impl App {
         }
     }
 
-    /// Pull a fresh projection snapshot inline (bypasses the 4 Hz poller).
-    /// Call after any user action so the very next frame sees up-to-date data.
+    /// Pull a fresh projection snapshot inline after an explicit local state
+    /// change (selection, command dispatch, or cached command result).
     pub fn refresh_projection(&mut self) {
         let view = self.shared.project();
         self.ingest_projection(view);
@@ -1106,7 +1114,7 @@ impl Drop for App {
             }
         }
         // `shutdown()` also clears the update listener (dropping the
-        // `ProfileUpdateBridge` registered in `init_nmp`), so there is no
+        // `ProjectionUpdateBridge` registered in `init_nmp`), so there is no
         // separate sink-teardown step here.
         app.shutdown();
     }
@@ -1132,19 +1140,21 @@ impl TuiProfile {
 /// `extern "C" fn(*mut c_void, *const u8, usize)` callback shape — the
 /// runtime now delivers owned update-frame bytes straight to a safe Rust
 /// closure/fn over the sink type, no raw pointers involved.
-fn on_nmp_update(bridge: &ProfileUpdateBridge, bytes: Vec<u8>) {
-    let Ok(envelope) = nmp_core::decode_snapshot_envelope(&bytes) else {
-        return;
-    };
-    let Ok(typed) = nmp_core::decode_snapshot_typed_projections(&bytes) else {
-        return;
-    };
-    let Some(entry) = typed.iter().find(|entry| entry.key == REFS_PROFILE_KEY) else {
-        return;
-    };
-    if let Ok(mut store) = bridge.shared.profile_refs.lock() {
-        store.apply_sidecar(&entry.payload, envelope.session_id, envelope.snapshot_epoch);
+fn on_nmp_update(bridge: &ProjectionUpdateBridge, bytes: Vec<u8>) {
+    let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        (
+            nmp_core::decode_snapshot_envelope(&bytes),
+            nmp_core::decode_snapshot_typed_projections(&bytes),
+        )
+    }));
+    if let Ok((Ok(envelope), Ok(typed))) = decoded {
+        if let Some(entry) = typed.iter().find(|entry| entry.key == REFS_PROFILE_KEY) {
+            if let Ok(mut store) = bridge.shared.profile_refs.lock() {
+                store.apply_sidecar(&entry.payload, envelope.session_id, envelope.snapshot_epoch);
+            }
+        }
     }
+    let _ = bridge.projection_tx.send(bridge.shared.project());
 }
 
 fn generate_local_id() -> String {
@@ -1287,8 +1297,8 @@ pub fn derive_channel_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nmp_core::substrate::KernelEvent;
     use nmp_app_29er::kinds::KIND_CHAT_MESSAGE;
+    use nmp_core::substrate::KernelEvent;
     use nmp_nip29::projection::GroupEvent as GroupChatMessage;
 
     fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
@@ -1327,8 +1337,8 @@ mod tests {
             relay_provenance: Vec::new(),
         }
     }
-    fn make_app() -> (App, tokio::sync::mpsc::UnboundedReceiver<ProjectionView>) {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ProjectionView>();
+    fn make_app() -> (App, watch::Receiver<ProjectionView>) {
+        let (tx, rx) = watch::channel(ProjectionView::default());
         (App::new("wss://relay.example.com", tx), rx)
     }
 
@@ -1760,8 +1770,8 @@ mod tests {
         );
     }
 
-    /// T10: refresh_projection() updates `latest` immediately without waiting
-    /// for the background poller.
+    /// T10: refresh_projection() updates `latest` immediately from an explicit
+    /// local state-change hook.
     #[test]
     fn test_refresh_projection_is_immediate() {
         let (mut app, _rx) = make_app();
@@ -1775,5 +1785,20 @@ mod tests {
         //  and the method is reachable).
         app.refresh_projection(); // must not panic
         assert!(app.snapshot().channel_tree.is_empty()); // still empty — no NMP running
+    }
+
+    #[test]
+    fn nmp_update_push_publishes_projection_without_profile_sidecar() {
+        let (app, mut rx) = make_app();
+        let bridge = ProjectionUpdateBridge {
+            shared: Arc::clone(&app.shared),
+            projection_tx: app.projection_tx.clone(),
+        };
+
+        on_nmp_update(&bridge, Vec::new());
+
+        assert!(matches!(rx.has_changed(), Ok(true)));
+        let view = rx.borrow_and_update().clone();
+        assert_eq!(view.identity_state, IdentityState::LoggingIn);
     }
 }

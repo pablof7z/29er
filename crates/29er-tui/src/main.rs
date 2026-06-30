@@ -1,12 +1,12 @@
 //! Runtime loop + full wiring (issues #5, #10). Owns the Screen state machine,
-//! the 4Hz projection mpsc, modal-aware input routing, and the only `apply`.
+//! projection updates, modal-aware input routing, and the only `apply`.
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers};
 use futures::StreamExt;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::Frame;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::watch;
 use twentyniner_tui::actions::Action;
 use twentyniner_tui::app::{App, Focus, ProjectionView, Screen, TuiSnapshot};
 use twentyniner_tui::terminal::TerminalHandle;
@@ -39,8 +39,8 @@ async fn main() -> Result<()> {
 async fn run() -> Result<()> {
     let mut terminal = TerminalHandle::new()?;
     let relay = std::env::var("NMP_RELAY").unwrap_or_else(|_| "wss://nip29.f7z.io".to_string());
-    let (poll_tx, mut poll_rx) = mpsc::unbounded_channel::<ProjectionView>();
-    let mut app = App::new(relay, poll_tx);
+    let (projection_tx, mut projection_rx) = watch::channel(ProjectionView::default());
+    let mut app = App::new(relay, projection_tx);
     let mut ui = Ui {
         login: LoginComponent::new(),
         room_list: RoomListComponent::new(),
@@ -66,13 +66,18 @@ async fn run() -> Result<()> {
         terminal.draw(|f| draw(f, &state, &mut ui))?;
         tokio::select! {
             _ = ticker.tick() => { app.tick(); }
-            Some(view) = poll_rx.recv() => app.ingest_projection(view),
+            result = projection_rx.changed() => match result {
+                Ok(()) => {
+                    let view = projection_rx.borrow_and_update().clone();
+                    app.ingest_projection(view);
+                }
+                Err(_) => app.quit(),
+            },
             maybe = reader.next() => match maybe {
                 Some(Ok(event)) => {
                     handle_event(&event, &mut app, &mut ui);
-                    // After any user action, immediately pull a fresh projection
-                    // so the next frame reflects the latest state without waiting
-                    // for the 4 Hz background poller.
+                    // Explicit local actions may update selected readers or
+                    // cached command state before NMP emits the next frame.
                     app.refresh_projection();
                 }
                 Some(Err(_)) | None => app.quit(),
