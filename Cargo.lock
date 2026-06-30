@@ -1709,7 +1709,7 @@ dependencies = [
 [[package]]
 name = "nmp-content"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -1730,7 +1730,7 @@ dependencies = [
 [[package]]
 name = "nmp-core"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "chrono",
  "flatbuffers",
@@ -1756,7 +1756,7 @@ dependencies = [
 [[package]]
 name = "nmp-coverage-gate"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-ownership",
 ]
@@ -1764,7 +1764,7 @@ dependencies = [
 [[package]]
 name = "nmp-feed"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -1779,7 +1779,7 @@ dependencies = [
 [[package]]
 name = "nmp-intent"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-core",
  "nmp-nip05",
@@ -1793,7 +1793,7 @@ dependencies = [
 [[package]]
 name = "nmp-kinds"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-ownership",
 ]
@@ -1801,7 +1801,7 @@ dependencies = [
 [[package]]
 name = "nmp-native-runtime"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-content",
  "nmp-core",
@@ -1834,7 +1834,7 @@ dependencies = [
 [[package]]
 name = "nmp-network"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "gloo-timers",
  "js-sys",
@@ -1852,7 +1852,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip01"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -1869,7 +1869,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip02"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -1882,7 +1882,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip05"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-core",
  "nmp-ownership",
@@ -1895,7 +1895,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip09"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-core",
  "nmp-ownership",
@@ -1906,7 +1906,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip11"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-core",
  "nmp-ownership",
@@ -1919,7 +1919,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip18"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -1934,7 +1934,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip25"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -1948,7 +1948,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip29"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -1964,7 +1964,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip42-types"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-ownership",
  "serde",
@@ -1974,7 +1974,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip47"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -1992,7 +1992,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip50"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -2007,7 +2007,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip51"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -2022,7 +2022,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip57"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "bech32",
  "flatbuffers",
@@ -2043,7 +2043,7 @@ dependencies = [
 [[package]]
 name = "nmp-nip77"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "negentropy",
  "nmp-core",
@@ -2059,7 +2059,7 @@ dependencies = [
 [[package]]
 name = "nmp-nostr-id"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-ownership",
  "nostr",
@@ -2068,7 +2068,7 @@ dependencies = [
 [[package]]
 name = "nmp-nostr-lmdb"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "async-utility",
  "flume",
@@ -2083,7 +2083,7 @@ dependencies = [
 [[package]]
 name = "nmp-note-feed"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-content",
@@ -2101,7 +2101,7 @@ dependencies = [
 [[package]]
 name = "nmp-nwc"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "base64",
  "nmp-ownership",
@@ -2114,12 +2114,12 @@ dependencies = [
 [[package]]
 name = "nmp-ownership"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 
 [[package]]
 name = "nmp-planner"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-ownership",
  "nmp-relay-url",
@@ -2130,7 +2130,7 @@ dependencies = [
 [[package]]
 name = "nmp-relay-url"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-ownership",
 ]
@@ -2138,7 +2138,7 @@ dependencies = [
 [[package]]
 name = "nmp-router"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
@@ -2155,7 +2155,7 @@ dependencies = [
 [[package]]
 name = "nmp-signer-iface"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-ownership",
  "serde",
@@ -2165,7 +2165,7 @@ dependencies = [
 [[package]]
 name = "nmp-store"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "heed",
  "nmp-kinds",
@@ -2183,7 +2183,7 @@ dependencies = [
 [[package]]
 name = "nmp-substrate"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-core",
  "nmp-coverage-gate",
@@ -2198,7 +2198,7 @@ dependencies = [
 [[package]]
 name = "nmp-threading"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-core",
  "nmp-ownership",
@@ -2209,7 +2209,7 @@ dependencies = [
 [[package]]
 name = "nmp-uniffi-support"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "nmp-core",
  "nmp-native-runtime",
@@ -2220,7 +2220,7 @@ dependencies = [
 [[package]]
 name = "nmp-wot"
 version = "0.8.4"
-source = "git+ssh://git@github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
+source = "git+https://github.com/pablof7z/nostr-multi-platform.git?rev=3ce99c020b602107f3669517a9ea355c0c8397aa#3ce99c020b602107f3669517a9ea355c0c8397aa"
 dependencies = [
  "flatbuffers",
  "nmp-core",
