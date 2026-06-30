@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import os.log
 
@@ -6,32 +5,42 @@ let kbLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "KernelBridge")
 
 /// Mirror of `KERNEL_SCHEMA_VERSION` (Rust: `crates/nmp-core/src/update_envelope.rs`).
 /// Must be bumped in lock-step when the Rust constant changes. A mismatch
-/// causes `KernelBridge.decode()` to reject the snapshot rather than silently
-/// misparse renamed or retyped fields.
+/// causes `KernelHandle.decodeFlatBuffer` to reject the snapshot rather than
+/// silently misparse renamed or retyped fields.
 private let KERNEL_SCHEMA_VERSION: UInt32 = 1
 
-/// Thin C-FFI wrapper around the `nmp_core` static library.
+/// Thin Swift wrapper around the generated `TwentyNinerApp` UniFFI facade
+/// (`Bridge/Generated/nmp_app_29er.swift`). PR-4 of the C-ABI → UniFFI
+/// migration: there is no more hand-marshaled `OpaquePointer` / `CString` /
+/// `UnsafeMutableRawBufferPointer` traffic here — every call below is a plain
+/// Swift method on the generated `TwentyNinerApp` object, which owns the
+/// opaque Rust pointer internally.
 ///
-/// 29er's minimal S01 surface: new/free, update callback registration, start
-/// / stop / reset, storage path, liveness probe, identity (nsec sign-in), and
-/// relay bootstrap. The NIP-29 group-discovery + group-chat + dispatch helpers
-/// live on the `KernelHandle` extension in `GroupDiscoveryBridge.swift`.
+/// 29er's minimal S01 surface: new/free (the generated class's own
+/// init/deinit), update-sink registration, start/stop/reset, storage path,
+/// liveness probe, identity (nsec sign-in), and relay bootstrap. The NIP-29
+/// group-discovery + group-chat + dispatch helpers live on the `KernelHandle`
+/// extension in `GroupDiscoveryBridge.swift` — that file still calls the
+/// deleted C-ABI symbols (`nmp_app_29er_open_group_discovery` and friends)
+/// and will not compile until PR-5 migrates it onto the facade once PR-2
+/// lands the matching Rust methods. That is expected and out of scope here.
 final class KernelHandle {
-    let raw: UnsafeMutableRawPointer
-    /// Retained handle for the update sink whose opaque pointer is registered
-    /// with Rust via `nmp_app_set_update_callback`. We `passRetained` the sink
-    /// into Rust (Rust owns the +1) and hold the `Unmanaged` token here so the
-    /// retain can be released *exactly once* — on re-`listen()` (replace) or
-    /// in `deinit` (clear).
-    private var retainedUpdateSink: Unmanaged<KernelUpdateSink>?
+    /// The generated UniFFI facade object. Owns the opaque Rust pointer and
+    /// its own lifecycle (`TwentyNinerApp.init`/`deinit` replace the old
+    /// `nmp_app_new`/`nmp_app_free` pair).
+    let app: TwentyNinerApp
+
+    /// Retained update sink. UniFFI's callback-interface handle map keeps the
+    /// Rust side's reference alive, but Swift must also hold a strong
+    /// reference of its own so the object is not deallocated out from under
+    /// the registered handle. Cleared in lock-step with `setUpdateSink(nil)`
+    /// on re-`listen()` (replace) or in `deinit` (clear) — mirrors the old
+    /// `Unmanaged.passRetained` discipline without the manual retain/release.
+    private var retainedUpdateSink: KernelUpdateSink?
     /// Strong reference to the registered capabilities object. Held so the
-    /// context pointer passed to `nmpCapabilityCallback` stays valid until
-    /// `deinit` unregisters the callback.
+    /// `CapabilitySink` adapter passed to `setCapabilityCallback` stays valid
+    /// until `deinit` clears the callback.
     private var retainedCapabilities: TwentyNinerCapabilities?
-    /// Opaque handle returned by `nmp_app_29er_register`. The
-    /// group-discovery bridge extension manages its lifetime; see
-    /// `GroupDiscoveryBridge.swift`.
-    var app29erHandle: UnsafeMutableRawPointer?
 
     /// Last-applied snapshot revision. Mutated by `KernelModel.apply` on
     /// `@MainActor` (the apply path runs on the main actor). Read by the
@@ -41,40 +50,24 @@ final class KernelHandle {
     var lastAppliedRev: UInt64 = 0
 
     init() {
-        raw = nmp_app_new()
-        Self.configureStoragePath(for: raw)
-        // Stage 4 of NIP-46 wiring: initialise the bunker broker before any
-        // `signInBunker(...)` dispatch can reach the actor. The broker
-        // registers a hook with `nmp-core` that drives the NIP-46 connect /
-        // get_public_key handshake on a worker thread. 29er does not use
-        // bunker sign-in in S01, but the broker is part of the canonical NMP
-        // composition and must be initialised before `nmp_app_start`.
-        let brokerResult = nmp_signer_broker_init(raw)
-        if brokerResult != 0 {
-            kbLog.fault("nmp_signer_broker_init returned \(brokerResult) — bunker broker NOT active; init logic error")
-            assertionFailure("nmp_signer_broker_init failed with code \(brokerResult)")
-        }
-        // 29er composition: register the canonical NMP defaults + the NIP-29
-        // action namespaces + the group-create defaults projection. The
-        // returned handle is held for `nmp_app_29er_unregister` in `deinit`.
-        var handle: UnsafeMutableRawPointer?
-        let registerStatus = nmp_app_29er_register(raw, &handle)
-        if registerStatus != NmpRegisterStatus_Ok.rawValue {
-            kbLog.fault("nmp_app_29er_register returned \(registerStatus) — 29er composition NOT registered; init logic error")
-            assertionFailure("nmp_app_29er_register failed with code \(registerStatus)")
-        }
-        app29erHandle = handle
+        // "Construct + compose 29er. No IO; the actor is NOT started." — the
+        // facade's `init()` now performs what used to be the separate
+        // `nmp_app_29er_register` composition step (NIP-29 action
+        // namespaces, group-create defaults projection, NIP-46 signer broker
+        // init) internally. There is no longer a second opaque "29er
+        // registration handle" to track.
+        app = TwentyNinerApp()
+        Self.configureStoragePath(for: app)
         // ADR-0053 — 29er is a full client: declare that it consumes every
         // kernel-owned built-in Tier-2 projection. Must run before
-        // `nmp_app_start`; the kernel narrows its built-in output to this
+        // `app.start(...)`; the kernel narrows its built-in output to this
         // declaration (the one non-footgun way to receive the full set).
-        nmp_app_29er_declare_consumed_projections(raw)
+        app.declareConsumedProjections()
         // S02 — register the native keyring capability handler before any
-        // `nmp_app_start` so the kernel can route capability requests from
-        // the first tick (the identity restore hook reads from Keychain
-        // during `register_defaults` → `nmp_app_start`). The handler is
-        // started immediately and held by `retainedCapabilities` for the
-        // kernel lifetime.
+        // `start()` so the kernel can route capability requests from the
+        // first tick (the identity restore hook reads from Keychain during
+        // actor startup). The handler is started immediately and held by
+        // `retainedCapabilities` for the kernel lifetime.
         let capabilities = TwentyNinerCapabilities()
         capabilities.start()
         registerCapabilityHandler(capabilities)
@@ -87,14 +80,14 @@ final class KernelHandle {
         return base.appendingPathComponent("NMP", isDirectory: true)
     }
 
-    private static func configureStoragePath(for raw: UnsafeMutableRawPointer) {
+    private static func configureStoragePath(for app: TwentyNinerApp) {
         guard let directory = storageDirectory else { return }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let status = directory.path.withCString { nmp_app_set_storage_path(raw, $0) }
-            if status != 0 {
-                kbLog.fault("nmp_app_set_storage_path returned \(status) — persistent storage NOT configured; init logic error")
-                assertionFailure("nmp_app_set_storage_path failed with code \(status)")
+            let ok = app.setStoragePath(path: directory.path)
+            if !ok {
+                kbLog.fault("setStoragePath returned false — persistent storage NOT configured; init logic error")
+                assertionFailure("TwentyNinerApp.setStoragePath failed")
             }
         } catch {
             kbLog.error("failed to create NMP storage directory: \(error.localizedDescription, privacy: .public)")
@@ -102,21 +95,15 @@ final class KernelHandle {
     }
 
     deinit {
-        // T146 / Chirp parity — drop the 29er registration BEFORE
-        // `nmp_app_free` per FFI contract.
-        if let handle = app29erHandle {
-            nmp_app_29er_unregister(handle)
-            app29erHandle = nil
-        }
-        // Unregister the update callback and release the retained sink in
-        // lock-step (balances the `passRetained` in `listen`).
+        // Unregister the update sink and release the retained reference in
+        // lock-step (balances the strong retain taken in `listen`).
         clearUpdateCallback()
         // Unregister the capability callback before releasing
         // `retainedCapabilities` so no callback fires with a dangling
-        // context pointer.
-        nmp_app_set_capability_callback(raw, nil, nil)
+        // reference.
+        app.setCapabilityCallback(sink: nil)
         retainedCapabilities = nil
-        nmp_app_free(raw)
+        app.shutdown()
     }
 
     /// Register the native keyring capability handler. The Rust kernel routes
@@ -125,44 +112,33 @@ final class KernelHandle {
     /// the actor issues during startup (identity restore reads from Keychain).
     func registerCapabilityHandler(_ capabilities: TwentyNinerCapabilities) {
         retainedCapabilities = capabilities
-        nmp_app_set_capability_callback(
-            raw,
-            Unmanaged.passUnretained(capabilities).toOpaque(),
-            nmpCapabilityCallback)
+        app.setCapabilityCallback(sink: capabilities)
     }
 
-    /// Wire the Rust update callback. `handler` runs on every snapshot frame.
+    /// Wire the Rust update sink. `handler` runs on every snapshot frame.
     /// Snapshot updates are binary-only FlatBuffers `nmp.transport.UpdateFrame`
-    /// bytes. There is no runtime JSON fallback path.
+    /// bytes delivered as `Data` through the generated `UpdateSink.onUpdate`
+    /// callback interface. There is no runtime JSON fallback path.
     func listen(
         _ handler: @escaping (KernelUpdateResult) -> Void,
         onPanic: @escaping () -> Void = {}
     ) {
-        // Clear any prior registration first. `set_update_callback` quiesces
-        // (Article: UpdateCallbackGate) — after it returns no in-flight
-        // callback can still hold the old context pointer — so releasing the
-        // previous retain immediately afterwards is safe.
+        // Clear any prior registration first. `setUpdateSink` quiesces (the
+        // generated binding's doc comment: "After this returns, the previous
+        // sink is neither registered nor mid-invocation") — after it returns
+        // no in-flight callback can still hold the old sink, so releasing the
+        // previous strong reference immediately afterwards is safe.
         clearUpdateCallback()
         let sink = KernelUpdateSink(handler: handler, onPanic: onPanic)
-        // `passRetained` hands Rust its own +1 on the sink; the matching
-        // release happens in `clearUpdateCallback()` (on replace or deinit).
-        let retained = Unmanaged.passRetained(sink)
-        retainedUpdateSink = retained
-        nmp_app_set_update_callback(
-            raw,
-            retained.toOpaque(),
-            nmpUpdateCallback)
+        retainedUpdateSink = sink
+        app.setUpdateSink(sink: sink)
     }
 
-    /// Unregister the Rust update callback and release the sink retain in
-    /// lock-step. Idempotent. Relies on the `nmp_app_set_update_callback`
-    /// quiescence guarantee: once the setter returns, the actor has drained any
-    /// in-flight callback, so no Rust caller can dereference the (about to be
-    /// released) context pointer.
+    /// Unregister the Rust update sink and release the retained reference in
+    /// lock-step. Idempotent.
     private func clearUpdateCallback() {
-        guard let retained = retainedUpdateSink else { return }
-        nmp_app_set_update_callback(raw, nil, nil)
-        retained.release()
+        guard retainedUpdateSink != nil else { return }
+        app.setUpdateSink(sink: nil)
         retainedUpdateSink = nil
     }
 
@@ -171,37 +147,38 @@ final class KernelHandle {
     /// (panic, clean Shutdown, or null app). Pairs with the panic envelope
     /// signal `listen(_:onPanic:)` subscribes to.
     func isAlive() -> Bool {
-        nmp_app_is_alive(raw) == 1
+        app.isAlive()
     }
 
     func start(visibleLimit: UInt32 = 80, emitHz: UInt32 = 4) {
-        nmp_app_start(raw, visibleLimit, emitHz)
+        app.start(visibleLimit: visibleLimit, emitHz: emitHz)
     }
 
+    /// Reconfigure rendering limits without restarting (same clamps as
+    /// `start`). Unlike the old minimal C-ABI header (which had no
+    /// `nmp_app_configure` symbol and left this a no-op), the generated
+    /// facade exposes it directly.
     func configure(visibleLimit: UInt32, emitHz: UInt32) {
-        // `nmp_app_configure` is not in 29er's minimal header; added when 29er
-        // grows a settings surface. Left as a no-op for S01 parity with Chirp.
-        _ = visibleLimit
-        _ = emitHz
+        app.configure(visibleLimit: visibleLimit, emitHz: emitHz)
     }
 
     func stop() {
-        nmp_app_stop(raw)
+        app.stop()
     }
 
     func reset() {
-        nmp_app_reset(raw)
+        app.reset()
     }
 
     func resetLocalDatabase() throws {
-        nmp_app_stop(raw)
+        app.stop()
         if let directory = Self.storageDirectory {
             if FileManager.default.fileExists(atPath: directory.path) {
                 try FileManager.default.removeItem(at: directory)
             }
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
-        nmp_app_reset(raw)
+        app.reset()
     }
 
     // ── T118 / G3 — iOS scenePhase → kernel lifecycle bridge ─────────────
@@ -212,65 +189,64 @@ final class KernelHandle {
 
     /// Report iOS scenePhase = `.active`. Idempotent.
     func lifecycleForeground() {
-        nmp_app_lifecycle_foreground(raw)
+        app.lifecycleForeground()
     }
 
     /// Report iOS scenePhase = `.background`. Idempotent.
     func lifecycleBackground() {
-        nmp_app_lifecycle_background(raw)
+        app.lifecycleBackground()
     }
 
     /// Add a relay to the kernel's relay set. `role` is a NMP relay role
     /// token (e.g. "outbox", "inbox"). Fire-and-forget (D6): a null app or
     /// invalid URL is a silent no-op.
     func addRelay(url: String, role: String) {
-        url.withCString { urlPtr in
-            role.withCString { rolePtr in
-                nmp_app_add_relay(raw, urlPtr, rolePtr)
-            }
-        }
+        app.addRelay(url: url, role: role)
+    }
+
+    func removeRelay(url: String) {
+        app.removeRelay(url: url)
     }
 
     /// Seed 29er's Rust-owned default relay set (D7 — seeding policy lives in
-    /// Rust, not the shell). Wraps `nmp_app_29er_seed_default_relays`; the
+    /// Rust, not the shell). Wraps `TwentyNinerApp.seedDefaultRelays`; the
     /// kernel dedups against session-restored rows so re-seeding is a no-op.
     /// Returns `true` when at least one relay was handed to the kernel.
     @discardableResult
     func seedDefaultRelays() -> Bool {
-        nmp_app_29er_seed_default_relays(raw)
+        app.seedDefaultRelays()
     }
 
     /// Seed relays from a `[["url","role"],…]` JSON array (the
     /// `NMP_TEST_RELAYS` override shape). Wraps
-    /// `nmp_app_29er_seed_relays_from_json`; returns `false` on null/malformed/
+    /// `TwentyNinerApp.seedRelaysFromJson`; returns `false` on null/malformed/
     /// empty input so the caller falls back to `seedDefaultRelays()`. Parsing +
     /// validation live in Rust — Swift only forwards the env-var string.
     func seedRelays(fromJSON json: String) -> Bool {
-        json.withCString { nmp_app_29er_seed_relays_from_json(raw, $0) }
+        app.seedRelaysFromJson(json: json)
     }
 
+    // TODO(follow-up PR): the NIP-29 relay-selector verbs
+    // (`nmp_app_29er_relay_selector_{select,add,remove}_relay`) were part of
+    // the deleted C-ABI's separate "29er registration handle" surface and
+    // have no equivalent on the generated `TwentyNinerApp` facade yet — PR-1
+    // only exposes the generic `dispatchAction` byte lane; the richer
+    // per-namespace NIP-29 convenience is later work (alongside PR-2/PR-5).
+    // Stubbed to a no-op `false` so `GroupTreeView`'s relay-selector UI
+    // compiles and degrades safely instead of resurrecting a dead C symbol.
     @discardableResult
     func selectNip29Relay(_ relayUrl: String) -> Bool {
-        guard let app29erHandle else { return false }
-        return relayUrl.withCString {
-            nmp_app_29er_relay_selector_select_relay(app29erHandle, $0)
-        }
+        false
     }
 
     @discardableResult
     func addNip29Relay(_ relayUrl: String) -> Bool {
-        guard let app29erHandle else { return false }
-        return relayUrl.withCString {
-            nmp_app_29er_relay_selector_add_relay(app29erHandle, $0)
-        }
+        false
     }
 
     @discardableResult
     func removeNip29Relay(_ relayUrl: String) -> Bool {
-        guard let app29erHandle else { return false }
-        return relayUrl.withCString {
-            nmp_app_29er_relay_selector_remove_relay(app29erHandle, $0)
-        }
+        false
     }
 
     /// Sign in with a local nsec and activate it as the active account.
@@ -283,38 +259,44 @@ final class KernelHandle {
     /// D004: Swift hands the nsec to NMP once, never re-reads it. The caller
     /// must clear its own copy immediately after dispatch.
     func signInNsec(_ nsec: String) {
-        nsec.withCString { nmp_app_signin_nsec(raw, $0, 1) }
+        app.signinNsec(nsec: nsec, makeActive: true)
     }
 
     /// Remove an identity. The Rust actor owns the resulting active-account
     /// transition and keyring forget work; Swift only names the current
     /// account to remove.
     func removeAccount(_ pubkey: String) {
-        pubkey.withCString { nmp_app_remove_account(raw, $0) }
+        app.removeAccount(identityId: pubkey)
     }
 
     func retryPublish(handle: String) {
-        handle.withCString { nmp_app_retry_publish(raw, $0) }
+        app.retryPublish(handle: handle)
     }
 
-    func resolveProfileRef(pubkey: String, consumerID: String) {
-        pubkey.withCString { pubkeyPtr in
-            consumerID.withCString { consumerPtr in
-                nmp_app_resolve_profile_ref(raw, pubkeyPtr, consumerPtr)
-            }
-        }
-    }
+    // TODO(follow-up PR): `nmp_app_resolve_profile_ref` /
+    // `nmp_app_release_profile_ref` (ADR-0063 typed profile-ref adapters)
+    // have no equivalent on the generated `TwentyNinerApp` facade yet either
+    // — same gap as the NIP-29 relay selector above. Stubbed to a no-op
+    // until a follow-up PR exposes the seam (most likely via the generic
+    // `dispatchAction` byte lane once Rust defines a typed envelope for
+    // `refs.profile`). This means avatar/profile-name resolution
+    // (`NostrAvatar`, `NostrProfileHost`) does not claim new pubkeys until
+    // that lands — flagged in the PR description, not silently dropped.
+    func resolveProfileRef(pubkey: String, consumerID: String) {}
 
-    func releaseProfileRef(pubkey: String, consumerID: String) {
-        pubkey.withCString { pubkeyPtr in
-            consumerID.withCString { consumerPtr in
-                nmp_app_release_profile_ref(raw, pubkeyPtr, consumerPtr)
-            }
-        }
-    }
+    func releaseProfileRef(pubkey: String, consumerID: String) {}
 }
 
-final class KernelUpdateSink {
+/// Adapts 29er's update handling to the generated `UpdateSink`
+/// callback-interface protocol (replaces the old `NmpUpdateCallback` C
+/// function pointer + `Unmanaged<KernelUpdateSink>` context dance).
+///
+/// `UpdateSink` requires `Sendable` (it crosses into Rust's callback handle
+/// map); `@unchecked` because the stored closures are plain
+/// `@MainActor`-hopping callbacks (mirroring `KernelModel.init()`'s existing
+/// `DispatchQueue.main.async` + `MainActor.assumeIsolated` pattern below),
+/// not because the type is internally mutated across threads.
+final class KernelUpdateSink: UpdateSink, @unchecked Sendable {
     let handler: (KernelUpdateResult) -> Void
     /// D7 actor-death hook. Rust emits a FlatBuffers panic frame before the
     /// update channel closes; the host flips its fatal-error UI from here.
@@ -327,53 +309,44 @@ final class KernelUpdateSink {
         self.handler = handler
         self.onPanic = onPanic
     }
-}
 
-let nmpUpdateCallback: NmpUpdateCallback = { context, bytes, count in
-    guard let context, let bytes, count > 0 else { return }
-    let sink = Unmanaged<KernelUpdateSink>.fromOpaque(context).takeUnretainedValue()
-    guard let frame = KernelHandle.decodeFlatBuffer(
-        bytes: UnsafeRawPointer(bytes),
-        count: Int(count)
-    ) else {
-        return
-    }
-    switch frame {
-    case let .snapshot(result):
-        sink.handler(result)
-    case .panic:
-        sink.onPanic()
+    /// `UpdateSink.onUpdate` — called by Rust on every snapshot/panic frame
+    /// with the raw FlatBuffers `nmp.transport.UpdateFrame` bytes, already
+    /// copied into a `Data` value by the generated binding (no borrowed
+    /// pointer to worry about, unlike the old C callback).
+    func onUpdate(frame: Data) {
+        guard let decoded = KernelHandle.decodeFlatBuffer(frame) else { return }
+        switch decoded {
+        case let .snapshot(result):
+            handler(result)
+        case .panic:
+            onPanic()
+        }
     }
 }
 
-/// C capability callback — receives `CapabilityRequest` JSON from Rust and
-/// returns a malloc-allocated `CapabilityEnvelope` JSON string that Rust frees
-/// via `nmp_free_string` / `CString::from_raw`. Uses `strdup` so the
-/// allocation is compatible with Rust's `CString::from_raw` on Apple platforms
-/// (both use the system malloc allocator).
+/// Adapts 29er's keyring capability handler to the generated `CapabilitySink`
+/// callback-interface protocol (replaces the old `NmpCapabilityCallback` C
+/// function pointer + `strdup`/`nmp_free_string` contract). Rust invokes this
+/// from the actor thread (never the main thread), so a synchronous capability
+/// may block here safely.
 ///
-/// There is one C callback for every capability; `TwentyNinerCapabilities.handleJSON`
-/// routes the request to the capability owning its `namespace` (keyring). Rust
-/// invokes this from the actor thread (never the main thread), so a synchronous
-/// capability may block here safely.
-let nmpCapabilityCallback: NmpCapabilityCallback = { context, requestJSON in
-    guard let context, let requestJSON else { return nil }
-    let capabilities = Unmanaged<TwentyNinerCapabilities>.fromOpaque(context).takeUnretainedValue()
-    let requestStr = String(cString: requestJSON)
-    let resultStr = capabilities.handleJSON(requestStr)
-    return resultStr.withCString { strdup($0) }
+/// `CapabilitySink` requires `Sendable`; this is a retroactive conformance
+/// declared outside `TwentyNinerCapabilities`'s own file, so Swift requires
+/// the `@unchecked` spelling here. `handleJSON` is already written to be
+/// safely callable off the main thread (see `Capabilities/TwentyNinerCapabilities.swift`).
+extension TwentyNinerCapabilities: CapabilitySink, @unchecked Sendable {
+    func onCapabilityRequest(requestJson: String) -> String {
+        handleJSON(requestJson)
+    }
 }
 
 extension KernelHandle {
     /// Decode a FlatBuffers `nmp.transport.UpdateFrame` byte buffer into the
     /// 29er `KernelDecodedUpdateFrame`. Returns `nil` on a decode error or a
     /// schema-version mismatch (the snapshot is dropped rather than misparsed).
-    static func decodeFlatBuffer(
-        bytes: UnsafeRawPointer,
-        count: Int
-    ) -> KernelDecodedUpdateFrame? {
+    static func decodeFlatBuffer(_ data: Data) -> KernelDecodedUpdateFrame? {
         let start = ContinuousClock.now
-        let data = Data(bytes: bytes, count: count)
         do {
             let frame = try KernelUpdateFrameDecoder.decode(data)
             switch frame {
