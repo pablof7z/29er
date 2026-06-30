@@ -362,6 +362,7 @@ mod tests {
             selected_channel_id: None,
             selected_messages: vec![],
             selected_members: vec![],
+            profiles: std::collections::HashMap::new(),
             is_admin: false,
             my_pubkey: None,
             publish_outbox: vec![],

@@ -19,9 +19,11 @@ nmp-app-29er = { workspace = true }
 nmp-nip29 = { workspace = true }
 nmp-content = { workspace = true }
 nmp-core = { workspace = true }
-nmp-ffi = { workspace = true }
+nmp-native-runtime = { workspace = true }
+nmp-uniffi-support = { workspace = true }
 nmp-planner = { workspace = true }
 serde_json = { workspace = true }
+zeroize = { workspace = true }
 ratatui = "0.30"
 ratatui-image = { version = "11.0.2", default-features = false, features = ["crossterm"] }
 crossterm = { version = "0.29", features = ["event-stream"] }

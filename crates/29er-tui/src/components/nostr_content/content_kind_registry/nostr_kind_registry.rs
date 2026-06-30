@@ -631,8 +631,6 @@ mod tests {
         EmbedKindProjection::Unknown(UnknownProjection {
             kind,
             author_pubkey: "a".repeat(64),
-            author_display_name: None,
-            author_picture_url: None,
             created_at: 0,
             content: "hello".to_string(),
             content_tree: ContentTreeWire::default(),
@@ -749,10 +747,6 @@ mod tests {
         let projection = EmbedKindProjection::ShortNote(ShortNoteProjection {
             id: "b".repeat(64),
             author_pubkey: SHOWCASE_PUBKEY.to_string(),
-            // Even when the kernel still emits a different static name, the
-            // byline must come from the live-resolved claim, not this field.
-            author_display_name: Some("STATIC-SHOULD-NOT-SHOW".to_string()),
-            author_picture_url: None,
             created_at: 0,
             content_tree: ContentTreeWire::default(),
             media_urls: Vec::new(),
@@ -801,8 +795,6 @@ mod tests {
             projection: EmbedKindProjection::ShortNote(ShortNoteProjection {
                 id: "b".repeat(64),
                 author_pubkey: SHOWCASE_PUBKEY.to_string(),
-                author_display_name: Some("STATIC-SHOULD-NOT-SHOW".to_string()),
-                author_picture_url: None,
                 created_at: 0,
                 content_tree: ContentTreeWire::default(),
                 media_urls: Vec::new(),

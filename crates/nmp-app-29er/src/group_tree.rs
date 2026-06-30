@@ -3,8 +3,10 @@ use std::sync::Mutex;
 
 use nmp_core::substrate::{BoundedMessageMap, KernelEvent, MAX_PROJECTION_MESSAGES};
 use nmp_core::ObservedProjectionSink;
-use nmp_nip29::kinds::{h_tag_value, KIND_CHAT_MESSAGE};
+use nmp_nip29::kinds::h_tag_value;
 use nmp_nip29::projection::{DiscoveredGroup, DiscoveredGroupsSnapshot, JoinedGroupsSnapshot};
+
+use crate::kinds::KIND_CHAT_MESSAGE;
 
 #[path = "wire/generated/group_tree_generated.rs"]
 mod generated;
