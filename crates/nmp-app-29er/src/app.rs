@@ -13,19 +13,15 @@
 //! composition root and the runtime, mirroring `nmp-uniffi`'s lifecycle/
 //! dispatch surface.
 //!
-//! ## Scope (PR-1 — the spine)
+//! ## Scope
 //!
-//! This object exposes lifecycle + the generic byte-dispatch passthrough
-//! only. NIP-29 group-discovery / group-chat typed read sessions and the
-//! `dispatchNip29Action` convenience verb are explicitly deferred:
-//!
-//! * Group-events / discovery / joined-groups typed read sessions are PR-2.
-//! * The `dispatchNip29Action` Swift-callable verb (and the relay-selector /
-//!   chat-send convenience methods) are PR-3. The underlying encoder
-//!   ([`crate::dispatch::dispatch_nip29_action`]) is ported now as a plain
-//!   Rust function — not yet exported via `#[uniffi::export]` — so the native
-//!   Rust TUI keeps working against the new pin; PR-3 wires the same function
-//!   onto this facade for Swift.
+//! PR-1 shipped lifecycle + the generic byte-dispatch passthrough. PR-2 (this
+//! crate's [`crate::group_sessions`] module) adds the NIP-29 group-discovery /
+//! group-chat / group-roster typed read sessions and the
+//! `dispatchNip29Action` convenience verb (folded into the same PR — both
+//! land in the same `impl TwentyNinerApp` extension and splitting them across
+//! two PRs would just create a merge conflict). See `crate::group_sessions`'s
+//! module doc for the session-lifecycle design.
 
 use std::sync::Arc;
 
@@ -84,7 +80,16 @@ pub trait UpdateSink: Send + Sync {
 /// Arc-wrapped 29er native runtime.
 #[derive(uniffi::Object)]
 pub struct TwentyNinerApp {
-    inner: NmpApp,
+    /// `Arc`-wrapped (not a bare `NmpApp`) because `NmpApp` is not `Clone` —
+    /// [`crate::group_sessions::GroupSessions::new`] registers an
+    /// identity-change observer closure that needs its own long-lived handle
+    /// to reopen the joined-groups door later, on the update-listener thread.
+    /// Mirrors `29er-tui::App` storing `app: Option<Arc<NmpApp>>` for the same
+    /// reason.
+    inner: Arc<NmpApp>,
+    /// NIP-29 group-discovery / group-chat / group-roster session state
+    /// (PR-2). See [`crate::group_sessions`].
+    sessions: crate::group_sessions::GroupSessions,
 }
 
 #[uniffi::export]
@@ -95,7 +100,9 @@ impl TwentyNinerApp {
     pub fn new() -> Arc<Self> {
         let mut inner = new_app();
         crate::composition::compose_29er_runtime(&mut inner);
-        Arc::new(Self { inner })
+        let inner = Arc::new(inner);
+        let sessions = crate::group_sessions::GroupSessions::new(&inner);
+        Arc::new(Self { inner, sessions })
     }
 
     /// Set the LMDB storage directory (pre-start). Empty clears it. Returns
@@ -218,11 +225,38 @@ impl TwentyNinerApp {
     }
 
     /// Dispatch a pre-built `DispatchEnvelope` (the generic byte lane,
-    /// ADR-0071). This is the one dispatch verb this PR exposes on the
-    /// facade; the richer per-namespace NIP-29 convenience
-    /// ([`crate::dispatch::dispatch_nip29_action`]) is PR-3's job to wire in.
+    /// ADR-0071). The richer per-namespace NIP-29 convenience
+    /// ([`crate::group_sessions`]'s `dispatch_nip29_action`) is built on top
+    /// of this same byte lane.
     pub fn dispatch_action(&self, envelope: Vec<u8>) -> DispatchOutcome {
         nmp_uniffi_support::dispatch_action_vec(&self.inner, envelope).into()
+    }
+
+    /// Register (or upgrade) a consumer's interest in a profile ref for
+    /// `pubkey`. Hardcodes the feed-avatar shape (`ProfileShape::Ref` +
+    /// `RefLiveness::CacheOk`) — the same shape `29er-tui`'s
+    /// `resolve_profile_ref` uses for a chat-message author byline (mirrors
+    /// the deleted C-ABI's `nmp_app_resolve_ref` typed adapter). `consumer`
+    /// is the caller-chosen refcount owner key (e.g. a SwiftUI view id) and
+    /// MUST be passed to [`Self::release_profile_ref`] to tear down. D6: an
+    /// invalid (non-hex) `pubkey` is a silent no-op. D8: fire-and-forget.
+    pub fn resolve_profile_ref(&self, pubkey: String, consumer: String) {
+        self.inner.resolve_ref(
+            nmp_core::RefNamespace::Profile,
+            pubkey,
+            consumer,
+            nmp_core::RefShape::Profile(nmp_core::ProfileShape::Ref),
+            nmp_core::RefLiveness::CacheOk,
+        );
+    }
+
+    /// Release a profile ref previously registered via
+    /// [`Self::resolve_profile_ref`] (mirrors the deleted C-ABI's
+    /// `nmp_app_release_profile_ref`). Idempotent (D6): releasing an unknown
+    /// or already-released `(pubkey, consumer)` pair is a silent no-op.
+    pub fn release_profile_ref(&self, pubkey: String, consumer: String) {
+        self.inner
+            .release_ref(nmp_core::RefNamespace::Profile, pubkey, consumer);
     }
 }
 
@@ -230,9 +264,57 @@ impl TwentyNinerApp {
 
 impl TwentyNinerApp {
     /// The owned `nmp-native-runtime` app. Crate-internal accessor so sibling
-    /// modules ([`crate::capability`]) reach the runtime without making
-    /// `inner` a public field.
+    /// modules ([`crate::capability`], [`crate::group_sessions`]) reach the
+    /// runtime without making `inner` a public field.
     pub(crate) fn app(&self) -> &NmpApp {
         &self.inner
+    }
+
+    /// NIP-29 group-read session state. Crate-internal accessor used by
+    /// [`crate::group_sessions`]'s `#[uniffi::export]` methods.
+    pub(crate) fn sessions(&self) -> &crate::group_sessions::GroupSessions {
+        &self.sessions
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VALID_PUBKEY: &str = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d";
+
+    /// Parity with `29er-tui::resolve_profile_ref` / the deleted C-ABI's
+    /// `nmp_app_resolve_ref` typed adapter: must not panic for a valid pubkey
+    /// (D6 + D8 fire-and-forget).
+    #[test]
+    fn resolve_profile_ref_valid_pubkey_does_not_panic() {
+        let app = TwentyNinerApp::new();
+        app.resolve_profile_ref(VALID_PUBKEY.to_string(), "view-1".to_string());
+    }
+
+    /// D6: an invalid (non-hex) pubkey is a silent no-op, never a panic.
+    #[test]
+    fn resolve_profile_ref_invalid_pubkey_is_silent_noop() {
+        let app = TwentyNinerApp::new();
+        app.resolve_profile_ref("not-a-pubkey".to_string(), "view-1".to_string());
+    }
+
+    /// Teardown lifecycle: resolve -> release -> release (idempotent, D6).
+    #[test]
+    fn release_profile_ref_is_idempotent() {
+        let app = TwentyNinerApp::new();
+        let consumer = "view-teardown".to_string();
+        app.resolve_profile_ref(VALID_PUBKEY.to_string(), consumer.clone());
+        app.release_profile_ref(VALID_PUBKEY.to_string(), consumer.clone());
+        // Second release must be a silent no-op, not a panic.
+        app.release_profile_ref(VALID_PUBKEY.to_string(), consumer);
+    }
+
+    /// D6: releasing a never-resolved `(pubkey, consumer)` pair is a silent
+    /// no-op.
+    #[test]
+    fn release_profile_ref_unknown_pair_is_silent_noop() {
+        let app = TwentyNinerApp::new();
+        app.release_profile_ref(VALID_PUBKEY.to_string(), "never-resolved".to_string());
     }
 }

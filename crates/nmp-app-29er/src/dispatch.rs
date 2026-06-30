@@ -2,15 +2,11 @@
 //! `ffi.rs` (`encode_payload_for_namespace` / `encode_chat_send_payload` /
 //! `nmp_app_29er_dispatch_action_bytes`).
 //!
-//! [`dispatch_nip29_action`] is a plain Rust function, not yet exported on
-//! [`crate::TwentyNinerApp`] via `#[uniffi::export]` — wiring it onto the
-//! facade as a Swift-callable `dispatchNip29Action` verb is PR-3's job (see
-//! the crate module docs and `docs/builder-guide/15-codegen-and-ffi.md`
-//! "App-owned UniFFI facades (#2494)" worked example). It is ported now,
-//! rather than deleted, because the native Rust TUI (`29er-tui`) dispatches
-//! every NIP-29 action — join/leave/create-group/chat-send/etc. — through
-//! this exact encoding, and leaving it out would regress a working feature
-//! for no PR-1 benefit.
+//! [`dispatch_nip29_action`] is a plain Rust function so the native Rust TUI
+//! (`29er-tui`) — which dispatches every NIP-29 action (join/leave/
+//! create-group/chat-send/etc.) through this exact encoding — can call it
+//! directly without going through UniFFI. [`crate::group_sessions`] wraps it
+//! as the Swift-callable `dispatchNip29Action` facade verb (PR-2).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

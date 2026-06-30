@@ -11,9 +11,13 @@
 //!
 //! * [`TwentyNinerApp`] — a `uniffi::Object` that OWNS an
 //!   `nmp-native-runtime` app, composes 29er in its constructor, and exposes
-//!   29er's lifecycle through UniFFI. The iOS shell will consume generated
-//!   Swift bindings (see `src/bin/uniffi_bindgen.rs`) — wiring those bindings
-//!   into the Xcode project is PR-4/PR-6's job, not this crate's.
+//!   29er's lifecycle + NIP-29 group-read sessions through UniFFI. The iOS
+//!   shell will consume generated Swift bindings (see
+//!   `src/bin/uniffi_bindgen.rs`) — wiring those bindings into the Xcode
+//!   project is PR-4/PR-6's job, not this crate's.
+//! * [`group_sessions`] — the NIP-29 group-discovery / group-chat /
+//!   group-roster typed read sessions and `dispatchNip29Action`, exported as
+//!   a second `impl TwentyNinerApp` block (PR-2).
 //! * [`composition::compose_29er_runtime`] — the shared composition root,
 //!   also called directly by the native Rust TUI on its own app instance.
 //! * Pure modules ([`compose`], [`config`], [`group_tree`],
@@ -21,13 +25,13 @@
 //!
 //! ## PR sequencing (see the migration tracking issue for the full plan)
 //!
-//! This crate currently covers PR-1 (the facade spine: lifecycle + generic
-//! byte dispatch + composition). NIP-29 group-discovery / group-chat typed
-//! read sessions as facade verbs are PR-2; `dispatchNip29Action` and other
-//! per-namespace dispatch convenience as facade verbs are PR-3. The
-//! underlying Rust logic for both ([`group_tree`], [`dispatch`]) is ported
-//! now (unexported via `#[uniffi::export]`) so the native Rust TUI keeps
-//! compiling and working against the new NMP pin.
+//! PR-1 shipped the facade spine: lifecycle + generic byte dispatch +
+//! composition. PR-2 added NIP-29 group-discovery / group-chat / group-roster
+//! typed read sessions plus `dispatchNip29Action` as facade verbs
+//! ([`group_sessions`]) — both land together because they touch the same
+//! `impl TwentyNinerApp` extension point. [`group_tree`] and [`dispatch`]
+//! remain reusable plain-Rust modules so the native Rust TUI keeps compiling
+//! and working against the same NMP pin.
 //!
 //! ## Doctrine
 //!
@@ -45,6 +49,7 @@ pub mod compose;
 pub mod composition;
 pub mod config;
 pub mod dispatch;
+mod group_sessions;
 pub mod group_tree;
 pub mod kinds;
 pub mod relay_seeding;
