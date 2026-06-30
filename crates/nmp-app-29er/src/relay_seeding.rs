@@ -53,6 +53,16 @@ pub fn seed_relays_from_json_str(app: &NmpApp, json: &str) -> bool {
     true
 }
 
+/// First relay URL in a `[["url","role"],...]` JSON array.
+#[must_use]
+pub fn first_relay_url_from_json_str(json: &str) -> Option<String> {
+    let parsed = serde_json::from_str::<Vec<[String; 2]>>(json).ok()?;
+    parsed.into_iter().next().map(|entry| {
+        let [url, _role] = entry;
+        url
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,9 +90,6 @@ mod tests {
     #[test]
     fn json_seed_well_formed_returns_true() {
         let app = nmp_native_runtime::new_app();
-        assert!(seed_relays_from_json_str(
-            &app,
-            r#"[["wss://x","both"]]"#
-        ));
+        assert!(seed_relays_from_json_str(&app, r#"[["wss://x","both"]]"#));
     }
 }

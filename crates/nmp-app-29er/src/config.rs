@@ -4,13 +4,14 @@
 //! relay set + the suggested NIP-29 public-group host relay. Keeping the URLs
 //! here (Rust) — not in the Swift/Kotlin shell — upholds the thin-shell
 //! doctrine (D7): the shell never hardcodes a relay URL or a relay role. The
-//! same constants feed both the startup relay-seeding FFI
-//! ([`crate::ffi::nmp_app_29er_seed_default_relays`]) and the NIP-29
-//! group-defaults projection (`wire_group_defaults_with_relay`), so a new
-//! public group's host relay and the bootstrap relay can never drift apart.
+//! same constants feed both [`crate::TwentyNinerApp::seed_default_relays`] and
+//! the NIP-29 group-defaults projection (`wire_group_defaults_with_relay`), so
+//! a new public group's host relay and the bootstrap relay can never drift
+//! apart.
 
 /// One `{url, role}` bootstrap relay entry. `role` is an NMP relay-role token
-/// (e.g. `"both"` / `"indexer"`), handed verbatim to `nmp_app_add_relay`.
+/// (e.g. `"both"` / `"indexer"`), handed verbatim to the app's relay seeding
+/// path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TwentyNinerRelayBootstrapEntry {
     pub url: &'static str,
@@ -29,9 +30,9 @@ pub const RELAY_BOOTSTRAP: &[TwentyNinerRelayBootstrapEntry] = &[TwentyNinerRela
     role: "both",
 }];
 
-/// The canonical 29er relay bootstrap set. The startup seeding FFI iterates
-/// this; the kernel dedups against session-restored rows, so re-seeding an
-/// existing install is a no-op.
+/// The canonical 29er relay bootstrap set. Startup seeding iterates this; the
+/// kernel dedups against session-restored rows, so re-seeding an existing
+/// install is a no-op.
 #[must_use]
 pub fn default_relay_bootstrap() -> &'static [TwentyNinerRelayBootstrapEntry] {
     RELAY_BOOTSTRAP

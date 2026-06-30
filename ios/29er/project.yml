@@ -53,7 +53,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         # UniFFI Swift integration: the bridging header points directly at
         # the generated FFI header (Bridge/Generated/nmp_app_29erFFI.h)
-        # instead of a hand-written C-ABI header. UniFFI's Swift codegen
+        # instead of an app-maintained header. UniFFI's Swift codegen
         # conditionally `import`s a separate `nmp_app_29erFFI` Clang module
         # from the generated .swift file when one is available
         # (`#if canImport(nmp_app_29erFFI)`); this project does not declare
@@ -70,26 +70,26 @@ targets:
         DEVELOPMENT_TEAM: 456SHKPP26
         # 29er links one aggregate Rust archive (`-lnmp_app_29er`) that
         # contains nmp-core, nmp-native-runtime, and the 29er per-app UniFFI
-        # facade (the hand-written `nmp-ffi` C-ABI crate is deleted, #2494).
+        # facade.
         # The xcframework wraps the staticlib; the link happens via
         # LIBRARY_SEARCH_PATHS pointing at the xcframework slice (mirrors
         # Chirp's `LIBRARY_SEARCH_PATHS` pointing at `target/.../debug`).
-        # NmpCore.xcframework is gitignored and not checked in; it is only
+        # NmpApp29er.xcframework is gitignored and not checked in; it is only
         # produced locally by `scripts/build-nmp-xcframework.sh` for
         # consumers without a Rust toolchain. The `target/aarch64-apple-ios*`
         # search-path entries below are where plain `cargo build --target
         # ...` runs land and are sufficient for day-to-day iOS development —
         # both fallbacks are kept.
         "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]":
-          - $(SRCROOT)/Vendor/NmpCore.xcframework/ios-arm64
+          - $(SRCROOT)/Vendor/NmpApp29er.xcframework/ios-arm64
           - $(SRCROOT)/../../target/aarch64-apple-ios/debug
           - $(SRCROOT)/../../target/aarch64-apple-ios/release
         "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]":
           - $(SRCROOT)/../../target/aarch64-apple-ios-sim/debug
           - $(SRCROOT)/../../target/aarch64-apple-ios-sim/release
-          - $(SRCROOT)/Vendor/NmpCore.xcframework/ios-arm64-simulator
+          - $(SRCROOT)/Vendor/NmpApp29er.xcframework/ios-arm64-simulator
         OTHER_LDFLAGS: "$(inherited) -lnmp_app_29er"
-        # The NmpCore.xcframework ships arm64 simulator + arm64 device slices
+        # The NmpApp29er.xcframework ships arm64 simulator + arm64 device slices
         # only (matches the Rust iOS build targets). Restrict the simulator
         # build to arm64 so the linker does not look for an x86_64 slice that
         # was never built. CI / local simulators on Apple Silicon cover this;

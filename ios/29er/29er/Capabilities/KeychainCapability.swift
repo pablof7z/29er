@@ -51,11 +51,9 @@ struct CapabilityEnvelope: Encodable, Equatable {
 /// Capability-private request payload (the decoded `payload_json`).
 ///
 /// The kernel's keyring capability contract is not yet defined in the Rust
-/// tree (filed: the kernel-side `KeyringCapability` Request/Result enum +
-/// IdentityModule wiring + the FFI/actor socket — see
-/// `docs/perf/pending-user-decisions.md` PD-019). This Swift vocabulary is
-/// the minimal, self-contained shape the iOS side needs and is the shape the
-/// kernel side should converge on: a key/value secret store keyed by an
+/// tree. This Swift vocabulary is the minimal, self-contained shape the iOS
+/// side needs and is the shape the kernel side should converge on: a
+/// key/value secret store keyed by an
 /// account-scoped account identifier.
 enum KeyringRequest: Decodable, Equatable {
     /// Persist `secret` under `accountID`. Overwrites any existing value.
@@ -183,7 +181,7 @@ final class KeychainCapability {
             resultJSON: resultJSON)
     }
 
-    /// Convenience entry point for FFI bridges that hand us the raw kernel
+    /// Convenience entry point for facade bridges that hand us the raw kernel
     /// `CapabilityRequest` JSON and want raw `CapabilityEnvelope` JSON back.
     /// Honors D6 end to end: malformed input yields an error envelope string.
     func handleJSON(_ requestJSON: String) -> String {

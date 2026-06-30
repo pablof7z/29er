@@ -1,21 +1,18 @@
 //! NIP-29 group-read sessions + the `dispatchNip29Action` convenience verb on
-//! [`TwentyNinerApp`] (PR-2/PR-3 of the UniFFI-facade migration, folded into
-//! one PR — see `crate::app`'s module doc for why).
+//! [`TwentyNinerApp`].
 //!
 //! Mirrors the session-opening pattern the native Rust TUI
 //! (`crates/29er-tui/src/app.rs`) already drives directly against
 //! `nmp-native-runtime`'s `Nip29*Session` doors — this module is the same
 //! composition, exposed through `#[uniffi::export]` so the iOS shell can call
-//! it via generated Swift instead of the deleted hand-written C-ABI.
+//! it via generated Swift.
 //!
 //! ## State ownership
 //!
-//! [`TwentyNinerApp`] cannot hand Swift a raw session handle the way the old
-//! C-ABI handed back an opaque pointer — a `uniffi::Object` is the only
-//! ergonomic way to round-trip state through Swift, and minting a second
-//! object per session is unnecessary ceremony for a facade that only ever
-//! has ONE discovery / chat / roster session open at a time (each door is
-//! itself a kernel-level singleton — re-opening replaces the prior session).
+//! [`TwentyNinerApp`] keeps session handles in Rust. Minting a second UniFFI
+//! object per session is unnecessary ceremony for a facade that only ever has
+//! one discovery / chat / roster session open at a time (each door is itself a
+//! kernel-level singleton — re-opening replaces the prior session).
 //! So [`GroupSessions`] holds the live handles behind `Mutex`es, owned by
 //! `TwentyNinerApp` itself (mirrors how `inner: NmpApp` is already the single
 //! source of truth for the runtime) — Swift just calls `open_group_discovery`
@@ -29,15 +26,12 @@
 //! (per-group unread + last-message preview), composed with the discovery
 //! door's catalog and the joined-groups door's membership truth into the
 //! app-owned `"nmp.29er.group_tree"` typed snapshot. This is the same
-//! composition the deleted C-ABI's `open_group_discovery_with_tree` performed
-//! (see `git show 99832a1:crates/nmp-app-29er/src/ffi.rs`), ported onto the
-//! new `Nip29*Session` door names.
+//! composition 29er wants for its discover screen.
 //!
 //! ## Joined-groups tracking is reactive, not a one-shot snapshot
 //!
-//! The deleted C-ABI read the active pubkey ONCE at `open_group_discovery`
-//! time. This module instead registers an identity-change observer (the same
-//! pattern `29er-tui::init_nmp` uses) once, in [`GroupSessions::new`], so the
+//! This module registers an identity-change observer (the same pattern
+//! `29er-tui::init_nmp` uses) once, in [`GroupSessions::new`], so the
 //! joined-groups session — and therefore the `is_member`/`is_admin` flags
 //! folded into `"nmp.29er.group_tree"` — stays correct across a later sign-in
 //! or account switch, not just whatever account happened to be active when
@@ -71,7 +65,7 @@ const SCOPE_GLOBAL: u32 = 1;
 /// Bounded read-cache replay budget for the 29er kind:9 group-tree observed
 /// projection. Mirrors `nmp_feed::DEFAULT_FEED_WINDOW_LIMIT` (80) — kept as a
 /// local const so this crate does not take an `nmp-feed` dependency just for
-/// one number (same rationale the deleted C-ABI used).
+/// one number.
 const GROUP_TREE_REPLAY_LIMIT: usize = 80;
 
 /// The live `"nmp.29er.group_tree"` composition opened by
@@ -296,11 +290,8 @@ fn sync_joined_session(
 }
 
 /// Open NMP's canonical discovery door and layer the 29er-owned kind:9
-/// group-tree composite on top. Ported from the deleted C-ABI's
-/// `open_group_discovery_with_tree` (`git show
-/// 99832a1:crates/nmp-app-29er/src/ffi.rs`) onto the new `Nip29*Session` door
-/// names. Returns `None` (D6 fail-closed) when the kernel refuses the kind:9
-/// observed projection.
+/// group-tree composite on top. Returns `None` (D6 fail-closed) when the
+/// kernel refuses the kind:9 observed projection.
 fn build_discovery_session(
     app: &NmpApp,
     relay_url: String,
@@ -338,7 +329,7 @@ fn build_discovery_session(
         let messages = tree_messages_for_sidecar.snapshot();
         // Re-read the live active pubkey + joined reader every tick so
         // membership is recomputed on an account switch and never leaks a
-        // previous account's truth (same rationale the deleted C-ABI used).
+        // previous account's truth.
         let active_pubkey = active_account
             .lock()
             .ok()
@@ -391,8 +382,8 @@ impl TwentyNinerApp {
     /// Replaces any previously open discovery session. `false` (D6) on an
     /// empty `host_relay_url` or if the kernel refuses the kind:9 observed
     /// projection. Does NOT dispatch `nmp.nip29.discover` itself — call
-    /// [`Self::dispatch_nip29_action`] for that (mirrors the deleted C-ABI:
-    /// open is a pure read-session open, discovery is a separate action).
+    /// [`Self::dispatch_nip29_action`] for that: open is a pure read-session
+    /// open, discovery is a separate action.
     pub fn open_group_discovery(&self, host_relay_url: String) -> bool {
         let relay = host_relay_url.trim().to_string();
         if relay.is_empty() {
@@ -409,12 +400,9 @@ impl TwentyNinerApp {
 
     /// Refresh the group-discovery session after a local store reset.
     ///
-    /// Restores the feature dropped when PR-1 deleted the C-ABI's
-    /// `nmp_app_29er_refresh_group_discovery` (see `git show
-    /// 99832a1:crates/nmp-app-29er/src/ffi.rs`). Rust owns the read-model
-    /// lifecycle: tears down the previous discovery/tree/joined composition
-    /// UNCONDITIONALLY (the old handle must not be reused after this call,
-    /// even on invalid input), opens a fresh composition for
+    /// Rust owns the read-model lifecycle: tears down the previous
+    /// discovery/tree/joined composition unconditionally, opens a fresh
+    /// composition for
     /// `host_relay_url`, and re-dispatches `nmp.nip29.discover` for that
     /// relay. `false` on an empty relay or if the fresh composition or the
     /// re-dispatch fails.
@@ -437,10 +425,9 @@ impl TwentyNinerApp {
 
     /// Mark a group's direct kind:9 messages read inside the open group-tree
     /// composition. `local_id` is the group's bare local id (NOT a
-    /// `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read` /
-    /// the deleted C-ABI's `nmp_app_29er_mark_group_read`). The next tree
-    /// snapshot folds this into the group's aggregate unread count. No-op
-    /// when no discovery session is open (D6).
+    /// `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read`).
+    /// The next tree snapshot folds this into the group's aggregate unread
+    /// count. No-op when no discovery session is open (D6).
     pub fn mark_group_read(&self, local_id: String) {
         self.sessions().mark_group_read(&local_id);
     }
@@ -465,9 +452,9 @@ impl TwentyNinerApp {
 
     /// Open the member-roster read session for one group. `group_id_json` is
     /// a JSON [`GroupId`] object (same shape as [`Self::open_group_chat`]).
-    /// Replaces `select_group_members`'s old C-ABI no-op (the dedicated
-    /// roster door — `nmp_native_runtime::open_nip29_group_roster_session` —
-    /// now exists; this wires it). `false` (D6) on malformed JSON.
+    /// Uses the dedicated roster door
+    /// (`nmp_native_runtime::open_nip29_group_roster_session`). `false` (D6)
+    /// on malformed JSON.
     pub fn open_group_roster(&self, group_id_json: String) -> bool {
         let Ok(group_id) = serde_json::from_str::<GroupId>(&group_id_json) else {
             return false;
@@ -542,8 +529,8 @@ mod tests {
         let app = TwentyNinerApp::new();
         assert!(app.open_group_discovery("wss://groups.example.com".to_string()));
         assert!(!app.refresh_group_discovery(String::new()));
-        // The old C-ABI contract: the prior handle is consumed regardless of
-        // whether the refresh's own open succeeds.
+        // The prior handle is consumed regardless of whether the refresh's
+        // own open succeeds.
         assert!(!app
             .app()
             .registered_typed_projection_keys()

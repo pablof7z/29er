@@ -1,12 +1,10 @@
-//! NIP-29 typed dispatch-payload encoding — ported from the deleted C-ABI
-//! `ffi.rs` (`encode_payload_for_namespace` / `encode_chat_send_payload` /
-//! `nmp_app_29er_dispatch_action_bytes`).
+//! NIP-29 typed dispatch-payload encoding.
 //!
 //! [`dispatch_nip29_action`] is a plain Rust function so the native Rust TUI
 //! (`29er-tui`) — which dispatches every NIP-29 action (join/leave/
 //! create-group/chat-send/etc.) through this exact encoding — can call it
 //! directly without going through UniFFI. [`crate::group_sessions`] wraps it
-//! as the Swift-callable `dispatchNip29Action` facade verb (PR-2).
+//! as the Swift-callable `dispatchNip29Action` facade verb.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -216,7 +214,10 @@ mod tests {
         assert_eq!(input.tags, vec![vec!["p".to_string(), HEX.to_string()]]);
         // The envelope tags (`h` / `previous`) must NOT be present — nmp-nip29
         // injects them and rejects caller-supplied copies.
-        assert!(input.tags.iter().all(|t| t.first().map(String::as_str) != Some("h")));
+        assert!(input
+            .tags
+            .iter()
+            .all(|t| t.first().map(String::as_str) != Some("h")));
         assert!(input
             .tags
             .iter()

@@ -40,34 +40,39 @@ struct GroupChatSnapshot: Decodable, Equatable {
     static let empty = GroupChatSnapshot(messages: [])
 }
 
-// ─── NIP-29 selected-group members read model ─────────────────────────────
+// ─── NIP-29 selected-group roster read model ──────────────────────────────
 
-/// One member row for the currently open NIP-29 group. Raw protocol values
+/// One roster row for the currently open NIP-29 group. Raw protocol values
 /// only; Rust owns membership/admin derivation and Swift renders fallbacks.
-struct GroupMember: Decodable, Identifiable, Equatable {
+struct GroupRosterMember: Identifiable, Equatable {
     let pubkey: String
-    let displayName: String?
-    let admin: Bool
-    let role: String?
+    let roles: [String]
+    let isAdmin: Bool
+    let isMember: Bool
 
     var id: String { pubkey }
 
     var title: String {
-        if let displayName, !displayName.isEmpty {
-            return displayName
-        }
         return pubkey.shortHex
     }
+
+    var roleBadge: String { isAdmin ? "Admin" : "Member" }
 }
 
-/// Members for the selected group only. `groupId == nil` means no group has
+struct GroupRole: Equatable {
+    let name: String
+    let description: String?
+}
+
+/// Roster for the selected group only. `groupId == nil` means no group has
 /// been selected on the Rust projection yet.
-struct GroupMembersSnapshot: Decodable, Equatable {
+struct GroupRosterSnapshot: Equatable {
     let hostRelayUrl: String
     let groupId: String?
-    let members: [GroupMember]
+    let members: [GroupRosterMember]
+    let roles: [GroupRole]
 
-    static let empty = GroupMembersSnapshot(hostRelayUrl: "", groupId: nil, members: [])
+    static let empty = GroupRosterSnapshot(hostRelayUrl: "", groupId: nil, members: [], roles: [])
 }
 
 extension String {

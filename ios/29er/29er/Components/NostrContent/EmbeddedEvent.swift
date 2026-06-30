@@ -89,7 +89,7 @@ public struct EmbeddedEvent: View {
 /// Protocol mirror of `nmp_content::EventClaimSink`. The renderer fires a
 /// resolve intent when an embed enters the view tree and the matching release
 /// when it leaves. Implementations are app-owned URI adapters that decode to
-/// the raw event key and call the unified `refs.event` FFI adapter.
+/// the raw event key and call the facade's typed event-ref adapter.
 ///
 /// `Sendable` because the gallery's concrete impl is the kernel actor's
 /// command channel — every method is fire-and-forget across threads.

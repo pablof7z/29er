@@ -10,24 +10,18 @@ let kbLog = Logger(subsystem: "io.f7z.app29er.bridge", category: "KernelBridge")
 private let KERNEL_SCHEMA_VERSION: UInt32 = 1
 
 /// Thin Swift wrapper around the generated `TwentyNinerApp` UniFFI facade
-/// (`Bridge/Generated/nmp_app_29er.swift`). PR-4 of the C-ABI → UniFFI
-/// migration: there is no more hand-marshaled `OpaquePointer` / `CString` /
-/// `UnsafeMutableRawBufferPointer` traffic here — every call below is a plain
-/// Swift method on the generated `TwentyNinerApp` object, which owns the
-/// opaque Rust pointer internally.
+/// (`Bridge/Generated/nmp_app_29er.swift`). Every call below is a plain Swift
+/// method on the generated `TwentyNinerApp` object, which owns the opaque Rust
+/// pointer internally.
 ///
 /// 29er's minimal S01 surface: new/free (the generated class's own
 /// init/deinit), update-sink registration, start/stop/reset, storage path,
 /// liveness probe, identity (nsec sign-in), and relay bootstrap. The NIP-29
 /// group-discovery + group-chat + dispatch helpers live on the `KernelHandle`
-/// extension in `GroupDiscoveryBridge.swift` — that file still calls the
-/// deleted C-ABI symbols (`nmp_app_29er_open_group_discovery` and friends)
-/// and will not compile until PR-5 migrates it onto the facade once PR-2
-/// lands the matching Rust methods. That is expected and out of scope here.
+/// extension in `GroupDiscoveryBridge.swift`.
 final class KernelHandle {
     /// The generated UniFFI facade object. Owns the opaque Rust pointer and
-    /// its own lifecycle (`TwentyNinerApp.init`/`deinit` replace the old
-    /// `nmp_app_new`/`nmp_app_free` pair).
+    /// its own lifecycle (`TwentyNinerApp.init`/`deinit`).
     let app: TwentyNinerApp
 
     /// Retained update sink. UniFFI's callback-interface handle map keeps the
@@ -50,12 +44,7 @@ final class KernelHandle {
     var lastAppliedRev: UInt64 = 0
 
     init() {
-        // "Construct + compose 29er. No IO; the actor is NOT started." — the
-        // facade's `init()` now performs what used to be the separate
-        // `nmp_app_29er_register` composition step (NIP-29 action
-        // namespaces, group-create defaults projection, NIP-46 signer broker
-        // init) internally. There is no longer a second opaque "29er
-        // registration handle" to track.
+        // "Construct + compose 29er. No IO; the actor is NOT started."
         app = TwentyNinerApp()
         Self.configureStoragePath(for: app)
         // ADR-0053 — 29er is a full client: declare that it consumes every
@@ -155,9 +144,7 @@ final class KernelHandle {
     }
 
     /// Reconfigure rendering limits without restarting (same clamps as
-    /// `start`). Unlike the old minimal C-ABI header (which had no
-    /// `nmp_app_configure` symbol and left this a no-op), the generated
-    /// facade exposes it directly.
+    /// `start`).
     func configure(visibleLimit: UInt32, emitHz: UInt32) {
         app.configure(visibleLimit: visibleLimit, emitHz: emitHz)
     }
@@ -226,27 +213,19 @@ final class KernelHandle {
         app.seedRelaysFromJson(json: json)
     }
 
-    // TODO(follow-up PR): the NIP-29 relay-selector verbs
-    // (`nmp_app_29er_relay_selector_{select,add,remove}_relay`) were part of
-    // the deleted C-ABI's separate "29er registration handle" surface and
-    // have no equivalent on the generated `TwentyNinerApp` facade yet — PR-1
-    // only exposes the generic `dispatchAction` byte lane; the richer
-    // per-namespace NIP-29 convenience is later work (alongside PR-2/PR-5).
-    // Stubbed to a no-op `false` so `GroupTreeView`'s relay-selector UI
-    // compiles and degrades safely instead of resurrecting a dead C symbol.
     @discardableResult
     func selectNip29Relay(_ relayUrl: String) -> Bool {
-        false
+        app.relaySelectorSelectRelay(relayUrl: relayUrl)
     }
 
     @discardableResult
     func addNip29Relay(_ relayUrl: String) -> Bool {
-        false
+        app.relaySelectorAddRelay(relayUrl: relayUrl)
     }
 
     @discardableResult
     func removeNip29Relay(_ relayUrl: String) -> Bool {
-        false
+        app.relaySelectorRemoveRelay(relayUrl: relayUrl)
     }
 
     /// Sign in with a local nsec and activate it as the active account.
@@ -273,23 +252,25 @@ final class KernelHandle {
         app.retryPublish(handle: handle)
     }
 
-    // TODO(follow-up PR): `nmp_app_resolve_profile_ref` /
-    // `nmp_app_release_profile_ref` (ADR-0063 typed profile-ref adapters)
-    // have no equivalent on the generated `TwentyNinerApp` facade yet either
-    // — same gap as the NIP-29 relay selector above. Stubbed to a no-op
-    // until a follow-up PR exposes the seam (most likely via the generic
-    // `dispatchAction` byte lane once Rust defines a typed envelope for
-    // `refs.profile`). This means avatar/profile-name resolution
-    // (`NostrAvatar`, `NostrProfileHost`) does not claim new pubkeys until
-    // that lands — flagged in the PR description, not silently dropped.
-    func resolveProfileRef(pubkey: String, consumerID: String) {}
+    func resolveProfileRef(pubkey: String, consumerID: String) {
+        app.resolveProfileRef(pubkey: pubkey, consumer: consumerID)
+    }
 
-    func releaseProfileRef(pubkey: String, consumerID: String) {}
+    func releaseProfileRef(pubkey: String, consumerID: String) {
+        app.releaseProfileRef(pubkey: pubkey, consumer: consumerID)
+    }
+
+    func resolveEventEmbed(key: String, consumerID: String) {
+        app.resolveEventEmbed(key: key, consumerId: consumerID)
+    }
+
+    func releaseEventRef(key: String, consumerID: String) {
+        app.releaseEventRef(key: key, consumerId: consumerID)
+    }
 }
 
 /// Adapts 29er's update handling to the generated `UpdateSink`
-/// callback-interface protocol (replaces the old `NmpUpdateCallback` C
-/// function pointer + `Unmanaged<KernelUpdateSink>` context dance).
+/// callback-interface protocol.
 ///
 /// `UpdateSink` requires `Sendable` (it crosses into Rust's callback handle
 /// map); `@unchecked` because the stored closures are plain
@@ -325,22 +306,6 @@ final class KernelUpdateSink: UpdateSink, @unchecked Sendable {
     }
 }
 
-/// Adapts 29er's keyring capability handler to the generated `CapabilitySink`
-/// callback-interface protocol (replaces the old `NmpCapabilityCallback` C
-/// function pointer + `strdup`/`nmp_free_string` contract). Rust invokes this
-/// from the actor thread (never the main thread), so a synchronous capability
-/// may block here safely.
-///
-/// `CapabilitySink` requires `Sendable`; this is a retroactive conformance
-/// declared outside `TwentyNinerCapabilities`'s own file, so Swift requires
-/// the `@unchecked` spelling here. `handleJSON` is already written to be
-/// safely callable off the main thread (see `Capabilities/TwentyNinerCapabilities.swift`).
-extension TwentyNinerCapabilities: CapabilitySink, @unchecked Sendable {
-    func onCapabilityRequest(requestJson: String) -> String {
-        handleJSON(requestJson)
-    }
-}
-
 extension KernelHandle {
     /// Decode a FlatBuffers `nmp.transport.UpdateFrame` byte buffer into the
     /// 29er `KernelDecodedUpdateFrame`. Returns `nil` on a decode error or a
@@ -363,7 +328,7 @@ extension KernelHandle {
                 let typedDiscoveredGroups = TypedDiscoveredGroupsDecoder.decode(from: envelopes)
                 let typedGroupTree = TypedGroupTreeDecoder.decode(from: envelopes)
                 let typedGroupChat = TypedGroupEventsDecoder.decode(from: envelopes)
-                let typedGroupMembers = TypedGroupMembersDecoder.decode(from: envelopes)
+                let typedGroupRoster = TypedGroupRosterDecoder.decode(from: envelopes)
                 let typedPublishOutbox = TypedPublishOutboxDecoder.decode(from: envelopes)
                 let typedActiveAccount = TypedActiveAccountDecoder.decode(from: envelopes)
                 let typedGroupDefaults = TypedGroupDefaultsDecoder.decode(from: envelopes)
@@ -376,7 +341,7 @@ extension KernelHandle {
                         typedDiscoveredGroups: typedDiscoveredGroups,
                         typedGroupTree: typedGroupTree,
                         typedGroupChat: typedGroupChat,
-                        typedGroupMembers: typedGroupMembers,
+                        typedGroupRoster: typedGroupRoster,
                         typedPublishOutbox: typedPublishOutbox,
                         typedActiveAccount: typedActiveAccount,
                         typedGroupDefaults: typedGroupDefaults,

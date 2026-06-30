@@ -31,10 +31,12 @@ required-features = ["bindgen"]
 
 [dependencies]
 flatbuffers = { workspace = true }
+nmp-content = { workspace = true }
 nmp-core = { workspace = true }
 nmp-native-runtime = { workspace = true }
 nmp-uniffi-support = { workspace = true }
 nmp-substrate = { workspace = true }
+nmp-nip25 = { workspace = true }
 nmp-nip29 = { workspace = true }
 nmp-planner = { workspace = true }
 nmp-signer-iface = { workspace = true }
