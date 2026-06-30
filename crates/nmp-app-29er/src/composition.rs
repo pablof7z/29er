@@ -18,8 +18,7 @@
 //!
 //! ## Why not `nmp-defaults::register_defaults_with_handles`
 //!
-//! The old (pre-#2483) `nmp-app-29er::ffi::nmp_app_29er_register` called
-//! `nmp_defaults::register_defaults_with_handles` for "the canonical NMP
+//! A previous hidden-default composition path installed "the canonical NMP
 //! default action set" (NIP-02/17/57/65, DM-inbox + zap-receipts runtimes).
 //! `nmp-defaults` is deleted upstream (ADR-0069 kills hidden default bundles
 //! in favor of explicit, named composition; the crate and every
@@ -55,8 +54,7 @@ use nmp_core::substrate::AppHost;
 ///    suggested public-group host relay ([`crate::config::public_group_relay_url`])
 ///    so the shell reads it from the projection instead of hardcoding it (D7).
 pub fn compose_29er_runtime(app: &mut impl AppHost) {
-    let _substrate_handles =
-        nmp_substrate::install(app, nmp_substrate::SubstrateConfig::default());
+    let _substrate_handles = nmp_substrate::install(app, nmp_substrate::SubstrateConfig::default());
 
     // 29er-specific: register the NIP-29 action namespaces against the action
     // registry. Lives in this crate (not NMP) because NIP-29 is not part of

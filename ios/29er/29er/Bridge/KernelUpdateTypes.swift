@@ -20,9 +20,9 @@ struct KernelUpdateResult {
     /// Typed `nmp.nip29.group_events` projection decode (`NGEV`). `nil` ⇒ no
     /// group-events view has been registered or the sidecar was absent/malformed.
     let typedGroupChat: GroupChatSnapshot?
-    /// Typed `nmp.nip29.group_members` projection decode (`NGMS`). `nil` ⇒ no
-    /// selected-group members sidecar was emitted or the sidecar was malformed.
-    let typedGroupMembers: GroupMembersSnapshot?
+    /// Typed `nmp.nip29.group_roster` projection decode (`NGRS`). `nil` ⇒ no
+    /// selected-group roster sidecar was emitted or the sidecar was malformed.
+    let typedGroupRoster: GroupRosterSnapshot?
     /// Typed kernel-owned `publish_outbox` projection decode (`KPBO`). `nil` ⇒
     /// no publish outbox sidecar was emitted or the sidecar was malformed.
     let typedPublishOutbox: [PublishOutboxItem]?

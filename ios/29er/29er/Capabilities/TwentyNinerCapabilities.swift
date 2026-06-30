@@ -11,10 +11,9 @@ import Foundation
 /// when and what to call; Swift only executes the request and reports the raw
 /// result (D7).
 ///
-/// There is a single C capability callback (`nmp_app_set_capability_callback`);
-/// it routes by the `namespace` field of the incoming `CapabilityRequest` —
-/// see [`handleJSON(_:)`].
-final class TwentyNinerCapabilities {
+/// The UniFFI capability callback routes by the `namespace` field of the
+/// incoming `CapabilityRequest`; see [`handleJSON(_:)`].
+final class TwentyNinerCapabilities: CapabilitySink, @unchecked Sendable {
     let keyring: KeychainCapability
 
     init(
@@ -65,6 +64,10 @@ final class TwentyNinerCapabilities {
                 resultJSON: "{\"status\":\"error\",\"message\":\"unknown-namespace\"}")
             return Self.encode(env) ?? "{}"
         }
+    }
+
+    func onCapabilityRequest(requestJson: String) -> String {
+        handleJSON(requestJson)
     }
 
     private static func encode<T: Encodable>(_ value: T) -> String? {

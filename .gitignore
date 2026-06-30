@@ -55,6 +55,6 @@ xcuserdata/
 # ── iOS build artifacts ──
 # Xcode per-user derived data.
 ios/**/DerivedData/
-# The NmpCore.xcframework is a built artifact of
+# The NmpApp29er.xcframework is a built artifact of
 # `scripts/build-nmp-xcframework.sh`; do not commit. Rebuild via the script.
-ios/**/Vendor/NmpCore.xcframework
+ios/**/Vendor/NmpApp29er.xcframework

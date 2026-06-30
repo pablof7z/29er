@@ -49,9 +49,9 @@ final class KernelModel: ObservableObject {
     /// selected group's event filter and newest-first ordering; Swift renders it.
     @Published var typedGroupChat: GroupChatSnapshot?
 
-    /// Typed `nmp.nip29.group_members` sidecar (`NGMS`). Rust owns selected
+    /// Typed `nmp.nip29.group_roster` sidecar (`NGRS`). Rust owns selected
     /// group membership/admin derivation; Swift renders it.
-    @Published var typedGroupMembers: GroupMembersSnapshot?
+    @Published var typedGroupRoster: GroupRosterSnapshot?
 
     /// Typed kernel-owned `publish_outbox` sidecar (`KPBO`). Rust owns publish
     /// lifecycle, retry policy, and offline queue state; Swift renders rows.
@@ -105,12 +105,10 @@ final class KernelModel: ObservableObject {
     func openGroupEvents(_ groupId: String) {
         selectedGroupId = groupId
         discoveredGroups.markGroupRead(groupId: groupId)
-        discoveredGroups.selectGroupMembers(groupId: groupId)
         guard let node = groupTree.allNodes[groupId] else { return }
-        kernel.registerGroupChat(groupId: GroupId(
-            hostRelayUrl: node.hostRelayUrl,
-            localId: node.groupId
-        ))
+        let group = GroupId(hostRelayUrl: node.hostRelayUrl, localId: node.groupId)
+        kernel.registerGroupChat(groupId: group)
+        kernel.openGroupRoster(groupId: group)
     }
 
     @discardableResult
@@ -139,10 +137,10 @@ final class KernelModel: ObservableObject {
     @Published var visibleLimit: UInt32 = 80
     @Published var emitHz: UInt32 = 4
 
-    /// D7 actor-death surface — flips to `true` exactly once when the Rust
+    /// D7 actor-death surface: flips to `true` exactly once when the Rust
     /// supervisor emits an `{"t":"panic",...}` update frame (the actor thread
     /// died inside `catch_unwind`) OR when the foreground-resume probe
-    /// (`nmp_app_is_alive`, ADR-0028) reports the actor as not running. Set
+    /// reports the actor as not running. Set
     /// once, never cleared in-process.
     @Published var kernelIsDead: Bool = false
 

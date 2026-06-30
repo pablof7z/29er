@@ -422,6 +422,22 @@ fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
+    typealias FfiType = Int32
+    typealias SwiftType = Int32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int32, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
@@ -537,9 +553,7 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
 
     /**
      * Declare that 29er consumes every kernel-owned built-in Tier-2
-     * projection (full client). Pre-start; idempotent. Replaces the deleted
-     * C-ABI symbol `nmp_app_consume_all_builtin_projections` /
-     * `nmp_app_29er_declare_consumed_projections`.
+     * projection (full client). Pre-start; idempotent.
      */
     func declareConsumedProjections()
 
@@ -588,10 +602,9 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
     /**
      * Mark a group's direct kind:9 messages read inside the open group-tree
      * composition. `local_id` is the group's bare local id (NOT a
-     * `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read` /
-     * the deleted C-ABI's `nmp_app_29er_mark_group_read`). The next tree
-     * snapshot folds this into the group's aggregate unread count. No-op
-     * when no discovery session is open (D6).
+     * `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read`).
+     * The next tree snapshot folds this into the group's aggregate unread
+     * count. No-op when no discovery session is open (D6).
      */
     func markGroupRead(localId: String)
 
@@ -614,29 +627,28 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * Replaces any previously open discovery session. `false` (D6) on an
      * empty `host_relay_url` or if the kernel refuses the kind:9 observed
      * projection. Does NOT dispatch `nmp.nip29.discover` itself — call
-     * [`Self::dispatch_nip29_action`] for that (mirrors the deleted C-ABI:
-     * open is a pure read-session open, discovery is a separate action).
+     * [`Self::dispatch_nip29_action`] for that: open is a pure read-session
+     * open, discovery is a separate action.
      */
     func openGroupDiscovery(hostRelayUrl: String)  -> Bool
 
     /**
      * Open the member-roster read session for one group. `group_id_json` is
      * a JSON [`GroupId`] object (same shape as [`Self::open_group_chat`]).
-     * Replaces `select_group_members`'s old C-ABI no-op (the dedicated
-     * roster door — `nmp_native_runtime::open_nip29_group_roster_session` —
-     * now exists; this wires it). `false` (D6) on malformed JSON.
+     * Uses the dedicated roster door
+     * (`nmp_native_runtime::open_nip29_group_roster_session`). `false` (D6)
+     * on malformed JSON.
      */
     func openGroupRoster(groupIdJson: String)  -> Bool
+
+    func reactToGroupMessage(groupIdJson: String, eventId: String, eventAuthorPubkey: String?, reaction: String)  -> DispatchOutcome
 
     /**
      * Refresh the group-discovery session after a local store reset.
      *
-     * Restores the feature dropped when PR-1 deleted the C-ABI's
-     * `nmp_app_29er_refresh_group_discovery` (see `git show
-     * 99832a1:crates/nmp-app-29er/src/ffi.rs`). Rust owns the read-model
-     * lifecycle: tears down the previous discovery/tree/joined composition
-     * UNCONDITIONALLY (the old handle must not be reused after this call,
-     * even on invalid input), opens a fresh composition for
+     * Rust owns the read-model lifecycle: tears down the previous
+     * discovery/tree/joined composition unconditionally, opens a fresh
+     * composition for
      * `host_relay_url`, and re-dispatches `nmp.nip29.discover` for that
      * relay. `false` on an empty relay or if the fresh composition or the
      * re-dispatch fails.
@@ -644,9 +656,29 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
     func refreshGroupDiscovery(hostRelayUrl: String)  -> Bool
 
     /**
+     * Add a NIP-29 relay to the active account's relay set, select it, and
+     * publish the updated kind:30002 relay-list event.
+     */
+    func relaySelectorAddRelay(relayUrl: String)  -> Bool
+
+    /**
+     * Remove a NIP-29 relay from the active account's relay set. The kernel
+     * connection is left alone; the next selector snapshot determines which
+     * relay the group-discovery read should follow.
+     */
+    func relaySelectorRemoveRelay(relayUrl: String)  -> Bool
+
+    /**
+     * Select the active NIP-29 relay and hand it to the kernel as a relay
+     * connection target.
+     */
+    func relaySelectorSelectRelay(relayUrl: String)  -> Bool
+
+    func releaseEventRef(key: String, consumerId: String)
+
+    /**
      * Release a profile ref previously registered via
-     * [`Self::resolve_profile_ref`] (mirrors the deleted C-ABI's
-     * `nmp_app_release_profile_ref`). Idempotent (D6): releasing an unknown
+     * [`Self::resolve_profile_ref`]. Idempotent (D6): releasing an unknown
      * or already-released `(pubkey, consumer)` pair is a silent no-op.
      */
     func releaseProfileRef(pubkey: String, consumer: String)
@@ -666,12 +698,13 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      */
     func reset()
 
+    func resolveEventEmbed(key: String, consumerId: String)
+
     /**
      * Register (or upgrade) a consumer's interest in a profile ref for
      * `pubkey`. Hardcodes the feed-avatar shape (`ProfileShape::Ref` +
      * `RefLiveness::CacheOk`) — the same shape `29er-tui`'s
-     * `resolve_profile_ref` uses for a chat-message author byline (mirrors
-     * the deleted C-ABI's `nmp_app_resolve_ref` typed adapter). `consumer`
+     * `resolve_profile_ref` uses for a chat-message author byline. `consumer`
      * is the caller-chosen refcount owner key (e.g. a SwiftUI view id) and
      * MUST be passed to [`Self::release_profile_ref`] to tear down. D6: an
      * invalid (non-hex) `pubkey` is a silent no-op. D8: fire-and-forget.
@@ -862,9 +895,7 @@ open func configure(visibleLimit: UInt32, emitHz: UInt32)  {try! rustCall() {
 
     /**
      * Declare that 29er consumes every kernel-owned built-in Tier-2
-     * projection (full client). Pre-start; idempotent. Replaces the deleted
-     * C-ABI symbol `nmp_app_consume_all_builtin_projections` /
-     * `nmp_app_29er_declare_consumed_projections`.
+     * projection (full client). Pre-start; idempotent.
      */
 open func declareConsumedProjections()  {try! rustCall() {
     uniffi_nmp_app_29er_fn_method_twentyninerapp_declare_consumed_projections(self.uniffiClonePointer(),$0
@@ -948,10 +979,9 @@ open func lifecycleForeground()  {try! rustCall() {
     /**
      * Mark a group's direct kind:9 messages read inside the open group-tree
      * composition. `local_id` is the group's bare local id (NOT a
-     * `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read` /
-     * the deleted C-ABI's `nmp_app_29er_mark_group_read`). The next tree
-     * snapshot folds this into the group's aggregate unread count. No-op
-     * when no discovery session is open (D6).
+     * `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read`).
+     * The next tree snapshot folds this into the group's aggregate unread
+     * count. No-op when no discovery session is open (D6).
      */
 open func markGroupRead(localId: String)  {try! rustCall() {
     uniffi_nmp_app_29er_fn_method_twentyninerapp_mark_group_read(self.uniffiClonePointer(),
@@ -985,8 +1015,8 @@ open func openGroupChat(groupIdJson: String) -> Bool  {
      * Replaces any previously open discovery session. `false` (D6) on an
      * empty `host_relay_url` or if the kernel refuses the kind:9 observed
      * projection. Does NOT dispatch `nmp.nip29.discover` itself — call
-     * [`Self::dispatch_nip29_action`] for that (mirrors the deleted C-ABI:
-     * open is a pure read-session open, discovery is a separate action).
+     * [`Self::dispatch_nip29_action`] for that: open is a pure read-session
+     * open, discovery is a separate action.
      */
 open func openGroupDiscovery(hostRelayUrl: String) -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
@@ -999,9 +1029,9 @@ open func openGroupDiscovery(hostRelayUrl: String) -> Bool  {
     /**
      * Open the member-roster read session for one group. `group_id_json` is
      * a JSON [`GroupId`] object (same shape as [`Self::open_group_chat`]).
-     * Replaces `select_group_members`'s old C-ABI no-op (the dedicated
-     * roster door — `nmp_native_runtime::open_nip29_group_roster_session` —
-     * now exists; this wires it). `false` (D6) on malformed JSON.
+     * Uses the dedicated roster door
+     * (`nmp_native_runtime::open_nip29_group_roster_session`). `false` (D6)
+     * on malformed JSON.
      */
 open func openGroupRoster(groupIdJson: String) -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
@@ -1011,15 +1041,23 @@ open func openGroupRoster(groupIdJson: String) -> Bool  {
 })
 }
 
+open func reactToGroupMessage(groupIdJson: String, eventId: String, eventAuthorPubkey: String?, reaction: String) -> DispatchOutcome  {
+    return try!  FfiConverterTypeDispatchOutcome_lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_react_to_group_message(self.uniffiClonePointer(),
+        FfiConverterString.lower(groupIdJson),
+        FfiConverterString.lower(eventId),
+        FfiConverterOptionString.lower(eventAuthorPubkey),
+        FfiConverterString.lower(reaction),$0
+    )
+})
+}
+
     /**
      * Refresh the group-discovery session after a local store reset.
      *
-     * Restores the feature dropped when PR-1 deleted the C-ABI's
-     * `nmp_app_29er_refresh_group_discovery` (see `git show
-     * 99832a1:crates/nmp-app-29er/src/ffi.rs`). Rust owns the read-model
-     * lifecycle: tears down the previous discovery/tree/joined composition
-     * UNCONDITIONALLY (the old handle must not be reused after this call,
-     * even on invalid input), opens a fresh composition for
+     * Rust owns the read-model lifecycle: tears down the previous
+     * discovery/tree/joined composition unconditionally, opens a fresh
+     * composition for
      * `host_relay_url`, and re-dispatches `nmp.nip29.discover` for that
      * relay. `false` on an empty relay or if the fresh composition or the
      * re-dispatch fails.
@@ -1033,9 +1071,53 @@ open func refreshGroupDiscovery(hostRelayUrl: String) -> Bool  {
 }
 
     /**
+     * Add a NIP-29 relay to the active account's relay set, select it, and
+     * publish the updated kind:30002 relay-list event.
+     */
+open func relaySelectorAddRelay(relayUrl: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_relay_selector_add_relay(self.uniffiClonePointer(),
+        FfiConverterString.lower(relayUrl),$0
+    )
+})
+}
+
+    /**
+     * Remove a NIP-29 relay from the active account's relay set. The kernel
+     * connection is left alone; the next selector snapshot determines which
+     * relay the group-discovery read should follow.
+     */
+open func relaySelectorRemoveRelay(relayUrl: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_relay_selector_remove_relay(self.uniffiClonePointer(),
+        FfiConverterString.lower(relayUrl),$0
+    )
+})
+}
+
+    /**
+     * Select the active NIP-29 relay and hand it to the kernel as a relay
+     * connection target.
+     */
+open func relaySelectorSelectRelay(relayUrl: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_relay_selector_select_relay(self.uniffiClonePointer(),
+        FfiConverterString.lower(relayUrl),$0
+    )
+})
+}
+
+open func releaseEventRef(key: String, consumerId: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_release_event_ref(self.uniffiClonePointer(),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(consumerId),$0
+    )
+}
+}
+
+    /**
      * Release a profile ref previously registered via
-     * [`Self::resolve_profile_ref`] (mirrors the deleted C-ABI's
-     * `nmp_app_release_profile_ref`). Idempotent (D6): releasing an unknown
+     * [`Self::resolve_profile_ref`]. Idempotent (D6): releasing an unknown
      * or already-released `(pubkey, consumer)` pair is a silent no-op.
      */
 open func releaseProfileRef(pubkey: String, consumer: String)  {try! rustCall() {
@@ -1075,12 +1157,19 @@ open func reset()  {try! rustCall() {
 }
 }
 
+open func resolveEventEmbed(key: String, consumerId: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_resolve_event_embed(self.uniffiClonePointer(),
+        FfiConverterString.lower(key),
+        FfiConverterString.lower(consumerId),$0
+    )
+}
+}
+
     /**
      * Register (or upgrade) a consumer's interest in a profile ref for
      * `pubkey`. Hardcodes the feed-avatar shape (`ProfileShape::Ref` +
      * `RefLiveness::CacheOk`) — the same shape `29er-tui`'s
-     * `resolve_profile_ref` uses for a chat-message author byline (mirrors
-     * the deleted C-ABI's `nmp_app_resolve_ref` typed adapter). `consumer`
+     * `resolve_profile_ref` uses for a chat-message author byline. `consumer`
      * is the caller-chosen refcount owner key (e.g. a SwiftUI view id) and
      * MUST be passed to [`Self::release_profile_ref`] to tear down. D6: an
      * invalid (non-hex) `pubkey` is a silent no-op. D8: fire-and-forget.
@@ -1668,6 +1757,16 @@ fileprivate struct FfiConverterOptionCallbackInterfaceUpdateSink: FfiConverterRu
         }
     }
 }
+public func tokenizeContent(content: String, tagsJson: String?, mode: Int32, kind: UInt32) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_func_tokenize_content(
+        FfiConverterString.lower(content),
+        FfiConverterOptionString.lower(tagsJson),
+        FfiConverterInt32.lower(mode),
+        FfiConverterUInt32.lower(kind),$0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -1684,6 +1783,9 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_nmp_app_29er_checksum_func_tokenize_content() != 42398) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_add_relay() != 23241) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1699,7 +1801,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_configure() != 61496) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_declare_consumed_projections() != 31210) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_declare_consumed_projections() != 14365) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_declare_incremental_apply() != 62830) {
@@ -1720,22 +1822,37 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_lifecycle_foreground() != 44999) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_mark_group_read() != 47521) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_mark_group_read() != 42135) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_chat() != 61403) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_discovery() != 46872) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_discovery() != 54936) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_roster() != 14552) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_roster() != 63417) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_refresh_group_discovery() != 9500) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_react_to_group_message() != 23629) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_release_profile_ref() != 20306) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_refresh_group_discovery() != 34709) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_relay_selector_add_relay() != 31712) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_relay_selector_remove_relay() != 59902) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_relay_selector_select_relay() != 12395) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_release_event_ref() != 12371) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_release_profile_ref() != 53739) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_remove_account() != 63148) {
@@ -1747,7 +1864,10 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_reset() != 30237) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_resolve_profile_ref() != 59958) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_resolve_event_embed() != 36891) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_resolve_profile_ref() != 51237) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_retry_publish() != 26016) {

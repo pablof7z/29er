@@ -24,6 +24,7 @@ nmp-core = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev
 nmp-native-runtime = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "3ce99c020b602107f3669517a9ea355c0c8397aa" }
 nmp-uniffi-support = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "3ce99c020b602107f3669517a9ea355c0c8397aa" }
 nmp-substrate = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "3ce99c020b602107f3669517a9ea355c0c8397aa" }
+nmp-nip25 = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "3ce99c020b602107f3669517a9ea355c0c8397aa" }
 nmp-nip29 = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "3ce99c020b602107f3669517a9ea355c0c8397aa" }
 nmp-nostr-id = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "3ce99c020b602107f3669517a9ea355c0c8397aa" }
 nmp-planner = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "3ce99c020b602107f3669517a9ea355c0c8397aa" }

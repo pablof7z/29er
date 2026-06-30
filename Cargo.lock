@@ -1690,8 +1690,10 @@ name = "nmp-app-29er"
 version = "0.1.0"
 dependencies = [
  "flatbuffers",
+ "nmp-content",
  "nmp-core",
  "nmp-native-runtime",
+ "nmp-nip25",
  "nmp-nip29",
  "nmp-nostr-id",
  "nmp-planner",

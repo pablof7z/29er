@@ -11,9 +11,9 @@
 //!
 //! So this module is where 29er composes a chat message. Both shells reuse it:
 //! the TUI routes raw input through the `nmp-app-29er` dispatch (which calls
-//! [`compose_chat_message`]); the iOS shell hits the same dispatch across the
-//! C-ABI byte doorway. Neither shell contains any NIP-21 / nostr knowledge —
-//! it all lives here.
+//! [`compose_chat_message`]); the iOS shell hits the same dispatch through the
+//! generated facade. Neither shell contains any NIP-21 / nostr knowledge — it
+//! all lives here.
 //!
 //! ## Mention contract
 //!
@@ -75,7 +75,7 @@ pub fn compose_chat_message(raw_text: &str, mention_pubkeys: &[String]) -> Compo
         };
 
         // The canonical NIP-21 URI uses the bech32 `npub`. Skip on encode
-        // failure (malformed hex) — fail-closed, never panic across the FFI.
+        // failure (malformed hex) -- fail-closed.
         let Ok(npub) = encode_npub(&hex) else {
             continue;
         };

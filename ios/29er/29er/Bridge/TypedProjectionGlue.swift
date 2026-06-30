@@ -38,19 +38,22 @@ enum TypedProjectionGlue {
         )
     }
 
-    // MARK: nmp.nip29.group_members → GroupMembersSnapshot
+    // MARK: nmp.nip29.group_roster -> GroupRosterSnapshot
 
-    static func groupMembers(_ reader: nmp_nip29_GroupMembersSnapshot) -> GroupMembersSnapshot {
-        GroupMembersSnapshot(
+    static func groupRoster(_ reader: nmp_nip29_GroupRosterSnapshot) -> GroupRosterSnapshot {
+        GroupRosterSnapshot(
             hostRelayUrl: reader.hostRelayUrl ?? "",
             groupId: reader.groupId,
             members: reader.members.map { row in
-                GroupMember(
+                GroupRosterMember(
                     pubkey: row.pubkey ?? "",
-                    displayName: row.displayName,
-                    admin: row.admin,
-                    role: row.role
+                    roles: row.roles.map { $0 ?? "" },
+                    isAdmin: row.isAdmin,
+                    isMember: row.isMember
                 )
+            },
+            roles: reader.roles.map { role in
+                GroupRole(name: role.name ?? "", description: role.description)
             }
         )
     }

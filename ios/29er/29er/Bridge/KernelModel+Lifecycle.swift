@@ -36,7 +36,7 @@ extension KernelModel {
         guard !startedKernel else { return }
         startedKernel = true
         // Seed the default relay set. Policy lives in Rust (D7): the URL + role
-        // come from `nmp_app_29er::config` via the seed FFI, so the shell holds
+        // come from `nmp_app_29er::config` via the facade, so the shell holds
         // no hardcoded relay literal. Swift's only job is the `NMP_TEST_RELAYS`
         // env seam (mirroring Chirp's `RelaySeeding.swift`): a well-formed
         // override seeds those relays, otherwise we fall back to the Rust

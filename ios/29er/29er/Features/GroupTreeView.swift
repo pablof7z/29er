@@ -371,19 +371,13 @@ struct GroupEventsView: View {
         isCurrentMember && !model.kernelIsDead
     }
 
-    // TODO(roster): `model.groupMembers` is fed by the `select_group_members`
-    // FFI call, which is a no-op in NMP v0.8 — there is no standalone
-    // group_members projection; membership/admin/metadata fold through the
-    // JoinedGroupsProjection. So this roster is currently always empty,
-    // degrading the member-list sheet and @-mention suggestions to "no roster".
-    // Membership/admin GATING no longer depends on it (see `isCurrentMember` /
-    // `isCurrentAdmin`, which read the JoinedGroupsProjection-backed
-    // `node.isMember` / `node.isAdmin`). When a typed 29er roster projection
-    // lands, source `currentMembers` from it; until then it stays empty and the
-    // build stays green. Do NOT reintroduce a roster scan for membership truth.
-    private var currentMembers: [GroupMember] {
-        guard model.groupMembers.groupId == groupId else { return [] }
-        return model.groupMembers.members
+    // The selected group's member list comes from the Rust-opened
+    // `nmp.nip29.group_roster` read session. Membership/admin gating does not
+    // depend on this roster; it reads the JoinedGroupsProjection-backed
+    // `node.isMember` / `node.isAdmin` flags from the group-tree snapshot.
+    private var currentMembers: [GroupRosterMember] {
+        guard model.groupRoster.groupId == groupId else { return [] }
+        return model.groupRoster.members
     }
 
     /// Viewer membership truth, read straight from the Rust group-tree
@@ -429,12 +423,10 @@ struct GroupEventsView: View {
 
     // Membership status derives ONLY from the JoinedGroupsProjection-backed
     // group-tree node (`node.isMember` / `node.isAdmin` / `node.isOpen`). It
-    // does NOT wait on a group_members roster snapshot — that projection does
-    // not exist in NMP v0.8, so any "Checking until roster arrives" gate would
-    // hang forever (this was the Join-button regression). In-flight join/leave
+    // does NOT wait on the selected-group roster snapshot. In-flight join/leave
     // transient states are NOT reconstructed in the shell from raw
-    // publish-outbox kinds/tags — that pending state must be surfaced as a
-    // typed 29er domain projection over FFI (deferred; see commit notes).
+    // publish-outbox kinds/tags; that pending state belongs in a typed 29er
+    // domain projection.
     private var membershipStatusLabel: String {
         if isCurrentAdmin {
             return "Admin"
@@ -458,7 +450,7 @@ struct GroupEventsView: View {
         return node?.isOpen == true ? "person.crop.circle.badge.plus" : "lock.fill"
     }
 
-    private var mentionSuggestions: [GroupMember] {
+    private var mentionSuggestions: [GroupRosterMember] {
         let token = currentMentionToken(in: draft)
         guard let token else { return [] }
         let needle = token.lowercased()
@@ -960,7 +952,7 @@ struct GroupEventsView: View {
         return String(last.dropFirst())
     }
 
-    private func acceptMention(_ member: GroupMember) {
+    private func acceptMention(_ member: GroupRosterMember) {
         selectedMentionPubkeys.insert(member.pubkey)
         // Insert an `@<pubkey>` *placeholder* (the raw hex identifier, NOT a
         // display name). The shared `compose_chat_message` helper in
@@ -1432,7 +1424,7 @@ private struct AdminActionsSheet: View {
 
 private struct MemberListSheet: View {
     let title: String
-    let members: [GroupMember]
+    let members: [GroupRosterMember]
 
     var body: some View {
         NavigationStack {
@@ -1456,7 +1448,7 @@ private struct MemberListSheet: View {
                                     Text(member.title)
                                         .font(.body.weight(.medium))
                                         .lineLimit(1)
-                                    if member.admin {
+                                    if member.isAdmin {
                                         Image(systemName: "shield.fill")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)

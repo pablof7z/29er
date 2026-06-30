@@ -1,27 +1,9 @@
-//! `TwentyNinerApp` — the 29er UniFFI facade object (#2494).
+//! `TwentyNinerApp` is 29er's UniFFI facade object.
 //!
-//! Replaces the deleted hand-written C-ABI (`nmp-ffi` + this crate's old
-//! `#[no_mangle] extern "C"` surface in `ffi.rs`). 29er owns its own
-//! `nmp-native-runtime` app (composed in [`TwentyNinerApp::new`] via
-//! [`crate::composition::compose_29er_runtime`]) and exposes its lifecycle
-//! through UniFFI, so the iOS shell consumes generated Swift instead of a
-//! hand-maintained header.
-//!
-//! Why a 29er-owned object (and not the stock `nmp-uniffi::NmpApp`): NIP-29 is
-//! not part of the canonical composition `nmp-uniffi` exposes, and a
-//! `uniffi::Object` cannot be extended across crates. 29er therefore owns the
-//! composition root and the runtime, mirroring `nmp-uniffi`'s lifecycle/
-//! dispatch surface.
-//!
-//! ## Scope
-//!
-//! PR-1 shipped lifecycle + the generic byte-dispatch passthrough. PR-2 (this
-//! crate's [`crate::group_sessions`] module) adds the NIP-29 group-discovery /
-//! group-chat / group-roster typed read sessions and the
-//! `dispatchNip29Action` convenience verb (folded into the same PR — both
-//! land in the same `impl TwentyNinerApp` extension and splitting them across
-//! two PRs would just create a merge conflict). See `crate::group_sessions`'s
-//! module doc for the session-lifecycle design.
+//! 29er owns its `nmp-native-runtime` app, composes it in
+//! [`TwentyNinerApp::new`], and exposes the app-specific lifecycle, reads, and
+//! verbs the native shell needs. The Swift shell consumes generated UniFFI
+//! bindings; Rust owns the app behavior and Nostr/NIP composition.
 
 use std::sync::Arc;
 
@@ -88,8 +70,10 @@ pub struct TwentyNinerApp {
     /// reason.
     inner: Arc<NmpApp>,
     /// NIP-29 group-discovery / group-chat / group-roster session state
-    /// (PR-2). See [`crate::group_sessions`].
+    /// See [`crate::group_sessions`].
     sessions: crate::group_sessions::GroupSessions,
+    /// 29er's relay selector projection and NIP-51 relay-set writer.
+    relay_selector: Arc<crate::relay_selector::RelaySelectorProjection>,
 }
 
 #[uniffi::export]
@@ -102,7 +86,12 @@ impl TwentyNinerApp {
         crate::composition::compose_29er_runtime(&mut inner);
         let inner = Arc::new(inner);
         let sessions = crate::group_sessions::GroupSessions::new(&inner);
-        Arc::new(Self { inner, sessions })
+        let relay_selector = crate::relay_selector::register_relay_selector_runtime(&inner);
+        Arc::new(Self {
+            inner,
+            sessions,
+            relay_selector,
+        })
     }
 
     /// Set the LMDB storage directory (pre-start). Empty clears it. Returns
@@ -116,9 +105,7 @@ impl TwentyNinerApp {
     }
 
     /// Declare that 29er consumes every kernel-owned built-in Tier-2
-    /// projection (full client). Pre-start; idempotent. Replaces the deleted
-    /// C-ABI symbol `nmp_app_consume_all_builtin_projections` /
-    /// `nmp_app_29er_declare_consumed_projections`.
+    /// projection (full client). Pre-start; idempotent.
     pub fn declare_consumed_projections(&self) {
         self.inner.consume_all_builtin_projections();
     }
@@ -221,7 +208,42 @@ impl TwentyNinerApp {
     /// Seed relays from a `[["url","role"],…]` JSON array (the `NMP_TEST_RELAYS`
     /// override). `false` on malformed/empty so the caller falls back.
     pub fn seed_relays_from_json(&self, json: String) -> bool {
-        crate::relay_seeding::seed_relays_from_json_str(&self.inner, &json)
+        let seeded = crate::relay_seeding::seed_relays_from_json_str(&self.inner, &json);
+        if seeded {
+            if let Some(first) = crate::relay_seeding::first_relay_url_from_json_str(&json) {
+                let _ = self.relay_selector_select_relay(first);
+            }
+        }
+        seeded
+    }
+
+    /// Select the active NIP-29 relay and hand it to the kernel as a relay
+    /// connection target.
+    pub fn relay_selector_select_relay(&self, relay_url: String) -> bool {
+        let Some(selected) = self.relay_selector.select_relay(&relay_url) else {
+            return false;
+        };
+        self.inner.add_relay(selected, "both".to_string());
+        true
+    }
+
+    /// Add a NIP-29 relay to the active account's relay set, select it, and
+    /// publish the updated kind:30002 relay-list event.
+    pub fn relay_selector_add_relay(&self, relay_url: String) -> bool {
+        let tx = self.inner.actor_sender();
+        let Some(selected) = self.relay_selector.add_relay(&relay_url, &tx) else {
+            return false;
+        };
+        self.inner.add_relay(selected, "both".to_string());
+        true
+    }
+
+    /// Remove a NIP-29 relay from the active account's relay set. The kernel
+    /// connection is left alone; the next selector snapshot determines which
+    /// relay the group-discovery read should follow.
+    pub fn relay_selector_remove_relay(&self, relay_url: String) -> bool {
+        let tx = self.inner.actor_sender();
+        self.relay_selector.remove_relay(&relay_url, &tx).is_some()
     }
 
     /// Dispatch a pre-built `DispatchEnvelope` (the generic byte lane,
@@ -235,8 +257,7 @@ impl TwentyNinerApp {
     /// Register (or upgrade) a consumer's interest in a profile ref for
     /// `pubkey`. Hardcodes the feed-avatar shape (`ProfileShape::Ref` +
     /// `RefLiveness::CacheOk`) — the same shape `29er-tui`'s
-    /// `resolve_profile_ref` uses for a chat-message author byline (mirrors
-    /// the deleted C-ABI's `nmp_app_resolve_ref` typed adapter). `consumer`
+    /// `resolve_profile_ref` uses for a chat-message author byline. `consumer`
     /// is the caller-chosen refcount owner key (e.g. a SwiftUI view id) and
     /// MUST be passed to [`Self::release_profile_ref`] to tear down. D6: an
     /// invalid (non-hex) `pubkey` is a silent no-op. D8: fire-and-forget.
@@ -251,8 +272,7 @@ impl TwentyNinerApp {
     }
 
     /// Release a profile ref previously registered via
-    /// [`Self::resolve_profile_ref`] (mirrors the deleted C-ABI's
-    /// `nmp_app_release_profile_ref`). Idempotent (D6): releasing an unknown
+    /// [`Self::resolve_profile_ref`]. Idempotent (D6): releasing an unknown
     /// or already-released `(pubkey, consumer)` pair is a silent no-op.
     pub fn release_profile_ref(&self, pubkey: String, consumer: String) {
         self.inner
@@ -283,9 +303,8 @@ mod tests {
 
     const VALID_PUBKEY: &str = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d";
 
-    /// Parity with `29er-tui::resolve_profile_ref` / the deleted C-ABI's
-    /// `nmp_app_resolve_ref` typed adapter: must not panic for a valid pubkey
-    /// (D6 + D8 fire-and-forget).
+    /// Parity with `29er-tui::resolve_profile_ref`: must not panic for a
+    /// valid pubkey (D6 + D8 fire-and-forget).
     #[test]
     fn resolve_profile_ref_valid_pubkey_does_not_panic() {
         let app = TwentyNinerApp::new();
