@@ -31,7 +31,7 @@
 
 use std::collections::BTreeSet;
 
-use nmp_core::nip19::{decode_npub, encode_npub};
+use nmp_nostr_id::{decode_npub, encode_npub};
 
 /// The composed body of a NIP-29 group event: the rewritten `content` (with
 /// `@mention` placeholders turned into `nostr:npub1…` URIs) and the

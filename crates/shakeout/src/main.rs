@@ -5,36 +5,35 @@
 //! Run:
 //!   SHAKEOUT_NSEC=nsec1... cargo run -p shakeout -- --relay wss://nip29.f7z.io
 //!
-//! The CLI boots an NMP kernel, signs in with the supplied nsec, opens group
-//! discovery on the target relay (registering the typed projection AND pushing
-//! the tailing interest), waits for snapshots to land, then reads the typed
-//! DiscoveredGroups FlatBuffers sidecar and logs each row.
+//! The CLI boots an NMP runtime via 29er's own composition root
+//! ([`nmp_app_29er::compose_29er_runtime`]) — the same composition the
+//! `TwentyNinerApp` UniFFI facade and the native Rust TUI use — signs in with
+//! the supplied nsec, opens group discovery on the target relay (registering
+//! the typed projection AND pushing the tailing interest), waits for
+//! snapshots to land, then reads the typed DiscoveredGroups FlatBuffers
+//! sidecar and logs each row.
+//!
+//! Ported off the deleted `nmp-ffi` C-ABI (#2483) onto `nmp-native-runtime` +
+//! `nmp-uniffi-support` directly — this CLI is a plain Rust consumer with no
+//! Swift/UniFFI boundary, so it talks to the runtime types directly rather
+//! than going through the `TwentyNinerApp` facade object.
 
-use std::ffi::CString;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use nmp_defaults::{NmpAppBuilder, RunConfig};
-use nmp_ffi::{
-    nmp_app_free, nmp_app_set_update_callback, nmp_app_signin_nsec, nmp_app_stop, NmpApp,
-};
-use nmp_nip29::wire::discovered_groups_fb::decode_discovered_groups_snapshot;
+use nmp_core::SignerSource;
+use nmp_native_runtime::{new_app, Nip29GroupDiscoverySession, NmpApp};
 
 const DEFAULT_RELAY: &str = "wss://nip29.f7z.io";
 const WAIT_SECS: u64 = 12;
 
 static UPDATE_TX: OnceLock<Mutex<Option<Sender<()>>>> = OnceLock::new();
 
-extern "C" fn update_signal_callback(_ctx: *mut std::ffi::c_void, _ptr: *const u8, _len: usize) {
-    if let Some(slot) = UPDATE_TX.get() {
-        if let Ok(guard) = slot.lock() {
-            if let Some(tx) = guard.as_ref() {
-                let _ = tx.send(());
-            }
-        }
-    }
-}
+/// Update-sink target for [`nmp_uniffi_support::set_update_sink`]. Every
+/// pushed `NMPU` frame just signals the wait loop to re-check the discovered
+/// group count — the frame bytes themselves are not decoded here.
+struct TickSink;
 
 fn main() {
     let relay = std::env::args()
@@ -52,65 +51,61 @@ fn main() {
     });
 
     println!("shakeout: relay={relay}");
-    println!("shakeout: booting NMP kernel (in-memory store, no initial relays)");
+    println!("shakeout: booting NMP runtime (29er composition, in-memory store)");
 
-    let mut builder = NmpAppBuilder::new();
-    nmp_defaults::register_defaults(&mut builder);
-    let app = builder
-        .in_memory()
-        .consume_all_builtin_projections()
-        .without_initial_relays()
-        .start(RunConfig::default());
-    if app.is_null() {
-        eprintln!("shakeout: nmp_app_new returned null");
-        std::process::exit(1);
-    }
+    let mut app = new_app();
+    nmp_app_29er::compose_29er_runtime(&mut app);
+    app.consume_all_builtin_projections();
+    nmp_uniffi_support::start_runtime(&app, 0, 0);
 
     let (tx, ticks) = channel::<()>();
     let slot = UPDATE_TX.get_or_init(|| Mutex::new(None));
     *slot.lock().unwrap() = Some(tx);
-    nmp_app_set_update_callback(app, std::ptr::null_mut(), Some(update_signal_callback));
+    nmp_uniffi_support::set_update_sink(&app, Some(Box::new(TickSink)), |_sink, _frame| {
+        if let Some(slot) = UPDATE_TX.get() {
+            if let Ok(guard) = slot.lock() {
+                if let Some(tx) = guard.as_ref() {
+                    let _ = tx.send(());
+                }
+            }
+        }
+    });
 
     println!("shakeout: adding relay {relay} (role=both)");
-    let url_c = CString::new(relay.as_str()).unwrap();
-    let role_c = CString::new("both").unwrap();
-    nmp_ffi::nmp_app_add_relay(app, url_c.as_ptr(), role_c.as_ptr());
+    app.add_relay(relay.clone(), "both".to_string());
 
     println!("shakeout: signing in with supplied nsec (active)");
-    let secret = CString::new(nsec).expect("nsec has no interior NUL");
-    nmp_app_signin_nsec(app, secret.as_ptr(), 1);
+    app.add_signer(SignerSource::LocalNsec(zeroize::Zeroizing::new(nsec)), true);
 
-    let app_ref: &NmpApp = unsafe { &*app };
-    wait_for_active_account(app_ref, &ticks);
+    wait_for_active_account(&app, &ticks);
 
-    println!("shakeout: opening group discovery projection on {relay}");
-    println!("shakeout: (open_group_discovery registers the typed projection AND opens the tailing interest internally)");
-    let _discovery_handle = app_ref.open_group_discovery(relay.clone());
+    println!("shakeout: opening group discovery session on {relay}");
+    println!("shakeout: (open_nip29_group_discovery_session_with_reader registers the typed projection AND opens the tailing interest internally)");
+    let (_discovery_handle, _reader) = app.open_nip29_group_discovery_session_with_reader(
+        Nip29GroupDiscoverySession::new(relay.clone()),
+    );
 
     println!("shakeout: waiting {WAIT_SECS}s for relay to stream metadata...");
     let deadline = Instant::now() + Duration::from_secs(WAIT_SECS);
     let mut last_count: usize = 0;
     while Instant::now() < deadline {
-        match ticks.recv_timeout(Duration::from_secs(1)) {
-            Ok(()) => {
-                let count = current_group_count(app_ref);
-                if count != last_count {
-                    println!("shakeout: tick — discovered_groups rows = {count}");
-                    last_count = count;
-                }
+        if ticks.recv_timeout(Duration::from_secs(1)).is_ok() {
+            let count = current_group_count(&app);
+            if count != last_count {
+                println!("shakeout: tick — discovered_groups rows = {count}");
+                last_count = count;
             }
-            Err(_) => {}
         }
     }
 
     println!("shakeout: ---- final discovered-groups snapshot ----");
-    let typed = app_ref.run_typed_snapshot_projections();
+    let typed = app.run_typed_snapshot_projections();
     let mut logged = 0;
     for entry in &typed {
         if entry.key != "nmp.nip29.discovered_groups" {
             continue;
         }
-        match decode_discovered_groups_snapshot(&entry.payload) {
+        match nmp_nip29::decode_discovered_groups_snapshot(&entry.payload) {
             Ok(snapshot) => {
                 println!(
                     "shakeout: host_relay_url={} groups={}",
@@ -142,12 +137,10 @@ fn main() {
     }
 
     println!("shakeout: shutting down");
-    nmp_app_set_update_callback(app, std::ptr::null_mut(), None);
     if let Some(slot) = UPDATE_TX.get() {
         *slot.lock().unwrap() = None;
     }
-    nmp_app_stop(app);
-    nmp_app_free(app);
+    app.shutdown();
 }
 
 fn wait_for_active_account(app: &NmpApp, ticks: &Receiver<()>) {
@@ -170,7 +163,7 @@ fn current_group_count(app: &NmpApp) -> usize {
     let typed = app.run_typed_snapshot_projections();
     for entry in &typed {
         if entry.key == "nmp.nip29.discovered_groups" {
-            if let Ok(snapshot) = decode_discovered_groups_snapshot(&entry.payload) {
+            if let Ok(snapshot) = nmp_nip29::decode_discovered_groups_snapshot(&entry.payload) {
                 return snapshot.groups.len();
             }
         }
