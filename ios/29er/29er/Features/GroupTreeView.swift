@@ -1546,8 +1546,8 @@ private struct SlackMessageGroupView: View {
     }
 
     // Re-declare the parent's grouping payload so this file-private view can name
-    // its parameter type. (Mirrors `GroupTimelineView.MessageGroup`.)
-    typealias MessageGroup = GroupTimelineView.MessageGroup
+    // its parameter type. (Mirrors `GroupEventsView.MessageGroup`.)
+    typealias MessageGroup = GroupEventsView.MessageGroup
 }
 
 /// One message body within a Slack group: NMP-rendered content (no bubble),
