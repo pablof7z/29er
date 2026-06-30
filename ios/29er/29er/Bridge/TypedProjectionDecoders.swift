@@ -66,10 +66,10 @@ enum TypedDiscoveredGroupsDecoder {
     }
 }
 
-enum TypedGroupTimelineDecoder {
-    static let key = "nmp.nip29.group_timeline"
-    static let schemaId = "nmp.nip29.group_timeline"
-    static let fileIdentifier = "NGTL"
+enum TypedGroupEventsDecoder {
+    static let key = "nmp.nip29.group_events"
+    static let schemaId = "nmp.nip29.group_events"
+    static let fileIdentifier = "NGEV"
 
     static func decode(from projections: [TypedProjectionEnvelope]) -> GroupChatSnapshot? {
         guard let projection = projections.first(where: {
@@ -83,8 +83,8 @@ enum TypedGroupTimelineDecoder {
     static func decode(bytes: Data) -> GroupChatSnapshot? {
         guard !bytes.isEmpty else { return nil }
         var buffer = ByteBuffer(data: bytes)
-        let reader: nmp_nip29_GroupTimelineSnapshot = getRoot(byteBuffer: &buffer)
-        return TypedProjectionGlue.groupTimeline(reader)
+        let reader: nmp_nip29_GroupEventsSnapshot = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.groupEvents(reader)
     }
 }
 

@@ -12,7 +12,7 @@ use nmp_app_29er::{
 use nmp_core::refs::{RefProfileStore, REFS_PROFILE_KEY};
 use nmp_core::substrate::{ObservedProjection, ObservedProjectionRegistrar};
 use nmp_core::{ObservedProjectionId, ObservedProjectionSink};
-use nmp_ffi::{nmp_free_string, GroupFeedHandle, NmpApp};
+use nmp_ffi::{nmp_free_string, GroupFeedToken, NmpApp};
 use nmp_nip29::projection::{
     DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot,
     GroupEvent as GroupChatMessage, GroupEventsProjection, JoinedGroupsProjection,
@@ -217,9 +217,11 @@ impl Default for IdentityState {
     }
 }
 
-/// A per-group `GroupEventsProjection` opened via `open_group_events_with_reader`.
-/// The LRU map keeps up to `CHAT_LRU_LIMIT` entries so switching back to a
-/// recently visited channel skips a full re-open.
+/// A selected `GroupEventsProjection` returned by NMP's canonical group-events
+/// door. Re-opening a group replaces the NMP singleton group-events session, so
+/// the map is only a short-lived reader cache; it does not own observers. The
+/// LRU map keeps up to `CHAT_LRU_LIMIT` entries so switching back to a recently
+/// visited channel skips a full re-open.
 const CHAT_LRU_LIMIT: usize = 10;
 struct ChatEntry {
     projection: Arc<GroupEventsProjection>,
@@ -347,7 +349,7 @@ pub struct App {
     chats: HashMap<String, ChatEntry>,
     profile_update_bridge: Option<Box<ProfileUpdateBridge>>,
     claimed_profile_authors: HashSet<String>,
-    discovery_handle: Option<GroupFeedHandle>,
+    discovery_handle: Option<GroupFeedToken>,
     group_tree_observer_id: Option<ObservedProjectionId>,
     latest: ProjectionView,
     screen: Screen,
@@ -499,7 +501,7 @@ impl App {
                 80,
             ));
             if tree_observer_id.0 == 0 {
-                discovery_handle.close();
+                app_ref.close_group_feed_token(discovery_handle);
                 nmp_ffi::nmp_app_free(app);
                 anyhow::bail!("failed to open group-tree observer");
             }
@@ -728,7 +730,7 @@ impl App {
                 }
             }
             if !self.app_ptr.is_null() {
-                // v0.8.4: open a group-events reader for kinds 9 + 11.
+                // Open a group-events reader for kinds 9 + 11.
                 let chat = unsafe {
                     (&*self.app_ptr).open_group_events_with_reader(
                         group.clone(),
@@ -1123,11 +1125,10 @@ impl Drop for App {
                 app.close_observed_projection(id);
             }
             if let Some(handle) = self.discovery_handle.take() {
-                // SAFETY: the handle was opened against this live app and is
-                // consumed exactly once during `App` teardown.
-                unsafe { handle.close(); }
+                app.close_group_feed_token(handle);
             }
             app.close_joined_groups();
+            app.close_group_events();
         }
     }
 }
