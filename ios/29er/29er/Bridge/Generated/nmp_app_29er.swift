@@ -509,25 +509,40 @@ fileprivate struct FfiConverterData: FfiConverterRustBuffer {
  * Arc-wrapped 29er native runtime.
  */
 public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
-    
+
     /**
      * Add a relay. `role` is an NMP relay-role token (e.g. `"both"`).
      */
-    func addRelay(url: String, role: String) 
-    
+    func addRelay(url: String, role: String)
+
+    /**
+     * Close the open group-chat session (idempotent, D6).
+     */
+    func closeGroupChat()
+
+    /**
+     * Close the open group-discovery session (idempotent, D6).
+     */
+    func closeGroupDiscovery()
+
+    /**
+     * Close the open roster session (idempotent, D6).
+     */
+    func closeGroupRoster()
+
     /**
      * Reconfigure rendering limits without restarting (same clamps as `start`).
      */
-    func configure(visibleLimit: UInt32, emitHz: UInt32) 
-    
+    func configure(visibleLimit: UInt32, emitHz: UInt32)
+
     /**
      * Declare that 29er consumes every kernel-owned built-in Tier-2
      * projection (full client). Pre-start; idempotent. Replaces the deleted
      * C-ABI symbol `nmp_app_consume_all_builtin_projections` /
      * `nmp_app_29er_declare_consumed_projections`.
      */
-    func declareConsumedProjections() 
-    
+    func declareConsumedProjections()
+
     /**
      * ADR-0055 Rung 3 — declare that 29er's runtime owns the NMP cache-merge
      * layer (D3-3) so the kernel may omit `Unchanged` projections from the
@@ -536,7 +551,7 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * is unavailable (informational — the kernel then emits full rows).
      */
     func declareIncrementalApply()  -> Bool
-    
+
     /**
      * Dispatch a pre-built `DispatchEnvelope` (the generic byte lane,
      * ADR-0071). This is the one dispatch verb this PR exposes on the
@@ -544,54 +559,122 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * ([`crate::dispatch::dispatch_nip29_action`]) is PR-3's job to wire in.
      */
     func dispatchAction(envelope: Data)  -> DispatchOutcome
-    
+
+    /**
+     * Dispatch a NIP-29 action through the typed per-namespace byte doorway
+     * (join/leave/create-group/post-chat-message/etc.). Thin wrapper over
+     * [`crate::dispatch::dispatch_nip29_action`] — the same encoder the
+     * native Rust TUI dispatches every NIP-29 action through. D6
+     * fail-closed: an unknown namespace or a malformed body returns a
+     * populated [`DispatchOutcome::error`], never a panic.
+     */
+    func dispatchNip29Action(namespace: String, bodyJson: String)  -> DispatchOutcome
+
     /**
      * Actor-liveness probe (ADR-0028). `true` while the actor thread runs.
      */
     func isAlive()  -> Bool
-    
+
     /**
      * Report iOS scenePhase = `.background`. Fire-and-forget.
      */
-    func lifecycleBackground() 
-    
+    func lifecycleBackground()
+
     /**
      * Report iOS scenePhase = `.active`. Fire-and-forget.
      */
-    func lifecycleForeground() 
-    
+    func lifecycleForeground()
+
+    /**
+     * Mark a group's direct kind:9 messages read inside the open group-tree
+     * composition. `local_id` is the group's bare local id (NOT a
+     * `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read` /
+     * the deleted C-ABI's `nmp_app_29er_mark_group_read`). The next tree
+     * snapshot folds this into the group's aggregate unread count. No-op
+     * when no discovery session is open (D6).
+     */
+    func markGroupRead(localId: String)
+
+    /**
+     * Open the group-chat (kind:9 + kind:11) read session for one group.
+     * `group_id_json` is a JSON [`GroupId`] object:
+     * `{"host_relay_url":"wss://groups.example.com","local_id":"room"}`.
+     * Replaces any previously open chat session. `false` (D6) on malformed
+     * JSON.
+     */
+    func openGroupChat(groupIdJson: String)  -> Bool
+
+    /**
+     * Open a NIP-29 group-discovery session for one host relay: NMP's
+     * canonical discovery + joined-groups doors, plus the 29er-owned kind:9
+     * group-tree composite (per-group unread + last-message preview +
+     * viewer membership), folded into the `"nmp.29er.group_tree"` typed
+     * snapshot the iOS shell reads through [`crate::UpdateSink`].
+     *
+     * Replaces any previously open discovery session. `false` (D6) on an
+     * empty `host_relay_url` or if the kernel refuses the kind:9 observed
+     * projection. Does NOT dispatch `nmp.nip29.discover` itself — call
+     * [`Self::dispatch_nip29_action`] for that (mirrors the deleted C-ABI:
+     * open is a pure read-session open, discovery is a separate action).
+     */
+    func openGroupDiscovery(hostRelayUrl: String)  -> Bool
+
+    /**
+     * Open the member-roster read session for one group. `group_id_json` is
+     * a JSON [`GroupId`] object (same shape as [`Self::open_group_chat`]).
+     * Replaces `select_group_members`'s old C-ABI no-op (the dedicated
+     * roster door — `nmp_native_runtime::open_nip29_group_roster_session` —
+     * now exists; this wires it). `false` (D6) on malformed JSON.
+     */
+    func openGroupRoster(groupIdJson: String)  -> Bool
+
+    /**
+     * Refresh the group-discovery session after a local store reset.
+     *
+     * Restores the feature dropped when PR-1 deleted the C-ABI's
+     * `nmp_app_29er_refresh_group_discovery` (see `git show
+     * 99832a1:crates/nmp-app-29er/src/ffi.rs`). Rust owns the read-model
+     * lifecycle: tears down the previous discovery/tree/joined composition
+     * UNCONDITIONALLY (the old handle must not be reused after this call,
+     * even on invalid input), opens a fresh composition for
+     * `host_relay_url`, and re-dispatches `nmp.nip29.discover` for that
+     * relay. `false` on an empty relay or if the fresh composition or the
+     * re-dispatch fails.
+     */
+    func refreshGroupDiscovery(hostRelayUrl: String)  -> Bool
+
     /**
      * Remove an identity; the actor owns the active-account transition.
      */
-    func removeAccount(identityId: String) 
-    
+    func removeAccount(identityId: String)
+
     /**
      * Remove a relay.
      */
-    func removeRelay(url: String) 
-    
+    func removeRelay(url: String)
+
     /**
      * Reset transient kernel state.
      */
-    func reset() 
-    
+    func reset()
+
     /**
      * Retry a parked publish-outbox row by its handle.
      */
-    func retryPublish(handle: String) 
-    
+    func retryPublish(handle: String)
+
     /**
      * Seed 29er's Rust-owned default relay set (D7). `true` when ≥1 relay was
      * handed to the kernel.
      */
     func seedDefaultRelays()  -> Bool
-    
+
     /**
      * Seed relays from a `[["url","role"],…]` JSON array (the `NMP_TEST_RELAYS`
      * override). `false` on malformed/empty so the caller falls back.
      */
     func seedRelaysFromJson(json: String)  -> Bool
-    
+
     /**
      * Register (or clear) the native keyring capability handler. Must be
      * called before [`TwentyNinerApp::start`] so the handler is in place for
@@ -603,44 +686,44 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * Re-entrancy is forbidden: calling this from inside
      * `on_capability_request` deadlocks the gate.
      */
-    func setCapabilityCallback(sink: CapabilitySink?) 
-    
+    func setCapabilityCallback(sink: CapabilitySink?)
+
     /**
      * Set the LMDB storage directory (pre-start). Empty clears it. Returns
      * `true` when accepted (`NmpConfigStatus::Ok`).
      */
     func setStoragePath(path: String)  -> Bool
-    
+
     /**
      * Register (or clear) the NMPU frame observer. After return the previous
      * sink is neither registered nor mid-invocation (quiescence). Mirrors
      * `nmp-uniffi::NmpApp::set_update_sink`.
      */
-    func setUpdateSink(sink: UpdateSink?) 
-    
+    func setUpdateSink(sink: UpdateSink?)
+
     /**
      * Idempotent teardown: clears the sink, sends Shutdown, joins threads.
      */
-    func shutdown() 
-    
+    func shutdown()
+
     /**
      * Sign in with a local nsec and (when `make_active`) activate it. The
      * nsec is wiped on drop (`Zeroizing`). D004: handed to NMP once.
      */
-    func signinNsec(nsec: String, makeActive: Bool) 
-    
+    func signinNsec(nsec: String, makeActive: Bool)
+
     /**
      * Start the runtime actor. Clamp parity with `nmp-uniffi`: `visible_limit
      * == 0` → default; else clamp(1..=500). `emit_hz == 0` → default; else
      * clamp(1..=12).
      */
-    func start(visibleLimit: UInt32, emitHz: UInt32) 
-    
+    func start(visibleLimit: UInt32, emitHz: UInt32)
+
     /**
      * Pause event processing (no data loss).
      */
-    func stop() 
-    
+    func stop()
+
 }
 /**
  * Arc-wrapped 29er native runtime.
@@ -705,9 +788,9 @@ public convenience init() {
         try! rustCall { uniffi_nmp_app_29er_fn_free_twentyninerapp(pointer, $0) }
     }
 
-    
 
-    
+
+
     /**
      * Add a relay. `role` is an NMP relay-role token (e.g. `"both"`).
      */
@@ -718,7 +801,34 @@ open func addRelay(url: String, role: String)  {try! rustCall() {
     )
 }
 }
-    
+
+    /**
+     * Close the open group-chat session (idempotent, D6).
+     */
+open func closeGroupChat()  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_close_group_chat(self.uniffiClonePointer(),$0
+    )
+}
+}
+
+    /**
+     * Close the open group-discovery session (idempotent, D6).
+     */
+open func closeGroupDiscovery()  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_close_group_discovery(self.uniffiClonePointer(),$0
+    )
+}
+}
+
+    /**
+     * Close the open roster session (idempotent, D6).
+     */
+open func closeGroupRoster()  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_close_group_roster(self.uniffiClonePointer(),$0
+    )
+}
+}
+
     /**
      * Reconfigure rendering limits without restarting (same clamps as `start`).
      */
@@ -729,7 +839,7 @@ open func configure(visibleLimit: UInt32, emitHz: UInt32)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Declare that 29er consumes every kernel-owned built-in Tier-2
      * projection (full client). Pre-start; idempotent. Replaces the deleted
@@ -741,7 +851,7 @@ open func declareConsumedProjections()  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * ADR-0055 Rung 3 — declare that 29er's runtime owns the NMP cache-merge
      * layer (D3-3) so the kernel may omit `Unchanged` projections from the
@@ -755,7 +865,7 @@ open func declareIncrementalApply() -> Bool  {
     )
 })
 }
-    
+
     /**
      * Dispatch a pre-built `DispatchEnvelope` (the generic byte lane,
      * ADR-0071). This is the one dispatch verb this PR exposes on the
@@ -769,7 +879,24 @@ open func dispatchAction(envelope: Data) -> DispatchOutcome  {
     )
 })
 }
-    
+
+    /**
+     * Dispatch a NIP-29 action through the typed per-namespace byte doorway
+     * (join/leave/create-group/post-chat-message/etc.). Thin wrapper over
+     * [`crate::dispatch::dispatch_nip29_action`] — the same encoder the
+     * native Rust TUI dispatches every NIP-29 action through. D6
+     * fail-closed: an unknown namespace or a malformed body returns a
+     * populated [`DispatchOutcome::error`], never a panic.
+     */
+open func dispatchNip29Action(namespace: String, bodyJson: String) -> DispatchOutcome  {
+    return try!  FfiConverterTypeDispatchOutcome_lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_dispatch_nip29_action(self.uniffiClonePointer(),
+        FfiConverterString.lower(namespace),
+        FfiConverterString.lower(bodyJson),$0
+    )
+})
+}
+
     /**
      * Actor-liveness probe (ADR-0028). `true` while the actor thread runs.
      */
@@ -779,7 +906,7 @@ open func isAlive() -> Bool  {
     )
 })
 }
-    
+
     /**
      * Report iOS scenePhase = `.background`. Fire-and-forget.
      */
@@ -788,7 +915,7 @@ open func lifecycleBackground()  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Report iOS scenePhase = `.active`. Fire-and-forget.
      */
@@ -797,7 +924,94 @@ open func lifecycleForeground()  {try! rustCall() {
     )
 }
 }
-    
+
+    /**
+     * Mark a group's direct kind:9 messages read inside the open group-tree
+     * composition. `local_id` is the group's bare local id (NOT a
+     * `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read` /
+     * the deleted C-ABI's `nmp_app_29er_mark_group_read`). The next tree
+     * snapshot folds this into the group's aggregate unread count. No-op
+     * when no discovery session is open (D6).
+     */
+open func markGroupRead(localId: String)  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_mark_group_read(self.uniffiClonePointer(),
+        FfiConverterString.lower(localId),$0
+    )
+}
+}
+
+    /**
+     * Open the group-chat (kind:9 + kind:11) read session for one group.
+     * `group_id_json` is a JSON [`GroupId`] object:
+     * `{"host_relay_url":"wss://groups.example.com","local_id":"room"}`.
+     * Replaces any previously open chat session. `false` (D6) on malformed
+     * JSON.
+     */
+open func openGroupChat(groupIdJson: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_open_group_chat(self.uniffiClonePointer(),
+        FfiConverterString.lower(groupIdJson),$0
+    )
+})
+}
+
+    /**
+     * Open a NIP-29 group-discovery session for one host relay: NMP's
+     * canonical discovery + joined-groups doors, plus the 29er-owned kind:9
+     * group-tree composite (per-group unread + last-message preview +
+     * viewer membership), folded into the `"nmp.29er.group_tree"` typed
+     * snapshot the iOS shell reads through [`crate::UpdateSink`].
+     *
+     * Replaces any previously open discovery session. `false` (D6) on an
+     * empty `host_relay_url` or if the kernel refuses the kind:9 observed
+     * projection. Does NOT dispatch `nmp.nip29.discover` itself — call
+     * [`Self::dispatch_nip29_action`] for that (mirrors the deleted C-ABI:
+     * open is a pure read-session open, discovery is a separate action).
+     */
+open func openGroupDiscovery(hostRelayUrl: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_open_group_discovery(self.uniffiClonePointer(),
+        FfiConverterString.lower(hostRelayUrl),$0
+    )
+})
+}
+
+    /**
+     * Open the member-roster read session for one group. `group_id_json` is
+     * a JSON [`GroupId`] object (same shape as [`Self::open_group_chat`]).
+     * Replaces `select_group_members`'s old C-ABI no-op (the dedicated
+     * roster door — `nmp_native_runtime::open_nip29_group_roster_session` —
+     * now exists; this wires it). `false` (D6) on malformed JSON.
+     */
+open func openGroupRoster(groupIdJson: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_open_group_roster(self.uniffiClonePointer(),
+        FfiConverterString.lower(groupIdJson),$0
+    )
+})
+}
+
+    /**
+     * Refresh the group-discovery session after a local store reset.
+     *
+     * Restores the feature dropped when PR-1 deleted the C-ABI's
+     * `nmp_app_29er_refresh_group_discovery` (see `git show
+     * 99832a1:crates/nmp-app-29er/src/ffi.rs`). Rust owns the read-model
+     * lifecycle: tears down the previous discovery/tree/joined composition
+     * UNCONDITIONALLY (the old handle must not be reused after this call,
+     * even on invalid input), opens a fresh composition for
+     * `host_relay_url`, and re-dispatches `nmp.nip29.discover` for that
+     * relay. `false` on an empty relay or if the fresh composition or the
+     * re-dispatch fails.
+     */
+open func refreshGroupDiscovery(hostRelayUrl: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_refresh_group_discovery(self.uniffiClonePointer(),
+        FfiConverterString.lower(hostRelayUrl),$0
+    )
+})
+}
+
     /**
      * Remove an identity; the actor owns the active-account transition.
      */
@@ -807,7 +1021,7 @@ open func removeAccount(identityId: String)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Remove a relay.
      */
@@ -817,7 +1031,7 @@ open func removeRelay(url: String)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Reset transient kernel state.
      */
@@ -826,7 +1040,7 @@ open func reset()  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Retry a parked publish-outbox row by its handle.
      */
@@ -836,7 +1050,7 @@ open func retryPublish(handle: String)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Seed 29er's Rust-owned default relay set (D7). `true` when ≥1 relay was
      * handed to the kernel.
@@ -847,7 +1061,7 @@ open func seedDefaultRelays() -> Bool  {
     )
 })
 }
-    
+
     /**
      * Seed relays from a `[["url","role"],…]` JSON array (the `NMP_TEST_RELAYS`
      * override). `false` on malformed/empty so the caller falls back.
@@ -859,7 +1073,7 @@ open func seedRelaysFromJson(json: String) -> Bool  {
     )
 })
 }
-    
+
     /**
      * Register (or clear) the native keyring capability handler. Must be
      * called before [`TwentyNinerApp::start`] so the handler is in place for
@@ -877,7 +1091,7 @@ open func setCapabilityCallback(sink: CapabilitySink?)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Set the LMDB storage directory (pre-start). Empty clears it. Returns
      * `true` when accepted (`NmpConfigStatus::Ok`).
@@ -889,7 +1103,7 @@ open func setStoragePath(path: String) -> Bool  {
     )
 })
 }
-    
+
     /**
      * Register (or clear) the NMPU frame observer. After return the previous
      * sink is neither registered nor mid-invocation (quiescence). Mirrors
@@ -901,7 +1115,7 @@ open func setUpdateSink(sink: UpdateSink?)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Idempotent teardown: clears the sink, sends Shutdown, joins threads.
      */
@@ -910,7 +1124,7 @@ open func shutdown()  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Sign in with a local nsec and (when `make_active`) activate it. The
      * nsec is wiped on drop (`Zeroizing`). D004: handed to NMP once.
@@ -922,7 +1136,7 @@ open func signinNsec(nsec: String, makeActive: Bool)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Start the runtime actor. Clamp parity with `nmp-uniffi`: `visible_limit
      * == 0` → default; else clamp(1..=500). `emit_hz == 0` → default; else
@@ -935,7 +1149,7 @@ open func start(visibleLimit: UInt32, emitHz: UInt32)  {try! rustCall() {
     )
 }
 }
-    
+
     /**
      * Pause event processing (no data loss).
      */
@@ -944,7 +1158,7 @@ open func stop()  {try! rustCall() {
     )
 }
 }
-    
+
 
 }
 
@@ -1060,8 +1274,8 @@ public struct FfiConverterTypeDispatchOutcome: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DispatchOutcome {
         return
             try DispatchOutcome(
-                correlationId: FfiConverterOptionString.read(from: &buf), 
-                error: FfiConverterOptionString.read(from: &buf), 
+                correlationId: FfiConverterOptionString.read(from: &buf),
+                error: FfiConverterOptionString.read(from: &buf),
                 code: FfiConverterOptionString.read(from: &buf)
         )
     }
@@ -1097,9 +1311,9 @@ public func FfiConverterTypeDispatchOutcome_lower(_ value: DispatchOutcome) -> R
  * `CapabilityEnvelope` JSON back.
  */
 public protocol CapabilitySink: AnyObject, Sendable {
-    
+
     func onCapabilityRequest(requestJson: String)  -> String
-    
+
 }
 
 
@@ -1128,7 +1342,7 @@ fileprivate struct UniffiCallbackInterfaceCapabilitySink {
                 )
             }
 
-            
+
             let writeReturn = { uniffiOutReturn.pointee = FfiConverterString.lower($0) }
             uniffiTraitInterfaceCall(
                 callStatus: uniffiCallStatus,
@@ -1219,9 +1433,9 @@ public func FfiConverterCallbackInterfaceCapabilitySink_lower(_ v: CapabilitySin
  * within `on_update`; the runtime quiescence gate would deadlock.
  */
 public protocol UpdateSink: AnyObject, Sendable {
-    
-    func onUpdate(frame: Data) 
-    
+
+    func onUpdate(frame: Data)
+
 }
 
 
@@ -1250,7 +1464,7 @@ fileprivate struct UniffiCallbackInterfaceUpdateSink {
                 )
             }
 
-            
+
             let writeReturn = { () }
             uniffiTraitInterfaceCall(
                 callStatus: uniffiCallStatus,
@@ -1421,6 +1635,15 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_add_relay() != 23241) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_close_group_chat() != 895) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_close_group_discovery() != 49001) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_close_group_roster() != 11452) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_configure() != 61496) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1433,6 +1656,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_dispatch_action() != 25873) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_dispatch_nip29_action() != 63847) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_is_alive() != 43096) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -1440,6 +1666,21 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_lifecycle_foreground() != 44999) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_mark_group_read() != 47521) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_chat() != 61403) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_discovery() != 46872) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_roster() != 14552) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_refresh_group_discovery() != 9500) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_remove_account() != 63148) {

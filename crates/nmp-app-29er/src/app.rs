@@ -13,19 +13,15 @@
 //! composition root and the runtime, mirroring `nmp-uniffi`'s lifecycle/
 //! dispatch surface.
 //!
-//! ## Scope (PR-1 — the spine)
+//! ## Scope
 //!
-//! This object exposes lifecycle + the generic byte-dispatch passthrough
-//! only. NIP-29 group-discovery / group-chat typed read sessions and the
-//! `dispatchNip29Action` convenience verb are explicitly deferred:
-//!
-//! * Group-events / discovery / joined-groups typed read sessions are PR-2.
-//! * The `dispatchNip29Action` Swift-callable verb (and the relay-selector /
-//!   chat-send convenience methods) are PR-3. The underlying encoder
-//!   ([`crate::dispatch::dispatch_nip29_action`]) is ported now as a plain
-//!   Rust function — not yet exported via `#[uniffi::export]` — so the native
-//!   Rust TUI keeps working against the new pin; PR-3 wires the same function
-//!   onto this facade for Swift.
+//! PR-1 shipped lifecycle + the generic byte-dispatch passthrough. PR-2 (this
+//! crate's [`crate::group_sessions`] module) adds the NIP-29 group-discovery /
+//! group-chat / group-roster typed read sessions and the
+//! `dispatchNip29Action` convenience verb (folded into the same PR — both
+//! land in the same `impl TwentyNinerApp` extension and splitting them across
+//! two PRs would just create a merge conflict). See `crate::group_sessions`'s
+//! module doc for the session-lifecycle design.
 
 use std::sync::Arc;
 
@@ -84,7 +80,16 @@ pub trait UpdateSink: Send + Sync {
 /// Arc-wrapped 29er native runtime.
 #[derive(uniffi::Object)]
 pub struct TwentyNinerApp {
-    inner: NmpApp,
+    /// `Arc`-wrapped (not a bare `NmpApp`) because `NmpApp` is not `Clone` —
+    /// [`crate::group_sessions::GroupSessions::new`] registers an
+    /// identity-change observer closure that needs its own long-lived handle
+    /// to reopen the joined-groups door later, on the update-listener thread.
+    /// Mirrors `29er-tui::App` storing `app: Option<Arc<NmpApp>>` for the same
+    /// reason.
+    inner: Arc<NmpApp>,
+    /// NIP-29 group-discovery / group-chat / group-roster session state
+    /// (PR-2). See [`crate::group_sessions`].
+    sessions: crate::group_sessions::GroupSessions,
 }
 
 #[uniffi::export]
@@ -95,7 +100,9 @@ impl TwentyNinerApp {
     pub fn new() -> Arc<Self> {
         let mut inner = new_app();
         crate::composition::compose_29er_runtime(&mut inner);
-        Arc::new(Self { inner })
+        let inner = Arc::new(inner);
+        let sessions = crate::group_sessions::GroupSessions::new(&inner);
+        Arc::new(Self { inner, sessions })
     }
 
     /// Set the LMDB storage directory (pre-start). Empty clears it. Returns
@@ -230,9 +237,15 @@ impl TwentyNinerApp {
 
 impl TwentyNinerApp {
     /// The owned `nmp-native-runtime` app. Crate-internal accessor so sibling
-    /// modules ([`crate::capability`]) reach the runtime without making
-    /// `inner` a public field.
+    /// modules ([`crate::capability`], [`crate::group_sessions`]) reach the
+    /// runtime without making `inner` a public field.
     pub(crate) fn app(&self) -> &NmpApp {
         &self.inner
+    }
+
+    /// NIP-29 group-read session state. Crate-internal accessor used by
+    /// [`crate::group_sessions`]'s `#[uniffi::export]` methods.
+    pub(crate) fn sessions(&self) -> &crate::group_sessions::GroupSessions {
+        &self.sessions
     }
 }
