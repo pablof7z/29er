@@ -101,10 +101,19 @@ struct GroupTreeView: View {
             .presentationDetents([.large])
         }
         .navigationDestination(for: String.self) { groupId in
+            // Explicit environment pass: SwiftUI does not reliably propagate
+            // custom environment keys (nostrProfileHost) through
+            // navigationDestination closures in NavigationStack — the pushed
+            // view inherits the stack's environment, not the declaring view's.
+            // NostrAvatar + NostrProfileName inside GroupTimelineView depend on
+            // nostrProfileHost being non-nil to register profile claims; without
+            // this pass they silently no-op and profiles never resolve.
             GroupTimelineView(groupId: groupId)
+                .environment(\.nostrProfileHost, model)
         }
         .navigationDestination(for: GroupChildrenRoute.self) { route in
             GroupChildrenView(parentGroupId: route.groupId)
+                .environment(\.nostrProfileHost, model)
         }
         .task {
             // Host relay comes from the Rust-owned relay selector projection.

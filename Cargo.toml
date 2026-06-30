@@ -9,22 +9,23 @@ repository = "https://github.com/pablof7z/29er"
 version = "0.1.0"
 
 # NMP is consumed as an external git dependency — never vendored.
-# Pinned to master HEAD bdabde6da (clean-break architecture + NIP-29 wave-2 seams):
+# Pinned to master HEAD 208a3acbc (profile resolution from active pinned group relays):
 #   * nmp-ffi DELETED (#2483) -> nmp-native-runtime (NmpApp impl) + nmp-uniffi (UniFFI surface).
 #   * register_defaults() killed as a production path (ADR-0069) -> explicit composition.
 #   * typed read sessions (ADR-0070); raw ObservedProjection/open_interest crate-private.
 #   * typed actions + publish provenance (ADR-0071) via dispatch_action(Vec<u8>) byte lane.
 #   * NIP-29 group-roster projection (NGRS / nmp.nip29.group_roster) +
 #     nmp.nip29.edit_metadata action (kind:9002).
+#   * planner: resolve kind:0 from active pinned (group) relays (#2503).
 [workspace.dependencies]
-nmp-core = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "bdabde6daa0becbf7346dc6e785722ecd08ec554" }
-nmp-native-runtime = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "bdabde6daa0becbf7346dc6e785722ecd08ec554" }
-nmp-defaults = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "bdabde6daa0becbf7346dc6e785722ecd08ec554" }
-nmp-nip29 = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "bdabde6daa0becbf7346dc6e785722ecd08ec554" }
-nmp-planner = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "bdabde6daa0becbf7346dc6e785722ecd08ec554" }
-nmp-network = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "bdabde6daa0becbf7346dc6e785722ecd08ec554" }
-nmp-signer-iface = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "bdabde6daa0becbf7346dc6e785722ecd08ec554" }
-nmp-content = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "bdabde6daa0becbf7346dc6e785722ecd08ec554" }
+nmp-core = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "208a3acbc18e1a5bae7fc61bc93db05dae1751b9" }
+nmp-native-runtime = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "208a3acbc18e1a5bae7fc61bc93db05dae1751b9" }
+nmp-defaults = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "208a3acbc18e1a5bae7fc61bc93db05dae1751b9" }
+nmp-nip29 = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "208a3acbc18e1a5bae7fc61bc93db05dae1751b9" }
+nmp-planner = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "208a3acbc18e1a5bae7fc61bc93db05dae1751b9" }
+nmp-network = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "208a3acbc18e1a5bae7fc61bc93db05dae1751b9" }
+nmp-signer-iface = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "208a3acbc18e1a5bae7fc61bc93db05dae1751b9" }
+nmp-content = { git = "ssh://git@github.com/pablof7z/nostr-multi-platform.git", rev = "208a3acbc18e1a5bae7fc61bc93db05dae1751b9" }
 nmp-app-29er = { path = "crates/nmp-app-29er" }
 flatbuffers = "25.12.19"
 nostr = "0.44"
