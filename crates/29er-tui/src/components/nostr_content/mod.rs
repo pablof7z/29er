@@ -22,15 +22,11 @@ pub mod nostr_content_view;
 
 use content_tree_wire::ContentTreeWire;
 
-/// Tokenize raw Nostr event content into the renderable [`ContentTreeWire`]
-/// using the shared `nmp-content` substrate. `RenderMode::Auto` dispatches
-/// markdown vs. plain by `kind` (kind 9/11 chat → plain). This is the single
-/// place the shell turns wire content into a render tree — no shell-side
-/// parsing. Returns `None` when projection fails; callers fall back to raw text.
+/// Decode canonical NFCT `ContentTreeWire` bytes produced by Rust projections
+/// into the TUI renderer's local mirror.
 #[must_use]
-pub fn tokenize_message(content: &str, tags: &[Vec<String>], kind: u32) -> Option<ContentTreeWire> {
-    let wire =
-        nmp_content::tokenize_with_kind(content, tags, nmp_content::RenderMode::Auto, kind).to_wire();
+pub fn content_tree_from_nfct_bytes(bytes: &[u8]) -> Option<ContentTreeWire> {
+    let wire = nmp_content::wire::decode_content_tree(bytes).ok()?;
     let value = serde_json::to_value(&wire).ok()?;
     ContentTreeWire::from_value(&value)
 }

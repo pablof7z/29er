@@ -12,14 +12,14 @@ use crate::actions::Action;
 use crate::app::{Focus, RelayState, TuiProfile, TuiSnapshot};
 use crate::components::nostr_content::{
     content_render_data::{ContentProfileRenderData, ContentRenderData},
+    content_tree_from_nfct_bytes,
     content_tree_wire::ContentTreeWire,
     nostr_content_view::NostrContentView,
-    tokenize_message,
 };
 use crate::ui;
 use crate::Component;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
-use nmp_nip29::projection::GroupEvent as GroupChatMessage;
+use nmp_app_29er::group_chat::GroupChatMessage;
 use ratatui::layout::{Alignment, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -36,10 +36,6 @@ const GUTTER: u16 = 2;
 
 pub struct ChatComponent {
     messages: Vec<GroupChatMessage>,
-    /// Per-message tokenized content tree, keyed by event id. Built in
-    /// `update` from the shared `nmp-content` substrate so `draw` is pure
-    /// rendering and never re-tokenizes on every frame.
-    trees: HashMap<String, ContentTreeWire>,
     profiles: HashMap<String, TuiProfile>,
     render_data: ContentRenderData,
     my_pubkey: Option<String>,
@@ -95,7 +91,6 @@ impl ChatComponent {
     pub fn new() -> Self {
         Self {
             messages: Vec::new(),
-            trees: HashMap::new(),
             profiles: HashMap::new(),
             render_data: ContentRenderData::default(),
             my_pubkey: None,
@@ -138,19 +133,6 @@ impl ChatComponent {
         self.prev_msg_count = new_count;
 
         self.messages = s.selected_messages.clone();
-        // Tokenize any messages we have not seen yet, and drop trees for
-        // messages no longer present (e.g. channel switch). The `GroupChatMessage`
-        // projection carries no tags, so emoji-tag resolution is a no-op here.
-        let live: std::collections::HashSet<&str> =
-            self.messages.iter().map(|m| m.id.as_str()).collect();
-        self.trees.retain(|id, _| live.contains(id.as_str()));
-        for m in &self.messages {
-            if !self.trees.contains_key(&m.id) {
-                if let Some(tree) = tokenize_message(&m.content, &[], m.kind) {
-                    self.trees.insert(m.id.clone(), tree);
-                }
-            }
-        }
 
         self.profiles = s.profiles.clone();
         self.render_data =
@@ -205,11 +187,11 @@ impl ChatComponent {
     /// Rendered height of a message body at `body_width` — via the content
     /// renderer when a tree is available, else the raw-text estimate.
     fn body_height(&self, m: &GroupChatMessage, body_width: u16) -> u16 {
-        match self.trees.get(&m.id) {
-            Some(tree) => NostrContentView::new(tree)
+        match message_tree(m) {
+            Some(tree) => NostrContentView::new(&tree)
                 .render_data(Some(&self.render_data))
                 .preferred_height(body_width as usize),
-            None => Self::raw_line_count(&m.content, body_width),
+            None => Self::raw_line_count(&m.raw_content, body_width),
         }
     }
 
@@ -305,18 +287,18 @@ impl ChatComponent {
                 let body_w = content_width.saturating_sub(GUTTER).max(1);
                 let h = self.body_height(m, body_w);
                 let rect = Rect::new(GUTTER, y, body_w, h);
-                match self.trees.get(&m.id) {
+                match message_tree(m) {
                     Some(tree) => {
                         sv.render_widget(
-                            NostrContentView::new(tree).render_data(Some(&self.render_data)),
+                            NostrContentView::new(&tree).render_data(Some(&self.render_data)),
                             rect,
                         );
                     }
                     None => {
-                        // Tokenization fell through — render the raw content so
+                        // Projection decode fell through — render the raw content so
                         // no message is ever dropped.
                         sv.render_widget(
-                            Paragraph::new(m.content.clone())
+                            Paragraph::new(m.raw_content.clone())
                                 .style(Style::default().fg(ui::TEXT))
                                 .wrap(Wrap { trim: false }),
                             rect,
@@ -326,6 +308,10 @@ impl ChatComponent {
             }
         }
     }
+}
+
+fn message_tree(message: &GroupChatMessage) -> Option<ContentTreeWire> {
+    content_tree_from_nfct_bytes(&message.content_tree_bytes)
 }
 
 impl Component for ChatComponent {
@@ -482,12 +468,19 @@ mod tests {
     use ratatui::Terminal;
 
     fn msg(pk: &str, ts: u64, c: &str) -> GroupChatMessage {
+        let tree = nmp_content::tokenize_with_kind(c, &[], nmp_content::RenderMode::Auto, 9)
+            .to_wire();
         GroupChatMessage {
             id: format!("{pk}{ts}"),
             pubkey: pk.to_string(),
-            content: c.to_string(),
+            raw_content: c.to_string(),
+            copy_text: c.to_string(),
             created_at: ts,
             kind: 9,
+            content_tree_bytes: nmp_content::wire::encode_content_tree(&tree),
+            mention_pubkeys: Vec::new(),
+            event_ref_uris: Vec::new(),
+            event_ref_primary_ids: Vec::new(),
         }
     }
 

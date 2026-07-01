@@ -422,22 +422,6 @@ fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
-    typealias FfiType = Int32
-    typealias SwiftType = Int32
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
-        return try lift(readInt(&buf))
-    }
-
-    public static func write(_ value: Int32, into buf: inout [UInt8]) {
-        writeInt(&buf, lower(value))
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterBool : FfiConverter {
     typealias FfiType = Int8
     typealias SwiftType = Bool
@@ -1757,16 +1741,6 @@ fileprivate struct FfiConverterOptionCallbackInterfaceUpdateSink: FfiConverterRu
         }
     }
 }
-public func tokenizeContent(content: String, tagsJson: String?, mode: Int32, kind: UInt32) -> String  {
-    return try!  FfiConverterString.lift(try! rustCall() {
-    uniffi_nmp_app_29er_fn_func_tokenize_content(
-        FfiConverterString.lower(content),
-        FfiConverterOptionString.lower(tagsJson),
-        FfiConverterInt32.lower(mode),
-        FfiConverterUInt32.lower(kind),$0
-    )
-})
-}
 
 private enum InitializationResult {
     case ok
@@ -1782,9 +1756,6 @@ private let initializationResult: InitializationResult = {
     let scaffolding_contract_version = ffi_nmp_app_29er_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
-    }
-    if (uniffi_nmp_app_29er_checksum_func_tokenize_content() != 42398) {
-        return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_add_relay() != 23241) {
         return InitializationResult.apiChecksumMismatch

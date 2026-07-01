@@ -497,11 +497,6 @@ void uniffi_nmp_app_29er_fn_init_callback_vtable_capabilitysink(const UniffiVTab
 void uniffi_nmp_app_29er_fn_init_callback_vtable_updatesink(const UniffiVTableCallbackInterfaceUpdateSink* _Nonnull vtable
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_FN_FUNC_TOKENIZE_CONTENT
-#define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_FN_FUNC_TOKENIZE_CONTENT
-RustBuffer uniffi_nmp_app_29er_fn_func_tokenize_content(RustBuffer content, RustBuffer tags_json, int32_t mode, uint32_t kind, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_FFI_NMP_APP_29ER_RUSTBUFFER_ALLOC
 #define UNIFFI_FFIDEF_FFI_NMP_APP_29ER_RUSTBUFFER_ALLOC
 RustBuffer ffi_nmp_app_29er_rustbuffer_alloc(uint64_t size, RustCallStatus *_Nonnull out_status
@@ -780,12 +775,6 @@ void ffi_nmp_app_29er_rust_future_free_void(uint64_t handle
 #ifndef UNIFFI_FFIDEF_FFI_NMP_APP_29ER_RUST_FUTURE_COMPLETE_VOID
 #define UNIFFI_FFIDEF_FFI_NMP_APP_29ER_RUST_FUTURE_COMPLETE_VOID
 void ffi_nmp_app_29er_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonnull out_status
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_FUNC_TOKENIZE_CONTENT
-#define UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_FUNC_TOKENIZE_CONTENT
-uint16_t uniffi_nmp_app_29er_checksum_func_tokenize_content(void
-
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_NMP_APP_29ER_CHECKSUM_METHOD_TWENTYNINERAPP_ADD_RELAY

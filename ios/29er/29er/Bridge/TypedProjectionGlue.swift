@@ -22,20 +22,150 @@ enum TypedProjectionGlue {
         reader.hasActiveAccount ? (reader.pubkey ?? "") : nil
     }
 
-    // MARK: nmp.nip29.group_events → GroupChatSnapshot
+    // MARK: nmp.29er.group_chat -> GroupChatSnapshot
 
-    static func groupEvents(_ reader: nmp_nip29_GroupEventsSnapshot) -> GroupChatSnapshot {
+    static func groupChat(_ reader: nmp_app_29er_GroupChatSnapshot) -> GroupChatSnapshot {
         GroupChatSnapshot(
-            messages: reader.events.map { row in
+            messages: reader.messages.map { row in
                 GroupChatMessage(
                     id: row.id ?? "",
                     pubkey: row.pubkey ?? "",
-                    content: row.content ?? "",
+                    rawContent: row.rawContent ?? "",
+                    copyText: row.copyText ?? "",
                     createdAt: row.createdAt,
-                    kind: row.kind
+                    kind: row.kind,
+                    contentTree: contentTree(fromNFCTBytes: row.contentTreeBytes.map { $0 }),
+                    mentionPubkeys: row.mentionPubkeys.map { $0 ?? "" },
+                    eventRefUris: row.eventRefUris.map { $0 ?? "" },
+                    eventRefPrimaryIds: row.eventRefPrimaryIds.map { $0 ?? "" }
                 )
-            }
+            },
+            profileDemandPubkeys: reader.profileDemandPubkeys.map { $0 ?? "" },
+            eventRefUris: reader.eventRefUris.map { $0 ?? "" },
+            eventRefPrimaryIds: reader.eventRefPrimaryIds.map { $0 ?? "" }
         )
+    }
+
+    private static func contentTree(fromNFCTBytes bytes: [UInt8]) -> ContentTreeWire? {
+        guard !bytes.isEmpty else { return nil }
+        var buffer = ByteBuffer(data: Data(bytes))
+        let reader: nmp_content_ContentTreeWire = getRoot(byteBuffer: &buffer)
+        return contentTree(reader)
+    }
+
+    private static func contentTree(_ reader: nmp_content_ContentTreeWire) -> ContentTreeWire {
+        ContentTreeWire(
+            nodes: reader.nodes.map(nostrNode),
+            roots: reader.roots.map { $0 },
+            mode: renderMode(reader.mode)
+        )
+    }
+
+    private static func nostrNode(_ row: nmp_content_WireNode) -> NostrWireNode {
+        switch row.kind {
+        case .text:
+            return .text(row.text ?? "")
+        case .mention:
+            guard let uri = row.nostrUri else { return .placeholder(reason: .unresolvedUri) }
+            return .mention(nostrUri(uri))
+        case .eventref:
+            guard let uri = row.nostrUri else { return .placeholder(reason: .unresolvedUri) }
+            return .eventRef(nostrUri(uri))
+        case .hashtag:
+            return .hashtag(row.tag ?? "")
+        case .url:
+            return .url(row.url ?? "")
+        case .media:
+            return .media(urls: row.mediaUrls.map { $0 ?? "" }, kind: mediaKind(row.mediaKind))
+        case .emoji:
+            return .emoji(shortcode: row.shortcode ?? "", url: row.emojiUrl)
+        case .invoice:
+            return .invoice(invoiceKind(row.invoiceKind, payload: row.invoicePayload ?? ""))
+        case .heading:
+            return .heading(level: row.level, children: row.children.map { $0 })
+        case .paragraph:
+            return .paragraph(children: row.children.map { $0 })
+        case .blockquote:
+            return .blockQuote(children: row.children.map { $0 })
+        case .codeblock:
+            return .codeBlock(info: row.codeInfo, body: row.text ?? "")
+        case .list:
+            let orderedStart = row.orderedStart >= 0 ? UInt64(row.orderedStart) : nil
+            return .list(
+                orderedStart: orderedStart,
+                items: row.listItems.map { $0.children.map { $0 } }
+            )
+        case .rule:
+            return .rule
+        case .emphasis:
+            return .emphasis(children: row.children.map { $0 })
+        case .strong:
+            return .strong(children: row.children.map { $0 })
+        case .inlinecode:
+            return .inlineCode(row.text ?? "")
+        case .link:
+            return .link(children: row.children.map { $0 }, href: row.href)
+        case .image:
+            return .image(alt: row.alt ?? "", title: row.imgTitle, src: row.url)
+        case .softbreak:
+            return .softBreak
+        case .hardbreak:
+            return .hardBreak
+        case .placeholder:
+            return .placeholder(reason: placeholderReason(row.placeholderReason))
+        }
+    }
+
+    private static func nostrUri(_ row: nmp_content_WireNostrUri) -> NostrWireUri {
+        NostrWireUri(
+            uri: row.uri ?? "",
+            kind: uriKind(row.kind),
+            primaryId: row.primaryId ?? "",
+            relays: row.relays.map { $0 ?? "" },
+            author: row.author,
+            eventKind: row.eventKind == 0 ? nil : row.eventKind
+        )
+    }
+
+    private static func uriKind(_ kind: nmp_content_WireNostrUriKind) -> NostrWireUriKind {
+        switch kind {
+        case .profile: return .profile
+        case .event: return .event
+        case .address: return .address
+        }
+    }
+
+    private static func mediaKind(_ raw: UInt8) -> NostrMediaKind {
+        switch raw {
+        case 1: return .video
+        case 2: return .audio
+        default: return .image
+        }
+    }
+
+    private static func invoiceKind(_ raw: UInt8, payload: String) -> NostrWireInvoice {
+        switch raw {
+        case 1: return .bolt12(payload)
+        case 2: return .cashu(payload)
+        default: return .bolt11(payload)
+        }
+    }
+
+    private static func placeholderReason(
+        _ reason: nmp_content_PlaceholderReason
+    ) -> NostrWirePlaceholderReason {
+        switch reason {
+        case .unresolveduri: return .unresolvedUri
+        case .depthlimit: return .depthLimit
+        }
+    }
+
+    private static func renderMode(_ mode: nmp_content_RenderMode) -> String {
+        switch mode {
+        case .auto: return "Auto"
+        case .markdown: return "Markdown"
+        case .text: return "Plain"
+        }
     }
 
     // MARK: nmp.nip29.group_roster -> GroupRosterSnapshot

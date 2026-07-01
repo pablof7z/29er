@@ -45,8 +45,9 @@ final class KernelModel: ObservableObject {
     /// this from the NIP-29 discovery projection; Swift only renders it.
     @Published var typedGroupTree: GroupTreeSnapshot?
 
-    /// Typed `nmp.nip29.group_events` sidecar (`NGEV`). Rust owns the
-    /// selected group's event filter and newest-first ordering; Swift renders it.
+    /// Typed app-owned `nmp.29er.group_chat` sidecar (`N29C`). Rust owns the
+    /// selected group's event filter, newest-first ordering, content tree, and
+    /// demand lists; Swift renders it.
     @Published var typedGroupChat: GroupChatSnapshot?
 
     /// Typed `nmp.nip29.group_roster` sidecar (`NGRS`). Rust owns selected

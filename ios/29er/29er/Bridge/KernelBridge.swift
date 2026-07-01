@@ -327,7 +327,7 @@ extension KernelHandle {
                 // (mirroring Chirp's `KernelBridge+Decoding.swift`).
                 let typedDiscoveredGroups = TypedDiscoveredGroupsDecoder.decode(from: envelopes)
                 let typedGroupTree = TypedGroupTreeDecoder.decode(from: envelopes)
-                let typedGroupChat = TypedGroupEventsDecoder.decode(from: envelopes)
+                let typedGroupChat = TypedGroupChatDecoder.decode(from: envelopes)
                 let typedGroupRoster = TypedGroupRosterDecoder.decode(from: envelopes)
                 let typedPublishOutbox = TypedPublishOutboxDecoder.decode(from: envelopes)
                 let typedActiveAccount = TypedActiveAccountDecoder.decode(from: envelopes)

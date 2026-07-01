@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use nmp_app_29er::group_chat::{GroupChatMessage, GroupChatProjection};
 use nmp_app_29er::group_tree::{GroupTreeMessageState, GroupTreeProjection};
 use nmp_app_29er::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use nmp_app_29er::{compose_29er_runtime, dispatch_nip29_action, DispatchOutcome};
@@ -21,8 +22,7 @@ use nmp_native_runtime::{
     Nip29GroupEventsSession, Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
 };
 use nmp_nip29::projection::{
-    DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot,
-    GroupEvent as GroupChatMessage, GroupEventsProjection, JoinedGroupsProjection,
+    DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, JoinedGroupsProjection,
 };
 use nmp_nip29::GroupId;
 use tokio::sync::watch;
@@ -248,7 +248,7 @@ pub struct SharedProjections {
     /// closure, which runs on the actor thread.
     pub joined_handle: Mutex<Option<Nip29JoinedGroupsHandle>>,
     pub active_account: Mutex<ActiveAccountSlot>,
-    pub selected_chat: Mutex<Option<Arc<GroupEventsProjection>>>,
+    pub selected_chat: Mutex<Option<Arc<GroupChatProjection>>>,
     pub selected_group: Mutex<Option<GroupId>>,
     pub profile_refs: Mutex<RefProfileStore>,
     /// Set on each pushed snapshot that returns non-empty data; drives relay-state indicator.
@@ -274,7 +274,7 @@ impl SharedProjections {
             .selected_chat
             .lock()
             .ok()
-            .and_then(|c| c.as_ref().map(|c| c.snapshot().events))
+            .and_then(|c| c.as_ref().map(|c| c.snapshot().messages))
             .unwrap_or_default();
         // The per-member roster API was removed in v0.8.0; no source yet.
         let members: Vec<GroupMemberRow> = Vec::new();
@@ -629,7 +629,7 @@ impl App {
                     return m.id == *eid;
                 }
                 // Fallback: trimmed content equality (same pubkey already verified).
-                m.content.trim() == item.content.trim()
+                m.raw_content.trim() == item.content.trim()
             });
             if confirmed {
                 item.status = OutboxStatus::Confirmed;
@@ -688,7 +688,10 @@ impl App {
             .latest
             .selected_messages
             .iter()
-            .map(|message| message.pubkey.clone())
+            .flat_map(|message| {
+                std::iter::once(message.pubkey.clone())
+                    .chain(message.mention_pubkeys.iter().cloned())
+            })
             .filter(|pubkey| !pubkey.is_empty())
             .collect();
         for pubkey in visible.difference(&self.claimed_profile_authors) {
@@ -741,6 +744,9 @@ impl App {
         // one replaces (and closes) the prior one, so there is no per-group
         // cache to maintain — just track the latest handle for teardown.
         if let Some(app) = &self.app {
+            if let Some(handle) = self.group_events_handle.take() {
+                app.close_nip29_group_events_session(handle);
+            }
             let (handle, reader) =
                 app.open_nip29_group_events_session_with_reader(Nip29GroupEventsSession::new(
                     group.clone(),
@@ -748,7 +754,7 @@ impl App {
                 ));
             self.group_events_handle = Some(handle);
             if let Ok(mut slot) = self.shared.selected_chat.lock() {
-                *slot = Some(reader);
+                *slot = Some(Arc::new(GroupChatProjection::new(reader)));
             }
         }
         if let Ok(mut g) = self.shared.selected_group.lock() {
@@ -1299,7 +1305,6 @@ mod tests {
     use super::*;
     use nmp_app_29er::kinds::KIND_CHAT_MESSAGE;
     use nmp_core::substrate::KernelEvent;
-    use nmp_nip29::projection::GroupEvent as GroupChatMessage;
 
     fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
         DiscoveredGroup {
@@ -1340,6 +1345,24 @@ mod tests {
     fn make_app() -> (App, watch::Receiver<ProjectionView>) {
         let (tx, rx) = watch::channel(ProjectionView::default());
         (App::new("wss://relay.example.com", tx), rx)
+    }
+
+    fn chat_msg(id: &str, pubkey: &str, created_at: u64, content: &str) -> GroupChatMessage {
+        let tree =
+            nmp_content::tokenize_with_kind(content, &[], nmp_content::RenderMode::Auto, 9)
+                .to_wire();
+        GroupChatMessage {
+            id: id.to_string(),
+            pubkey: pubkey.to_string(),
+            raw_content: content.to_string(),
+            copy_text: content.to_string(),
+            created_at,
+            kind: 9,
+            content_tree_bytes: nmp_content::wire::encode_content_tree(&tree),
+            mention_pubkeys: Vec::new(),
+            event_ref_uris: Vec::new(),
+            event_ref_primary_ids: Vec::new(),
+        }
     }
 
     // --- existing tests (issue #11 baseline) ---
@@ -1421,13 +1444,7 @@ mod tests {
         let snap = TuiSnapshot {
             channel_tree: vec![],
             selected_channel_id: Some(gid.clone()),
-            selected_messages: vec![GroupChatMessage {
-                id: "e1".to_string(),
-                pubkey: "pk1".to_string(),
-                content: "hello".to_string(),
-                created_at: 1000,
-                kind: 9,
-            }],
+            selected_messages: vec![chat_msg("e1", "pk1", 1000, "hello")],
             selected_members: vec![GroupMemberRow {
                 pubkey: "pk1".to_string(),
                 display_name: Some("Alice".to_string()),
@@ -1574,13 +1591,7 @@ mod tests {
         });
 
         // The matching message MUST carry the same pubkey as my_pubkey.
-        let matching_msg = GroupChatMessage {
-            id: "event-1".to_string(),
-            pubkey: "my-pk".to_string(),
-            content: "hello world".to_string(),
-            created_at: 12345,
-            kind: 9,
-        };
+        let matching_msg = chat_msg("event-1", "my-pk", 12345, "hello world");
         let mut view = ProjectionView::default();
         view.my_pubkey = Some("my-pk".to_string());
         view.selected_messages = vec![matching_msg];
@@ -1614,13 +1625,7 @@ mod tests {
         });
 
         // Matching content, but my_pubkey is None — must NOT confirm.
-        let matching_msg = GroupChatMessage {
-            id: "event-1".to_string(),
-            pubkey: "any-pubkey".to_string(),
-            content: "hello world".to_string(),
-            created_at: 12345,
-            kind: 9,
-        };
+        let matching_msg = chat_msg("event-1", "any-pubkey", 12345, "hello world");
         let mut view = ProjectionView::default();
         // Intentionally NOT setting view.my_pubkey.
         view.selected_messages = vec![matching_msg];
@@ -1651,13 +1656,7 @@ mod tests {
             dispatched_at: Instant::now(),
         });
 
-        let msg = GroupChatMessage {
-            id: "event-2".to_string(),
-            pubkey: "pk".to_string(),
-            content: "oops".to_string(),
-            created_at: 9999,
-            kind: 9,
-        };
+        let msg = chat_msg("event-2", "pk", 9999, "oops");
         let mut view = ProjectionView::default();
         view.selected_messages = vec![msg];
         app.ingest_projection(view);

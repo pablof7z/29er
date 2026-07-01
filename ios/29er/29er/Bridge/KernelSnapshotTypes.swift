@@ -19,25 +19,38 @@ struct GroupId: Hashable, Equatable {
     }
 }
 
-// ─── NIP-29 group-chat read model ─────────────────────────────────────────
+// ─── 29er group-chat read model ───────────────────────────────────────────
 
-/// One rendered NIP-29 group-chat message. Raw protocol values only; Rust owns
-/// filtering, ordering, and event-kind semantics.
-struct GroupChatMessage: Decodable, Identifiable, Equatable {
+/// One rendered group-chat message from the app-owned `nmp.29er.group_chat`
+/// projection. Rust owns filtering, ordering, content enrichment, and demand
+/// extraction; Swift only renders this shape.
+struct GroupChatMessage: Identifiable, Equatable {
     let id: String
     let pubkey: String
-    let content: String
+    let rawContent: String
+    let copyText: String
     let createdAt: UInt64
     let kind: UInt32
+    let contentTree: ContentTreeWire?
+    let mentionPubkeys: [String]
+    let eventRefUris: [String]
+    let eventRefPrimaryIds: [String]
 }
 
-/// The serialised read model a group chat consumes. `messages` is a local
-/// UI alias for the NMP `GroupEventsSnapshot.events` vector and is ordered
-/// newest-first by Rust; Swift does not re-sort.
-struct GroupChatSnapshot: Decodable, Equatable {
+/// The serialised read model a group chat consumes. `messages` is ordered
+/// newest-first by Rust; Swift does not re-sort or tokenize content.
+struct GroupChatSnapshot: Equatable {
     let messages: [GroupChatMessage]
+    let profileDemandPubkeys: [String]
+    let eventRefUris: [String]
+    let eventRefPrimaryIds: [String]
 
-    static let empty = GroupChatSnapshot(messages: [])
+    static let empty = GroupChatSnapshot(
+        messages: [],
+        profileDemandPubkeys: [],
+        eventRefUris: [],
+        eventRefPrimaryIds: []
+    )
 }
 
 // ─── NIP-29 selected-group roster read model ──────────────────────────────

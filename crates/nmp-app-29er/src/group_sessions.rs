@@ -46,8 +46,12 @@ use nmp_native_runtime::{
     Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
     Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
 };
-use nmp_nip29::{GroupId, JoinedGroupsProjection};
+use nmp_nip29::{GroupEventsProjection, GroupId, JoinedGroupsProjection};
 
+use crate::group_chat::{
+    encode_group_chat_snapshot, GROUP_CHAT_FILE_IDENTIFIER, GROUP_CHAT_SCHEMA_ID,
+    GROUP_CHAT_SCHEMA_VERSION,
+};
 use crate::group_tree::{
     encode_group_tree_snapshot, membership_from_joined, GroupTreeProjection,
     GROUP_TREE_FILE_IDENTIFIER, GROUP_TREE_SCHEMA_ID, GROUP_TREE_SCHEMA_VERSION,
@@ -76,6 +80,12 @@ struct DiscoverySession {
     tree_projection: Arc<GroupTreeProjection>,
 }
 
+/// The live `"nmp.29er.group_chat"` composition opened by
+/// [`GroupSessions::open_chat`].
+struct ChatSession {
+    handle: Nip29GroupEventsHandle,
+}
+
 /// All NIP-29 group-read session state owned by one [`TwentyNinerApp`].
 ///
 /// Each field is an independent singleton session — opening a new discovery
@@ -84,7 +94,7 @@ struct DiscoverySession {
 /// implements.
 pub(crate) struct GroupSessions {
     discovery: Mutex<Option<DiscoverySession>>,
-    chat: Mutex<Option<Nip29GroupEventsHandle>>,
+    chat: Mutex<Option<ChatSession>>,
     roster: Mutex<Option<Nip29GroupRosterHandle>>,
     /// The relay the joined-groups session should be scoped to. `Some` only
     /// while a discovery session is open; read by the identity-change
@@ -195,21 +205,24 @@ impl GroupSessions {
     /// Open the group-chat (kind:9 + kind:11) read session for `group_id`,
     /// replacing any previously open chat session.
     pub(crate) fn open_chat(&self, app: &NmpApp, group_id: GroupId) {
-        let (handle, _reader) =
+        self.close_chat(app);
+        let (handle, reader) =
             app.open_nip29_group_events_session_with_reader(Nip29GroupEventsSession::new(
                 group_id,
                 vec![KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
             ));
+        register_group_chat_snapshot(app, reader);
         if let Ok(mut slot) = self.chat.lock() {
-            *slot = Some(handle);
+            *slot = Some(ChatSession { handle });
         }
     }
 
     /// Close the open group-chat session, if any (D6 idempotent).
     pub(crate) fn close_chat(&self, app: &NmpApp) {
         if let Ok(mut slot) = self.chat.lock() {
-            if let Some(handle) = slot.take() {
-                app.close_nip29_group_events_session(handle);
+            if let Some(session) = slot.take() {
+                app.remove_snapshot_projection(GROUP_CHAT_SCHEMA_ID);
+                app.close_nip29_group_events_session(session.handle);
             }
         }
     }
@@ -357,6 +370,20 @@ fn build_discovery_session(
         tree_observer_id,
         tree_projection: tree_messages,
     })
+}
+
+fn register_group_chat_snapshot(app: &NmpApp, reader: Arc<GroupEventsProjection>) {
+    app.register_typed_snapshot_projection(GROUP_CHAT_SCHEMA_ID, move || {
+        let snapshot = reader.snapshot();
+        Some(TypedProjectionData {
+            key: GROUP_CHAT_SCHEMA_ID.to_string(),
+            schema_id: GROUP_CHAT_SCHEMA_ID.to_string(),
+            schema_version: GROUP_CHAT_SCHEMA_VERSION,
+            file_identifier: String::from_utf8_lossy(GROUP_CHAT_FILE_IDENTIFIER).into_owned(),
+            payload: encode_group_chat_snapshot(&snapshot),
+            ..Default::default()
+        })
+    });
 }
 
 // ── TwentyNinerApp UniFFI surface ───────────────────────────────────────────
@@ -568,7 +595,40 @@ mod tests {
     fn open_group_chat_accepts_a_valid_group_id() {
         let app = TwentyNinerApp::new();
         assert!(app.open_group_chat(group_id_json()));
+        assert!(app
+            .app()
+            .registered_typed_projection_keys()
+            .iter()
+            .any(|key| key == GROUP_CHAT_SCHEMA_ID));
         app.close_group_chat();
+    }
+
+    #[test]
+    fn close_group_chat_removes_group_chat_snapshot() {
+        let app = TwentyNinerApp::new();
+        assert!(app.open_group_chat(group_id_json()));
+        app.close_group_chat();
+        assert!(!app
+            .app()
+            .registered_typed_projection_keys()
+            .iter()
+            .any(|key| key == GROUP_CHAT_SCHEMA_ID));
+    }
+
+    #[test]
+    fn reopening_group_chat_replaces_the_prior_session() {
+        let app = TwentyNinerApp::new();
+        assert!(app.open_group_chat(group_id_json()));
+        assert!(app.open_group_chat(
+            r#"{"host_relay_url":"wss://groups.example.com","local_id":"other"}"#.to_string()
+        ));
+        let count = app
+            .app()
+            .registered_typed_projection_keys()
+            .iter()
+            .filter(|key| key.as_str() == GROUP_CHAT_SCHEMA_ID)
+            .count();
+        assert_eq!(count, 1);
     }
 
     #[test]
