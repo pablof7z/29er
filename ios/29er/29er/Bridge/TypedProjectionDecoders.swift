@@ -219,3 +219,25 @@ enum TypedRelayDiagnosticsDecoder {
         return TypedProjectionGlue.relayDiagnostics(reader)
     }
 }
+
+enum TypedRefEventEnvelopesDecoder {
+    static let key = "refs.event.envelopes"
+    static let schemaId = "refs.event.envelopes"
+    static let fileIdentifier = "NEMB"
+
+    static func decode(from projections: [TypedProjectionEnvelope]) -> [String: EmbeddedEventEnvelope]? {
+        guard let projection = projections.first(where: {
+            $0.key == key && $0.schemaId == schemaId
+        }), !projection.payload.isEmpty else {
+            return nil
+        }
+        return decode(bytes: projection.payload)
+    }
+
+    static func decode(bytes: Data) -> [String: EmbeddedEventEnvelope]? {
+        guard !bytes.isEmpty else { return nil }
+        var buffer = ByteBuffer(data: bytes)
+        let reader: nmp_embed_RefEventEnvelopes = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.refEventEnvelopes(reader)
+    }
+}

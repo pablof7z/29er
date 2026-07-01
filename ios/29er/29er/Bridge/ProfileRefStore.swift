@@ -106,6 +106,39 @@ final class ProfileRefStore {
     }
 }
 
+@MainActor
+final class EventEnvelopeStore: EmbedEnvelopeSource {
+    private var envelopesByPrimaryID: [String: EmbeddedEventEnvelope] = [:]
+    private var envelopesByURI: [String: EmbeddedEventEnvelope] = [:]
+
+    func reset() {
+        envelopesByPrimaryID.removeAll()
+        envelopesByURI.removeAll()
+    }
+
+    func replace(payload: Data) -> Bool {
+        guard let nextByPrimaryID = TypedRefEventEnvelopesDecoder.decode(bytes: payload) else {
+            return false
+        }
+        var nextByURI: [String: EmbeddedEventEnvelope] = [:]
+        for envelope in nextByPrimaryID.values where !envelope.uri.isEmpty {
+            nextByURI[envelope.uri] = envelope
+        }
+        let changed = envelopesByPrimaryID != nextByPrimaryID || envelopesByURI != nextByURI
+        envelopesByPrimaryID = nextByPrimaryID
+        envelopesByURI = nextByURI
+        return changed
+    }
+
+    func envelopeForPrimaryID(_ id: String) -> EmbeddedEventEnvelope? {
+        envelopesByPrimaryID[id]
+    }
+
+    func envelopeForURI(_ uri: String) -> EmbeddedEventEnvelope? {
+        envelopesByURI[uri]
+    }
+}
+
 private extension String {
     var nonEmpty: String? { isEmpty ? nil : self }
 }

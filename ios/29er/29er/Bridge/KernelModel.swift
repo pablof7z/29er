@@ -74,6 +74,10 @@ final class KernelModel: ObservableObject {
     /// that read the registry `NostrProfileHost` environment.
     @Published var profileRefsRevision: UInt64 = 0
 
+    /// Monotonic UI invalidation token for the whole-value `refs.event.envelopes`
+    /// sidecar. The envelope map itself lives in `eventEnvelopes`.
+    @Published var eventRefsRevision: UInt64 = 0
+
     /// Typed app-owned `nmp.29er.relay_selector` sidecar (`N29R`). Rust owns
     /// active relay selection and the NIP-51 kind:30002 relay-set list.
     @Published var typedRelaySelector: RelaySelectorSnapshot?
@@ -161,6 +165,7 @@ final class KernelModel: ObservableObject {
     private(set) lazy var discoveredGroups = DiscoveredGroupsStore(kernel: kernel)
 
     let profileRefs = ProfileRefStore()
+    let eventEnvelopes = EventEnvelopeStore()
 
     init() {
         if let v = ProcessInfo.processInfo.environment["NMP_VISIBLE_LIMIT"].flatMap(UInt32.init) {

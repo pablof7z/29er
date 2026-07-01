@@ -46,11 +46,120 @@ enum TypedProjectionGlue {
         )
     }
 
+    // MARK: refs.event.envelopes -> [String: EmbeddedEventEnvelope]
+
+    static func refEventEnvelopes(
+        _ reader: nmp_embed_RefEventEnvelopes
+    ) -> [String: EmbeddedEventEnvelope] {
+        Dictionary(uniqueKeysWithValues: reader.entries.compactMap { row in
+            guard let envelope = embeddedEventEnvelope(row) else { return nil }
+            return (envelope.primaryId, envelope)
+        })
+    }
+
+    private static func embeddedEventEnvelope(
+        _ row: nmp_embed_EmbeddedEventEnvelope
+    ) -> EmbeddedEventEnvelope? {
+        guard let projectionReader = row.projection else { return nil }
+        let primaryId = row.primaryId ?? ""
+        guard !primaryId.isEmpty else { return nil }
+        return EmbeddedEventEnvelope(
+            uri: row.uri ?? "",
+            primaryId: primaryId,
+            depth: row.depth,
+            maxDepth: row.maxDepth,
+            projection: embedProjection(projectionReader),
+            collapsed: row.collapsed,
+            collapseReason: row.hasCollapseReason ? row.collapseReason : nil
+        )
+    }
+
+    private static func embedProjection(
+        _ reader: nmp_embed_EmbedKindProjection
+    ) -> EmbedKindProjection {
+        switch reader.kind {
+        case .shortnote:
+            guard let note = reader.shortNote else {
+                return .unknown(UnknownProjection(kind: 1, authorPubkey: ""))
+            }
+            let contentTreeBytes = note.contentTree.map { $0 }
+            return .shortNote(ShortNoteProjection(
+                id: note.id ?? "",
+                authorPubkey: note.authorPubkey ?? "",
+                createdAt: note.createdAt,
+                content: contentPlainText(fromNFCTBytes: contentTreeBytes),
+                mediaUrls: note.mediaUrls.map { $0 ?? "" }
+            ))
+        case .article:
+            guard let article = reader.article else {
+                return .unknown(UnknownProjection(kind: 30023, authorPubkey: ""))
+            }
+            return .article(ArticleProjection(
+                id: article.id ?? "",
+                authorPubkey: article.authorPubkey ?? "",
+                createdAt: article.createdAt,
+                title: article.hasTitle ? article.title : nil,
+                summary: article.hasSummary ? article.summary : nil,
+                heroImageUrl: article.hasHeroImageUrl ? article.heroImageUrl : nil,
+                dTag: article.dTag ?? "",
+                content: contentPlainText(fromNFCTBytes: article.contentTree.map { $0 })
+            ))
+        case .highlight:
+            guard let highlight = reader.highlight else {
+                return .unknown(UnknownProjection(kind: 9802, authorPubkey: ""))
+            }
+            return .highlight(HighlightProjection(
+                id: highlight.id ?? "",
+                authorPubkey: highlight.authorPubkey ?? "",
+                createdAt: highlight.createdAt,
+                highlightedText: highlight.highlightedText ?? "",
+                sourceEventId: highlight.hasSourceEventId ? highlight.sourceEventId : nil,
+                sourceEventAddr: highlight.hasSourceEventAddr ? highlight.sourceEventAddr : nil,
+                sourceUrl: highlight.hasSourceUrl ? highlight.sourceUrl : nil,
+                context: highlight.hasContext ? highlight.context : nil
+            ))
+        case .profile:
+            guard let profile = reader.profile else {
+                return .unknown(UnknownProjection(kind: 0, authorPubkey: ""))
+            }
+            return .profile(ProfileProjection(
+                pubkey: profile.pubkey ?? "",
+                displayName: profile.hasDisplayName ? profile.displayName : nil,
+                pictureUrl: profile.hasPictureUrl ? profile.pictureUrl : nil,
+                about: profile.hasAbout ? profile.about : nil,
+                nip05: profile.hasNip05 ? profile.nip05 : nil,
+                lud16: profile.hasLud16 ? profile.lud16 : nil,
+                bannerUrl: profile.hasBannerUrl ? profile.bannerUrl : nil
+            ))
+        case .unknown:
+            guard let unknown = reader.unknown else {
+                return .unknown(UnknownProjection(kind: 0, authorPubkey: ""))
+            }
+            return .unknown(UnknownProjection(
+                kind: unknown.kind,
+                authorPubkey: unknown.authorPubkey ?? "",
+                createdAt: unknown.createdAt,
+                content: unknown.content ?? contentPlainText(fromNFCTBytes: unknown.contentTree.map { $0 }),
+                tags: unknown.tags.map { tag in tag.values.map { $0 ?? "" } },
+                altText: unknown.hasAltText ? unknown.altText : nil
+            ))
+        }
+    }
+
     private static func contentTree(fromNFCTBytes bytes: [UInt8]) -> ContentTreeWire? {
         guard !bytes.isEmpty else { return nil }
         var buffer = ByteBuffer(data: Data(bytes))
         let reader: nmp_content_ContentTreeWire = getRoot(byteBuffer: &buffer)
         return contentTree(reader)
+    }
+
+    private static func contentPlainText(fromNFCTBytes bytes: [UInt8]) -> String {
+        guard let tree = contentTree(fromNFCTBytes: bytes) else { return "" }
+        return nostrContentPlainText(
+            tree,
+            children: tree.roots,
+            mentionLabel: NostrContentView.defaultMentionLabel
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func contentTree(_ reader: nmp_content_ContentTreeWire) -> ContentTreeWire {

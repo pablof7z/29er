@@ -334,6 +334,7 @@ struct GroupEventsView: View {
     @State private var showingLeaveSheet = false
     @State private var showingAdminSheet = false
     @State private var claimedChatProfilePubkeys: Set<String> = []
+    @State private var claimedChatEventRefs: Set<String> = []
     @FocusState private var composerFocused: Bool
 
     private var node: GroupTreeNode? {
@@ -578,6 +579,7 @@ struct GroupEventsView: View {
             }
             .onAppear {
                 syncChatProfileClaims()
+                syncChatEventClaims()
             }
             .onChange(of: model.groupChat.messages) { _, _ in
                 scrollToBottom(proxy)
@@ -585,8 +587,12 @@ struct GroupEventsView: View {
             .onChange(of: model.groupChat.profileDemandPubkeys) { _, _ in
                 syncChatProfileClaims()
             }
+            .onChange(of: model.groupChat.eventRefPrimaryIds) { _, _ in
+                syncChatEventClaims()
+            }
             .onDisappear {
                 releaseChatProfileClaims()
+                releaseChatEventClaims()
             }
         }
     }
@@ -749,6 +755,7 @@ struct GroupEventsView: View {
     /// Fold the chronological message list into day dividers + author groups.
     private var chatStream: [ChatStreamItem] {
         _ = model.profileRefsRevision
+        _ = model.eventRefsRevision
         var items: [ChatStreamItem] = []
         var bucket: [GroupChatMessage] = []
         var currentAuthor: String?
@@ -1004,6 +1011,24 @@ struct GroupEventsView: View {
             model.releaseProfileRef(pubkey: pubkey, consumerID: "group-chat-content")
         }
         claimedChatProfilePubkeys.removeAll()
+    }
+
+    private func syncChatEventClaims() {
+        let next = Set(model.groupChat.eventRefPrimaryIds.filter { !$0.isEmpty })
+        for primaryId in next.subtracting(claimedChatEventRefs) {
+            model.kernel.resolveEventEmbed(key: primaryId, consumerID: "group-chat-content")
+        }
+        for primaryId in claimedChatEventRefs.subtracting(next) {
+            model.kernel.releaseEventRef(key: primaryId, consumerID: "group-chat-content")
+        }
+        claimedChatEventRefs = next
+    }
+
+    private func releaseChatEventClaims() {
+        for primaryId in claimedChatEventRefs {
+            model.kernel.releaseEventRef(key: primaryId, consumerID: "group-chat-content")
+        }
+        claimedChatEventRefs.removeAll()
     }
 
     private func outboxItem(for eventId: String) -> PublishOutboxItem? {
@@ -1583,6 +1608,8 @@ private struct SlackMessageGroupView: View {
 /// One message body within a Slack group: NMP-rendered content (no bubble),
 /// inline pending/retry status, and the per-message context menu.
 private struct SlackMessageBody: View {
+    @EnvironmentObject private var model: KernelModel
+
     let message: GroupChatMessage
     let pending: PublishOutboxItem?
     let onRetry: (PublishOutboxItem) -> Void
@@ -1636,6 +1663,7 @@ private struct SlackMessageBody: View {
     private var content: some View {
         if let tree = message.contentTree {
             NostrContentView(tree: tree, font: .body, mentionLabel: mentionLabel)
+                .embedEnvelopeSource(model.eventEnvelopes, registry: NostrKindRegistry.makeDefault())
         } else {
             // Projection decode fell through — never drop a message.
             Text(message.rawContent)

@@ -77,6 +77,7 @@ fn base_snapshot() -> TuiSnapshot {
         selected_messages: vec![],
         selected_members: vec![],
         profiles: Default::default(),
+        event_envelopes: Default::default(),
         is_admin: false,
         my_pubkey: None,
         publish_outbox: vec![],
