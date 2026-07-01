@@ -1,0 +1,6 @@
+{
+  "id": "019f0-8ccdc",
+  "ts": "2026-06-28T07:17:19Z",
+  "session": "019f0d0b-8033-7cf0-a750-21b389b8daf0",
+  "text": "and to reset the local database [...] - [App.swift](/Users/pablofernandez/Work/29er/ios/29er/29er/App.swift:105): added a destructive confirmation dialog for database reset.\n- [KernelBridge.swift](/Users/pablofernandez/Work/29er/ios/29er/29er/Bridge/KernelBridge.swift:83): centralized the NMP storage directory and added a reset path that stops the kernel, removes/recreates `Application Support/NMP`, then resets.\n- [KernelModel+Lifecycle.swift](/Users/pablofernandez/Work/29er/ios/29er/29er/Bridge/KernelModel+Lifecycle.swift:79): added the model action to reset local DB, clear projections, reseed relays, and restart. [...] - Tapped reset only far enough to verify the confirmation dialog appeared; I did not confirm the destructive action."
+}

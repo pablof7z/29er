@@ -1,0 +1,6 @@
+{
+  "id": "019f0-597b2",
+  "ts": "2026-06-28T07:53:06Z",
+  "session": "019f0d0b-8033-7cf0-a750-21b389b8daf0",
+  "text": "User: don't you realize that after saying that you cleaned the cache by tapping on it it still shows the exact state from before? all the channels that no longer exist no the relay are still shown -- it should probably do something with NMP to close the projection and reopen it or something -- don't change anything, tell me how you'd fix it [...] User: yes, it should happen on the rust side [...] - Launched on `29er-M001-fresh-uat`, confirmed reset through the UI, and the post-reset snapshot no longer showed the old multi-channel state; it rehydrated from the refreshed Rust discovery path."
+}
