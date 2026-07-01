@@ -1,0 +1,6 @@
+{
+  "id": "019f0-eaacd",
+  "ts": "2026-06-28T07:53:50Z",
+  "session": "019f0d0b-8033-7cf0-a750-21b389b8daf0",
+  "text": "User: add a settings button on the top right tab bar\n\nthus far it allows me to logout (move the logout button there)\nand to reset the local database [...] Changed:\n- [App.swift](/Users/pablofernandez/Work/29er/ios/29er/29er/App.swift:79): replaced the top-right `Log Out` button with a gear `Settings` menu.\n- [App.swift](/Users/pablofernandez/Work/29er/ios/29er/29er/App.swift:87): moved `Log Out` into that menu and added `Reset Local Database`.\n- [App.swift](/Users/pablofernandez/Work/29er/ios/29er/29er/App.swift:105): added a destructive confirmation dialog for database reset. [...] - UI snapshot showed `Settings`, then menu entries `Log Out` and `Reset Local Database`.\n- Tapped reset only far enough to verify the confirmation dialog appeared; I did not confirm the destructive action."
+}

@@ -11,8 +11,8 @@ mod generated;
 
 use generated::nmp_app_29er as fb;
 
-pub const RELAY_SELECTOR_KEY: &str = "nmp.29er.relay_selector";
-pub const RELAY_SELECTOR_SCHEMA_ID: &str = "nmp.29er.relay_selector";
+pub const RELAY_SELECTOR_KEY: &str = "app.29er.relay_selector";
+pub const RELAY_SELECTOR_SCHEMA_ID: &str = "app.29er.relay_selector";
 pub const RELAY_SELECTOR_SCHEMA_VERSION: u32 = 1;
 pub const RELAY_SELECTOR_FILE_IDENTIFIER: &[u8; 4] = b"N29R";
 
@@ -223,7 +223,10 @@ pub fn register_relay_selector_runtime(
     });
 
     let projection_for_snapshot = Arc::clone(&projection);
-    app.register_typed_snapshot_projection(RELAY_SELECTOR_KEY, move || {
+    let registration_key = nmp_native_runtime::ProjectionKey::app_owned(RELAY_SELECTOR_KEY)
+        .expect("29er relay-selector projection key must stay app-owned")
+        .dynamic_token();
+    app.register_typed_snapshot_projection(registration_key, move || {
         Some(TypedProjectionData {
             key: RELAY_SELECTOR_KEY.to_string(),
             schema_id: RELAY_SELECTOR_SCHEMA_ID.to_string(),

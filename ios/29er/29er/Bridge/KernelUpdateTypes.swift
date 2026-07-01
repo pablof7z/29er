@@ -14,10 +14,10 @@ struct KernelUpdateResult {
     /// ⇒ the sidecar was absent or malformed (the generic JSON `payload`
     /// fallback is not decoded by 29er in S01).
     let typedDiscoveredGroups: DiscoveredGroupsSnapshot?
-    /// Typed app-owned `nmp.29er.group_tree` projection decode (`N29T`). `nil`
+    /// Typed app-owned `app.29er.group_tree` projection decode (`N29T`). `nil`
     /// ⇒ discovery has not been opened or the sidecar was absent/malformed.
     let typedGroupTree: GroupTreeSnapshot?
-    /// Typed app-owned `nmp.29er.group_chat` projection decode (`N29C`). `nil`
+    /// Typed app-owned `app.29er.group_chat` projection decode (`N29C`). `nil`
     /// ⇒ no group-chat view has been registered or the sidecar was
     /// absent/malformed.
     let typedGroupChat: GroupChatSnapshot?
@@ -30,15 +30,11 @@ struct KernelUpdateResult {
     /// Typed `active_account` projection decode (`KACT`). `nil` ⇒ no active
     /// account on this tick.
     let typedActiveAccount: String?
-    /// Typed `nmp.nip29.group_defaults` projection decode (`NGDF`). `nil` ⇒ the
-    /// sidecar was absent or malformed on this tick. Carries 29er's suggested
-    /// public-group host relay URL (Rust-owned operator policy).
-    let typedGroupDefaults: GroupDefaultsSnapshot?
     /// Raw typed-projection envelopes from this frame. Keyed row-delta
     /// projections (`refs.profile`) merge through their own host store because
     /// their payload is not one whole value.
     let typedProjections: [TypedProjectionEnvelope]
-    /// Typed app-owned `nmp.29er.relay_selector` projection decode (`N29R`).
+    /// Typed app-owned `app.29er.relay_selector` projection decode (`N29R`).
     /// Rust owns active relay selection and the NIP-51 kind:30002 relay-set
     /// list; Swift renders this snapshot and submits relay intents back.
     let typedRelaySelector: RelaySelectorSnapshot?

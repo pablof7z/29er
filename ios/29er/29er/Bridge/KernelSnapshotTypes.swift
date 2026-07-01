@@ -21,7 +21,7 @@ struct GroupId: Hashable, Equatable {
 
 // ─── 29er group-chat read model ───────────────────────────────────────────
 
-/// One rendered group-chat message from the app-owned `nmp.29er.group_chat`
+/// One rendered group-chat message from the app-owned `app.29er.group_chat`
 /// projection. Rust owns filtering, ordering, content enrichment, and demand
 /// extraction; Swift only renders this shape.
 struct GroupChatMessage: Identifiable, Equatable {
@@ -192,21 +192,4 @@ struct DiscoveredGroupsSnapshot: Decodable, Equatable {
     let groups: [DiscoveredGroup]
 
     static let empty = DiscoveredGroupsSnapshot(hostRelayUrl: "", groups: [])
-}
-
-// ─── NIP-29 group-create defaults read model ──────────────────────────────
-
-/// App/operator-supplied defaults for the create-public-group flow, mirrored
-/// verbatim from the kernel `nmp.nip29.group_defaults` projection (`NGDF`).
-///
-/// `suggestedRelayUrl` is 29er's suggested NIP-29 host relay, sourced in Rust
-/// from `nmp_app_29er::config::public_group_relay_url` via
-/// `wire_group_defaults_with_relay`. The shell reads it from here instead of
-/// hardcoding a URL (D7): it pre-fills the editable relay field and uses it as
-/// the host relay for `createGroup` / auto-opened discovery. Empty until the
-/// first snapshot tick (the `.empty` default).
-struct GroupDefaultsSnapshot: Decodable, Equatable {
-    let suggestedRelayUrl: String
-
-    static let empty = GroupDefaultsSnapshot(suggestedRelayUrl: "")
 }

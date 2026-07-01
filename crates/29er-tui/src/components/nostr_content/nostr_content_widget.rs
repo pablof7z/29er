@@ -177,7 +177,13 @@ impl NostrContentView<'_> {
 
     /// Render a markdown blockquote (`> …`). Mirrors the `lines()` path's
     /// `blockquote_lines`; not an embedded-event quote card.
-    fn render_blockquote(&self, children: &[usize], area: Rect, buf: &mut Buffer, cursor: &mut u16) {
+    fn render_blockquote(
+        &self,
+        children: &[usize],
+        area: Rect,
+        buf: &mut Buffer,
+        cursor: &mut u16,
+    ) {
         let lines = self.blockquote_lines(children, area.width as usize);
         self.render_lines(lines, area, buf, cursor);
     }

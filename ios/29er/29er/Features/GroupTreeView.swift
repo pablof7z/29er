@@ -346,7 +346,7 @@ struct GroupEventsView: View {
     }
 
     private var visibleMessages: [GroupChatMessage] {
-        // The Rust-owned `nmp.29er.group_chat` projection is the single ordered,
+        // The Rust-owned `app.29er.group_chat` projection is the single ordered,
         // deduped, enriched message list. The shell no longer joins
         // `publish_outbox` against chat, walks raw `["h", groupId]` tags,
         // tokenizes content, dedups by event id, or reorders. The projection is

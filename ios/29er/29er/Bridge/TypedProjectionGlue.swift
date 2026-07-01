@@ -22,7 +22,7 @@ enum TypedProjectionGlue {
         reader.hasActiveAccount ? (reader.pubkey ?? "") : nil
     }
 
-    // MARK: nmp.29er.group_chat -> GroupChatSnapshot
+    // MARK: app.29er.group_chat -> GroupChatSnapshot
 
     static func groupChat(_ reader: nmp_app_29er_GroupChatSnapshot) -> GroupChatSnapshot {
         GroupChatSnapshot(
@@ -359,21 +359,7 @@ enum TypedProjectionGlue {
         )
     }
 
-    // MARK: nmp.nip29.group_defaults → GroupDefaultsSnapshot
-
-    /// Map the typed `nmp.nip29.group_defaults` sidecar (`NGDF` /
-    /// `nmp_nip29_GroupDefaultsSnapshot`) to the `GroupDefaultsSnapshot` the
-    /// JSON `projections["nmp.nip29.group_defaults"]` path yields. Flat
-    /// single-field copy: `suggestedRelayUrl` is 29er's app/operator-owned
-    /// default host relay URL for a new public group, carried verbatim (raw
-    /// protocol value; the shell pre-fills it but the user may overwrite it).
-    static func groupDefaults(
-        _ reader: nmp_nip29_GroupDefaultsSnapshot
-    ) -> GroupDefaultsSnapshot {
-        GroupDefaultsSnapshot(suggestedRelayUrl: reader.suggestedRelayUrl ?? "")
-    }
-
-    // MARK: nmp.29er.group_tree → GroupTreeSnapshot
+    // MARK: app.29er.group_tree -> GroupTreeSnapshot
 
     static func groupTree(_ reader: nmp_app_29er_GroupTreeSnapshot) -> GroupTreeSnapshot {
         let nodes = reader.nodes.map(groupTreeNode(_:))
@@ -407,7 +393,7 @@ enum TypedProjectionGlue {
         )
     }
 
-    // MARK: nmp.29er.relay_selector → RelaySelectorSnapshot
+    // MARK: app.29er.relay_selector -> RelaySelectorSnapshot
 
     static func relaySelector(
         _ reader: nmp_app_29er_RelaySelectorSnapshot

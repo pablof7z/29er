@@ -605,7 +605,7 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * Open a NIP-29 group-discovery session for one host relay: NMP's
      * canonical discovery + joined-groups doors, plus the 29er-owned kind:9
      * group-tree composite (per-group unread + last-message preview +
-     * viewer membership), folded into the `"nmp.29er.group_tree"` typed
+     * viewer membership), folded into the `"app.29er.group_tree"` typed
      * snapshot the iOS shell reads through [`crate::UpdateSink`].
      *
      * Replaces any previously open discovery session. `false` (D6) on an
@@ -993,7 +993,7 @@ open func openGroupChat(groupIdJson: String) -> Bool  {
      * Open a NIP-29 group-discovery session for one host relay: NMP's
      * canonical discovery + joined-groups doors, plus the 29er-owned kind:9
      * group-tree composite (per-group unread + last-message preview +
-     * viewer membership), folded into the `"nmp.29er.group_tree"` typed
+     * viewer membership), folded into the `"app.29er.group_tree"` typed
      * snapshot the iOS shell reads through [`crate::UpdateSink`].
      *
      * Replaces any previously open discovery session. `false` (D6) on an
@@ -1799,7 +1799,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_chat() != 61403) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_discovery() != 54936) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_discovery() != 18040) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_roster() != 63417) {

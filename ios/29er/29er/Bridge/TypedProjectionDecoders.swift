@@ -67,8 +67,8 @@ enum TypedDiscoveredGroupsDecoder {
 }
 
 enum TypedGroupChatDecoder {
-    static let key = "nmp.29er.group_chat"
-    static let schemaId = "nmp.29er.group_chat"
+    static let key = "app.29er.group_chat"
+    static let schemaId = "app.29er.group_chat"
     static let fileIdentifier = "N29C"
 
     static func decode(from projections: [TypedProjectionEnvelope]) -> GroupChatSnapshot? {
@@ -132,31 +132,9 @@ enum TypedPublishOutboxDecoder {
     }
 }
 
-enum TypedGroupDefaultsDecoder {
-    static let key = "nmp.nip29.group_defaults"
-    static let schemaId = "nmp.nip29.group_defaults"
-    static let fileIdentifier = "NGDF"
-
-    static func decode(from projections: [TypedProjectionEnvelope]) -> GroupDefaultsSnapshot? {
-        guard let projection = projections.first(where: {
-            $0.key == key && $0.schemaId == schemaId
-        }), !projection.payload.isEmpty else {
-            return nil
-        }
-        return decode(bytes: projection.payload)
-    }
-
-    static func decode(bytes: Data) -> GroupDefaultsSnapshot? {
-        guard !bytes.isEmpty else { return nil }
-        var buffer = ByteBuffer(data: bytes)
-        let reader: nmp_nip29_GroupDefaultsSnapshot = getRoot(byteBuffer: &buffer)
-        return TypedProjectionGlue.groupDefaults(reader)
-    }
-}
-
 enum TypedGroupTreeDecoder {
-    static let key = "nmp.29er.group_tree"
-    static let schemaId = "nmp.29er.group_tree"
+    static let key = "app.29er.group_tree"
+    static let schemaId = "app.29er.group_tree"
     static let fileIdentifier = "N29T"
 
     static func decode(from projections: [TypedProjectionEnvelope]) -> GroupTreeSnapshot? {
@@ -177,8 +155,8 @@ enum TypedGroupTreeDecoder {
 }
 
 enum TypedRelaySelectorDecoder {
-    static let key = "nmp.29er.relay_selector"
-    static let schemaId = "nmp.29er.relay_selector"
+    static let key = "app.29er.relay_selector"
+    static let schemaId = "app.29er.relay_selector"
     static let fileIdentifier = "N29R"
 
     static func decode(from projections: [TypedProjectionEnvelope]) -> RelaySelectorSnapshot? {

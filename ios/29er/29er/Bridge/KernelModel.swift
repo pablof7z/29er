@@ -41,11 +41,11 @@ final class KernelModel: ObservableObject {
     /// the last tick. Read through the `discoveredGroups` accessor.
     @Published var typedDiscoveredGroups: DiscoveredGroupsSnapshot?
 
-    /// Typed app-owned `nmp.29er.group_tree` sidecar (`N29T`). Rust derives
+    /// Typed app-owned `app.29er.group_tree` sidecar (`N29T`). Rust derives
     /// this from the NIP-29 discovery projection; Swift only renders it.
     @Published var typedGroupTree: GroupTreeSnapshot?
 
-    /// Typed app-owned `nmp.29er.group_chat` sidecar (`N29C`). Rust owns the
+    /// Typed app-owned `app.29er.group_chat` sidecar (`N29C`). Rust owns the
     /// selected group's event filter, newest-first ordering, content tree, and
     /// demand lists; Swift renders it.
     @Published var typedGroupChat: GroupChatSnapshot?
@@ -63,12 +63,6 @@ final class KernelModel: ObservableObject {
     /// `activeAccountPubkey` accessor.
     @Published var typedActiveAccount: String?
 
-    /// Typed `nmp.nip29.group_defaults` sidecar (`NGDF`). `nil` ⇒ the defaults
-    /// projection sidecar was absent/malformed on the last tick. Carries 29er's
-    /// Rust-owned suggested public-group host relay URL. Read through the
-    /// `groupDefaults` accessor.
-    @Published var typedGroupDefaults: GroupDefaultsSnapshot?
-
     /// Monotonic UI invalidation token for `refs.profile` row commits. The
     /// actual rows live in `profileRefs`; this published scalar redraws views
     /// that read the registry `NostrProfileHost` environment.
@@ -78,7 +72,7 @@ final class KernelModel: ObservableObject {
     /// sidecar. The envelope map itself lives in `eventEnvelopes`.
     @Published var eventRefsRevision: UInt64 = 0
 
-    /// Typed app-owned `nmp.29er.relay_selector` sidecar (`N29R`). Rust owns
+    /// Typed app-owned `app.29er.relay_selector` sidecar (`N29R`). Rust owns
     /// active relay selection and the NIP-51 kind:30002 relay-set list.
     @Published var typedRelaySelector: RelaySelectorSnapshot?
 
@@ -97,7 +91,7 @@ final class KernelModel: ObservableObject {
 
     /// The currently selected group id in the group-tree navigation, or
     /// `nil` when nothing is selected. Selection is UI state only; group tree
-    /// data comes from the Rust `nmp.29er.group_tree` projection.
+    /// data comes from the Rust `app.29er.group_tree` projection.
     @Published var selectedGroupId: String?
 
     /// Set the selected group id. Called from `GroupTreeRow`'s

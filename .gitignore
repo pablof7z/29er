@@ -1,6 +1,7 @@
 
 # Claude Code local config (worktrees, local settings)
 .claude/
+.claire/
 
 # ── GSD baseline (auto-generated) ──
 .gsd

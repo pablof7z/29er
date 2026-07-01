@@ -88,7 +88,10 @@ fn projection_preserves_raw_newest_first_order_and_clear_updates() {
         event("old", 10, 9, "old"),
     ]));
     assert_eq!(
-        full.messages.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        full.messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
         vec!["new", "old"]
     );
 
