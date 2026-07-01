@@ -1,7 +1,7 @@
 //! 3-step progressive onboarding (issue #10).
 //!
 //! Step 1 – Identity:  nsec paste (masked), validates `nsec1` prefix.
-//! Step 2 – Relay:     relay URL, pre-filled with the default.
+//! Step 2 – Relay:     relay URL, pre-filled from Rust-owned app config.
 //! Step 3 – Discover:  optional quick-join prompt (shown when no rooms exist).
 use crate::actions::Action;
 use crate::app::TuiSnapshot;
@@ -14,8 +14,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
 use ratatui_textarea::{CursorMove, TextArea};
-
-const DEFAULT_RELAY: &str = "wss://nip29.f7z.io";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Step {
@@ -53,7 +51,7 @@ impl LoginComponent {
         nsec_ta.set_placeholder_text("nsec1\u{2026}");
 
         let mut relay_ta = TextArea::default();
-        relay_ta.insert_str(DEFAULT_RELAY);
+        relay_ta.insert_str(nmp_app_29er::config::public_group_relay_url());
 
         Self {
             step: Step::Identity,
@@ -111,12 +109,7 @@ impl LoginComponent {
     }
 
     fn current_relay(&self) -> String {
-        let r = self.relay_ta.lines().join("").trim().to_string();
-        if r.is_empty() {
-            DEFAULT_RELAY.to_string()
-        } else {
-            r
-        }
+        self.relay_ta.lines().join("").trim().to_string()
     }
 
     // ── step draw functions ─────────────────────────────────────────────────
@@ -193,20 +186,32 @@ impl LoginComponent {
             header_area,
         );
 
+        let border_color = if self.inline_error.is_some() || self.error.is_some() {
+            ui::RED
+        } else {
+            ui::LAVENDER
+        };
         let block = Block::default()
             .title(" relay url ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(ui::LAVENDER));
+            .border_style(Style::default().fg(border_color));
         self.relay_ta.set_block(block);
         f.render_widget(&self.relay_ta, field_area);
 
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "Default relay \u{2014} press Enter to continue  \u{2022}  Esc to go back",
+        let hint_line = if let Some(e) = self.inline_error.as_deref().or(self.error.as_deref()) {
+            Line::from(vec![
+                Span::styled("\u{2717} ", Style::default().fg(ui::RED)),
+                Span::styled(e.to_owned(), Style::default().fg(ui::RED)),
+            ])
+        } else {
+            Line::from(Span::styled(
+                "Relay comes from 29er config; edit to use another relay  \u{2022}  Esc to go back",
                 Style::default().fg(ui::SUBTEXT),
-            )))
-            .alignment(Alignment::Center),
+            ))
+        };
+        f.render_widget(
+            Paragraph::new(hint_line).alignment(Alignment::Center),
             hint_area,
         );
     }
@@ -323,6 +328,12 @@ impl Component for LoginComponent {
                 }
                 KeyCode::Enter => {
                     let relay = self.current_relay();
+                    if relay.is_empty() {
+                        self.inline_error = Some("Relay URL is required".to_string());
+                        return None;
+                    }
+                    self.inline_error = None;
+                    self.error = None;
                     if self.has_rooms {
                         // Existing session — skip Step 3 and go straight to app.
                         let nsec = self.nsec.take().unwrap_or_default();
@@ -335,6 +346,7 @@ impl Component for LoginComponent {
                 }
                 KeyCode::Char(c) => {
                     self.relay_ta.insert_char(c);
+                    self.inline_error = None;
                     None
                 }
                 KeyCode::Backspace => {
@@ -359,6 +371,11 @@ impl Component for LoginComponent {
                 }
                 KeyCode::Enter => {
                     let relay = self.current_relay();
+                    if relay.is_empty() {
+                        self.inline_error = Some("Relay URL is required".to_string());
+                        self.step = Step::Relay;
+                        return None;
+                    }
                     let nsec = self.nsec.take().unwrap_or_default();
                     Some(Action::LoginSubmit { nsec, relay })
                 }

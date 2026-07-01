@@ -38,9 +38,8 @@ async fn main() -> Result<()> {
 
 async fn run() -> Result<()> {
     let mut terminal = TerminalHandle::new()?;
-    let relay = std::env::var("NMP_RELAY").unwrap_or_else(|_| "wss://nip29.f7z.io".to_string());
     let (projection_tx, mut projection_rx) = watch::channel(ProjectionView::default());
-    let mut app = App::new(relay, projection_tx);
+    let mut app = App::new(projection_tx);
     let mut ui = Ui {
         login: LoginComponent::new(),
         room_list: RoomListComponent::new(),

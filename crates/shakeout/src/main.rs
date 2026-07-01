@@ -3,7 +3,7 @@
 //! relay data before any UI work.
 //!
 //! Run:
-//!   SHAKEOUT_NSEC=nsec1... cargo run -p shakeout -- --relay wss://nip29.f7z.io
+//!   SHAKEOUT_NSEC=nsec1... cargo run -p shakeout -- --relay <wss://relay.example>
 //!
 //! The CLI boots an NMP runtime via 29er's own composition root
 //! ([`nmp_app_29er::compose_29er_runtime`]) — the same composition the
@@ -25,7 +25,6 @@ use std::time::{Duration, Instant};
 use nmp_core::SignerSource;
 use nmp_native_runtime::{new_app, Nip29GroupDiscoverySession, NmpApp};
 
-const DEFAULT_RELAY: &str = "wss://nip29.f7z.io";
 const WAIT_SECS: u64 = 12;
 
 static UPDATE_TX: OnceLock<Mutex<Option<Sender<()>>>> = OnceLock::new();
@@ -36,14 +35,12 @@ static UPDATE_TX: OnceLock<Mutex<Option<Sender<()>>>> = OnceLock::new();
 struct TickSink;
 
 fn main() {
-    let relay = std::env::args()
-        .nth(1)
-        .or_else(|| {
-            std::env::args()
-                .position(|a| a == "--relay")
-                .and_then(|i| std::env::args().nth(i + 1))
-        })
-        .unwrap_or_else(|| DEFAULT_RELAY.to_string());
+    let relay = relay_arg().unwrap_or_else(|| {
+        eprintln!(
+            "shakeout: --relay <relay-url> or SHAKEOUT_RELAY is required; relay selection is explicit input"
+        );
+        std::process::exit(2);
+    });
 
     let nsec = std::env::var("SHAKEOUT_NSEC").unwrap_or_else(|_| {
         eprintln!("shakeout: SHAKEOUT_NSEC env var is required (NIP-42 AUTH on {relay})");
@@ -141,6 +138,21 @@ fn main() {
         *slot.lock().unwrap() = None;
     }
     app.shutdown();
+}
+
+fn relay_arg() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--relay" {
+            return args.next().filter(|relay| !relay.trim().is_empty());
+        }
+        if !arg.starts_with('-') && !arg.trim().is_empty() {
+            return Some(arg);
+        }
+    }
+    std::env::var("SHAKEOUT_RELAY")
+        .ok()
+        .filter(|relay| !relay.trim().is_empty())
 }
 
 fn wait_for_active_account(app: &NmpApp, ticks: &Receiver<()>) {
