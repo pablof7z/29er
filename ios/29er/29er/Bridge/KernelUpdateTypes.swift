@@ -30,10 +30,6 @@ struct KernelUpdateResult {
     /// Typed `active_account` projection decode (`KACT`). `nil` ⇒ no active
     /// account on this tick.
     let typedActiveAccount: String?
-    /// Typed `nmp.nip29.group_defaults` projection decode (`NGDF`). `nil` ⇒ the
-    /// sidecar was absent or malformed on this tick. Carries 29er's suggested
-    /// public-group host relay URL (Rust-owned operator policy).
-    let typedGroupDefaults: GroupDefaultsSnapshot?
     /// Raw typed-projection envelopes from this frame. Keyed row-delta
     /// projections (`refs.profile`) merge through their own host store because
     /// their payload is not one whole value.

@@ -28,7 +28,6 @@ extension KernelModel {
         typedGroupRoster = result.typedGroupRoster
         typedPublishOutbox = result.typedPublishOutbox
         typedActiveAccount = result.typedActiveAccount
-        typedGroupDefaults = result.typedGroupDefaults
         if let refsProfile = result.typedProjectionPayload(key: "refs.profile"),
            profileRefs.merge(
                payload: refsProfile,
@@ -69,11 +68,10 @@ extension KernelModel {
             // non-empty after the first call prevents re-entry. GroupTreeView's
             // .task guard also deduplicates when the view appears later.
             //
-            // The host relay comes from the Rust-owned `group_defaults`
-            // projection (D7) — never a Swift literal. `group_defaults` is a
-            // static snapshot registered at app init, so it is present on this
-            // tick; if it has not landed yet the guard skips and the next tick
-            // (or GroupTreeView's `.task`) retries.
+            // The host relay comes from the Rust-owned relay selector projection
+            // (D7) — never a Swift literal. If the selector has not landed yet,
+            // the guard skips and the next tick (or GroupTreeView's `.task`)
+            // retries.
             let suggestedRelay = relaySelector.activeRelayUrl
             if !wasSignedIn, case .signedIn = identityState,
                discoveredGroups.hostRelayUrl.isEmpty, !suggestedRelay.isEmpty {
@@ -125,7 +123,6 @@ extension KernelModel {
         typedGroupRoster = nil
         typedPublishOutbox = nil
         typedActiveAccount = nil
-        typedGroupDefaults = nil
         profileRefs.reset()
         profileRefsRevision &+= 1
         eventEnvelopes.reset()
@@ -161,13 +158,6 @@ extension KernelModel {
 
     var publishOutbox: [PublishOutboxItem] {
         typedPublishOutbox ?? []
-    }
-
-    /// NIP-29 group-create defaults (`nil` slot ⇒ `.empty`). Carries 29er's
-    /// Rust-owned suggested public-group host relay (`suggestedRelayUrl`); the
-    /// shell reads it instead of hardcoding a relay URL (D7).
-    var groupDefaults: GroupDefaultsSnapshot {
-        typedGroupDefaults ?? .empty
     }
 
     var relaySelector: RelaySelectorSnapshot {

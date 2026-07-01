@@ -23,13 +23,13 @@ use crate::kinds::KIND_CHAT_MESSAGE;
 const CHAT_SEND_NAMESPACE: &str = "nmp.nip29.post_chat_message";
 /// 29er's app-level child-channel doorway. The shell supplies only the parent
 /// group and display fields; this Rust app crate owns the child local-id policy
-/// and re-emits the typed NIP-29 create-public-group action.
+/// and re-emits the typed NIP-29 create-group action.
 const CREATE_CHILD_GROUP_NAMESPACE: &str = "nmp.29er.create_child_group";
 /// The real NIP-29 generic-publish action namespace the composed chat send is
 /// dispatched under.
 const PUBLISH_GROUP_EVENT_NAMESPACE: &str = "nmp.nip29.publish_group_event";
 /// The real NIP-29 create action namespace used by the app-owned child doorway.
-const CREATE_PUBLIC_GROUP_NAMESPACE: &str = "nmp.nip29.create_public_group";
+const CREATE_GROUP_NAMESPACE: &str = "nmp.nip29.create_group";
 
 /// Build the typed payload + open `DispatchEnvelope` for a NIP-29 action and
 /// dispatch it through the byte lane, returning the typed [`DispatchOutcome`].
@@ -49,7 +49,7 @@ pub fn dispatch_nip29_action(app: &NmpApp, namespace: &str, body_json: &str) -> 
         }
     } else if namespace == CREATE_CHILD_GROUP_NAMESPACE {
         match encode_child_group_payload(body_json) {
-            Some(p) => (CREATE_PUBLIC_GROUP_NAMESPACE.to_string(), p),
+            Some(p) => (CREATE_GROUP_NAMESPACE.to_string(), p),
             None => {
                 return DispatchOutcome::error("could not compose child channel create action");
             }
@@ -137,7 +137,7 @@ fn encode_child_group_payload(json: &str) -> Option<Vec<u8>> {
     if name.is_empty() {
         return None;
     }
-    let input = nmp_nip29::action::CreatePublicGroupInput {
+    let input = nmp_nip29::action::CreateGroupInput {
         group: GroupId::new(body.parent.host_relay_url.clone(), mint_group_local_id()),
         name,
         about: body.about.filter(|value| !value.trim().is_empty()),
@@ -170,9 +170,7 @@ fn encode_payload_for_namespace(namespace: &str, json: &str) -> Option<Vec<u8>> 
         "nmp.nip29.discover" => encode::<nmp_nip29::action::DiscoverGroupsInput>(json),
         "nmp.nip29.join" => encode::<nmp_nip29::action::JoinGroupInput>(json),
         "nmp.nip29.leave" => encode::<nmp_nip29::action::LeaveGroupInput>(json),
-        "nmp.nip29.create_public_group" => {
-            encode::<nmp_nip29::action::CreatePublicGroupInput>(json)
-        }
+        "nmp.nip29.create_group" => encode::<nmp_nip29::action::CreateGroupInput>(json),
         "nmp.nip29.put_user" => encode::<nmp_nip29::action::PutUserInput>(json),
         "nmp.nip29.create_invite" => encode::<nmp_nip29::action::CreateInviteInput>(json),
         "nmp.nip29.set_parent" => encode::<nmp_nip29::action::SetParentInput>(json),
@@ -204,11 +202,11 @@ mod tests {
         assert_eq!(leave.reason.as_deref(), Some("done"));
 
         let create = encode_payload_for_namespace(
-            "nmp.nip29.create_public_group",
+            "nmp.nip29.create_group",
             r#"{"group":{"host_relay_url":"wss://groups.example.com","local_id":"child-room"},"name":"Child Room","about":"Admin work","visibility":"private","access":"closed","parent":"root"}"#,
         )
         .expect("create payload encodes");
-        let create = <nmp_nip29::action::CreatePublicGroupInput as ActionPayload>::decode(&create)
+        let create = <nmp_nip29::action::CreateGroupInput as ActionPayload>::decode(&create)
             .expect("decodes");
         assert_eq!(create.group.local_id, "child-room");
         assert_eq!(create.name, "Child Room");
@@ -280,7 +278,7 @@ mod tests {
             r#"{"parent":{"host_relay_url":"wss://groups.example.com","local_id":"root"},"name":"Child Room"}"#,
         )
         .expect("child group composes");
-        let input = <nmp_nip29::action::CreatePublicGroupInput as ActionPayload>::decode(&bytes)
+        let input = <nmp_nip29::action::CreateGroupInput as ActionPayload>::decode(&bytes)
             .expect("decodes");
 
         assert_eq!(input.group.host_relay_url, "wss://groups.example.com");

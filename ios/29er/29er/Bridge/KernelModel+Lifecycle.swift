@@ -106,8 +106,8 @@ extension KernelModel {
     /// Open NIP-29 group discovery for `hostRelayUrl` (the read side of the
     /// discover screen). Delegates to `DiscoveredGroupsStore.searchGroups`
     /// which opens the read projection + dispatches the `nmp.nip29.discover`
-    /// action. Callers pass `groupDefaults.suggestedRelayUrl` (the Rust-owned
-    /// default) or a user-entered relay — never a Swift literal (D7).
+    /// action. Callers pass the Rust-owned active relay selector value or a
+    /// user-entered relay — never a Swift literal (D7).
     func openGroupDiscovery(hostRelayUrl: String) {
         discoveredGroups.searchGroups(relayUrl: hostRelayUrl)
     }

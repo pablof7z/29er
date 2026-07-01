@@ -331,7 +331,6 @@ extension KernelHandle {
                 let typedGroupRoster = TypedGroupRosterDecoder.decode(from: envelopes)
                 let typedPublishOutbox = TypedPublishOutboxDecoder.decode(from: envelopes)
                 let typedActiveAccount = TypedActiveAccountDecoder.decode(from: envelopes)
-                let typedGroupDefaults = TypedGroupDefaultsDecoder.decode(from: envelopes)
                 let typedRelaySelector = TypedRelaySelectorDecoder.decode(from: envelopes)
                 let typedRelayDiagnostics = TypedRelayDiagnosticsDecoder.decode(from: envelopes)
                 let duration = start.duration(to: .now)
@@ -344,7 +343,6 @@ extension KernelHandle {
                         typedGroupRoster: typedGroupRoster,
                         typedPublishOutbox: typedPublishOutbox,
                         typedActiveAccount: typedActiveAccount,
-                        typedGroupDefaults: typedGroupDefaults,
                         typedProjections: envelopes,
                         typedRelaySelector: typedRelaySelector,
                         typedRelayDiagnostics: typedRelayDiagnostics,

@@ -4,10 +4,8 @@
 //! relay set + the suggested NIP-29 public-group host relay. Keeping the URLs
 //! here (Rust) — not in the Swift/Kotlin shell — upholds the thin-shell
 //! doctrine (D7): the shell never hardcodes a relay URL or a relay role. The
-//! same constants feed both [`crate::TwentyNinerApp::seed_default_relays`] and
-//! the NIP-29 group-defaults projection (`wire_group_defaults_with_relay`), so
-//! a new public group's host relay and the bootstrap relay can never drift
-//! apart.
+//! same constants feed relay seeding, relay selection, and TUI login defaults,
+//! so a new public group's host relay and the bootstrap relay can never drift.
 
 /// One `{url, role}` bootstrap relay entry. `role` is an NMP relay-role token
 /// (e.g. `"both"` / `"indexer"`), handed verbatim to the app's relay seeding
@@ -19,8 +17,7 @@ pub struct TwentyNinerRelayBootstrapEntry {
 }
 
 /// 29er's bootstrap NIP-29 relay (R002 / M001 product decision). Also the
-/// suggested host relay for new public groups, surfaced through the generic
-/// `nmp.nip29.group_defaults` projection so the shell does not hardcode it.
+/// suggested host relay for new public groups.
 pub const NIP29_RELAY_URL: &str = "wss://nip29.f7z.io";
 
 /// The relays seeded onto a fresh 29er install. NIP-29 group traffic (read +
@@ -40,9 +37,8 @@ pub fn default_relay_bootstrap() -> &'static [TwentyNinerRelayBootstrapEntry] {
 
 /// 29er's suggested NIP-29 public-group host relay.
 ///
-/// This is 29er operator policy, surfaced through the generic NIP-29 defaults
-/// projection (`nmp.nip29.group_defaults`) so the native shell pre-fills its
-/// editable relay field without hardcoding the URL.
+/// This is 29er operator policy. Native shells may read it through the app
+/// facade/config path, but must not hardcode the URL independently.
 #[must_use]
 pub fn public_group_relay_url() -> &'static str {
     NIP29_RELAY_URL
