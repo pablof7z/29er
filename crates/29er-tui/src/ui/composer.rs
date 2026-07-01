@@ -126,11 +126,11 @@ impl Composer {
             }
         }
     }
-    fn latest_failed(&self) -> Option<String> {
+    fn latest_retryable(&self) -> Option<String> {
         self.outbox
             .iter()
             .rev()
-            .find(|i| matches!(i.status, OutboxStatus::Failed))
+            .find(|i| i.can_retry)
             .map(|i| i.correlation_id.clone())
     }
     fn outbox_lines(&self) -> Vec<Line<'static>> {
@@ -149,7 +149,7 @@ impl Composer {
                     Span::styled(format!("{glyph} "), Style::default().fg(color)),
                     Span::styled(preview, Style::default().fg(ui::SUBTEXT0)),
                 ];
-                if matches!(it.status, OutboxStatus::Failed) {
+                if it.can_retry {
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled(
                         "[Ctrl-R retry]",
@@ -235,7 +235,7 @@ impl Component for Composer {
         if key.modifiers.contains(KeyModifiers::CONTROL)
             && matches!(key.code, KeyCode::Char('r') | KeyCode::Char('R'))
         {
-            return self.latest_failed().map(Action::RetryOutbox);
+            return self.latest_retryable().map(Action::RetryOutbox);
         }
         if self.mention_open {
             match key.code {
@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(c.matches("a").len(), 1);
     }
     #[test]
-    fn ctrl_r_retries_latest_failed() {
+    fn ctrl_r_retries_latest_nmp_retryable_item() {
         let mut c = Composer::new();
         c.outbox = vec![PublishOutboxItem {
             correlation_id: "29er-1".into(),
@@ -363,6 +363,8 @@ mod tests {
             error: None,
             mention_pubkeys: Vec::new(),
             event_id: None,
+            retry_handle: Some("event-handle".into()),
+            can_retry: true,
             dispatched_at: std::time::Instant::now(),
         }];
         let ev = Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
