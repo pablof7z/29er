@@ -34,7 +34,7 @@ final class M002RelayFlowUITests: XCTestCase {
 
     func testM002RelayActionsPublishToRelay() throws {
         let app = XCUIApplication()
-        app.launchEnvironment["M001_DEFAULT_RELAY_URL"] = relayURL.absoluteString
+        app.launchEnvironment["NMP_TEST_RELAYS"] = "[[\"\(relayURL.absoluteString)\",\"both\"]]"
         app.launchEnvironment["S03_AUTO_SIGN_IN_NSEC"] = appNsec
         app.launch()
 

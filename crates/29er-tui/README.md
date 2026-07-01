@@ -8,15 +8,12 @@ A terminal UI for 29er — a NIP-29 relay-based group chat client.
 # From the workspace root:
 NMP_NSEC=nsec1... cargo run -p tui-29er --bin 29er-tui
 
-# Or with a custom relay:
-NMP_NSEC=nsec1... NMP_RELAY=wss://your-relay.example.com cargo run -p tui-29er --bin 29er-tui
-
 # Without credentials (demo mode):
 cargo run -p tui-29er --bin 29er-tui
 ```
 
-## Default relay
-wss://nip29.f7z.io
+The login relay field is pre-filled from `nmp-app-29er`'s Rust-owned app
+configuration. Edit that field during login to use a different relay.
 
 ## Keybindings
 | Key | Action |
@@ -65,5 +62,5 @@ tmux new-session -d -s smoke -x 180 -y 48 && \
 **The TUI NEVER:**
 - Stores nsec after handing it to NMP
 - Constructs Nostr events or tags directly
-- Makes relay decisions
+- Owns relay defaults or hidden relay fallbacks
 - Derives membership/admin state locally

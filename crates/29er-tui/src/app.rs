@@ -448,8 +448,8 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(relay_url: impl Into<String>, projection_tx: watch::Sender<ProjectionView>) -> Self {
-        let relay_url = relay_url.into();
+    pub fn new(projection_tx: watch::Sender<ProjectionView>) -> Self {
+        let relay_url = nmp_app_29er::config::public_group_relay_url().to_string();
         let shared = Arc::new(SharedProjections {
             group_tree: Arc::new(GroupTreeProjection::new()),
             discovered: Mutex::new(None),
@@ -499,16 +499,21 @@ impl App {
     }
 
     /// Validate + hand the nsec straight to NMP, never storing it (issue #10).
-    /// `relay` overrides the relay URL configured at startup (collected in Step 2).
+    /// `relay` is the Step 2 user-visible relay selection. The field is
+    /// prefilled from Rust-owned 29er app config, but an edited value is
+    /// explicit user input.
     pub fn login(&mut self, nsec: String, relay: String) {
         let nsec = nsec.trim().to_string();
         if !nsec.starts_with("nsec1") {
             self.login_error = Some("Secret key must start with nsec1\u{2026}".to_string());
             return;
         }
-        if !relay.is_empty() {
-            self.relay_url = relay;
+        let relay = relay.trim().to_string();
+        if relay.is_empty() {
+            self.login_error = Some("Relay URL is required".to_string());
+            return;
         }
+        self.relay_url = relay;
         match self.init_nmp(&nsec) {
             Ok(()) => {
                 self.screen = Screen::App;
@@ -1579,7 +1584,7 @@ mod tests {
     }
     fn make_app() -> (App, watch::Receiver<ProjectionView>) {
         let (tx, rx) = watch::channel(ProjectionView::default());
-        (App::new("wss://relay.example.com", tx), rx)
+        (App::new(tx), rx)
     }
 
     fn chat_msg(id: &str, pubkey: &str, created_at: u64, content: &str) -> GroupChatMessage {

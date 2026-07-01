@@ -338,8 +338,12 @@ mod tests {
     #[test]
     fn projection_uses_fallback_until_active_account_relay_set_arrives() {
         let active = Arc::new(Mutex::new(None));
-        let projection = RelaySelectorProjection::new(active, "wss://NIP29.F7Z.IO/".to_string());
-        assert_eq!(projection.snapshot().active_relay_url, "wss://nip29.f7z.io");
+        let projection =
+            RelaySelectorProjection::new(active, "wss://Fallback.Example/".to_string());
+        assert_eq!(
+            projection.snapshot().active_relay_url,
+            "wss://fallback.example"
+        );
         assert!(!projection.snapshot().relays[0].from_nip51);
     }
 
@@ -347,7 +351,7 @@ mod tests {
     fn projection_reads_active_account_kind_30002_relay_set() {
         let active = Arc::new(Mutex::new(Some("pubkey".to_string())));
         let projection =
-            RelaySelectorProjection::new(Arc::clone(&active), "wss://nip29.f7z.io".to_string());
+            RelaySelectorProjection::new(Arc::clone(&active), "wss://fallback.example".to_string());
         projection.on_kernel_event(&KernelEvent {
             id: "event".to_string(),
             author: "pubkey".to_string(),
