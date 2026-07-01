@@ -18,33 +18,34 @@
 //! source of truth for the runtime) — Swift just calls `open_group_discovery`
 //! / `close_group_discovery` etc. with no handle of its own to manage.
 //!
-//! ## The group-tree composite (`"nmp.29er.group_tree"`)
+//! ## The group-tree composite (`"app.29er.group_tree"`)
 //!
 //! `open_group_discovery` layers ONE 29er-owned read on top of NMP's
-//! canonical discovery + joined-groups doors: a hydrating, relay-pinned kind:9
-//! observed projection feeding [`crate::group_tree::GroupTreeProjection`]
-//! (per-group unread + last-message preview), composed with the discovery
-//! door's catalog and the joined-groups door's membership truth into the
-//! app-owned `"nmp.29er.group_tree"` typed snapshot. This is the same
-//! composition 29er wants for its discover screen.
+//! canonical discovery + joined-groups doors: an observed feed-source session
+//! over the active user's hosted groups feeding
+//! [`crate::group_tree::GroupTreeProjection`] (per-group unread + last-message
+//! preview), composed with the discovery door's catalog and the joined-groups
+//! door's membership truth into the app-owned `"app.29er.group_tree"` typed
+//! snapshot. This is the same composition 29er wants for its discover screen.
 //!
 //! ## Joined-groups tracking is reactive, not a one-shot snapshot
 //!
 //! This module registers an identity-change observer (the same pattern
 //! `29er-tui::init_nmp` uses) once, in [`GroupSessions::new`], so the
 //! joined-groups session — and therefore the `is_member`/`is_admin` flags
-//! folded into `"nmp.29er.group_tree"` — stays correct across a later sign-in
+//! folded into `"app.29er.group_tree"` — stays correct across a later sign-in
 //! or account switch, not just whatever account happened to be active when
 //! discovery was opened.
 
 use std::sync::{Arc, Mutex};
 
-use nmp_core::substrate::{ObservedProjection, ObservedProjectionRegistrar};
-use nmp_core::{ObservedProjectionId, ObservedProjectionSink, TypedProjectionData};
+use nmp_core::ObservedProjectionSink;
+use nmp_core::TypedProjectionData;
 use nmp_native_runtime::{
+    FeedAdmission, FeedHandle, FeedParams, FeedRanking, FeedRender, FeedScope, FeedWindow,
     Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
     Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
-    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
+    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp, ProjectionKey,
 };
 use nmp_nip29::{GroupEventsProjection, GroupId, JoinedGroupsProjection};
 
@@ -60,27 +61,21 @@ use crate::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use crate::DispatchOutcome;
 use crate::TwentyNinerApp;
 
-/// `1` = `Global` scope (account-agnostic) — matches the discovery door's own
-/// scope for the 29er-owned kind:9 tree observer (`nmp-native-runtime`'s
-/// `group_feed` module keeps the same constant private, so it is re-declared
-/// here for this one consumer).
-const SCOPE_GLOBAL: u32 = 1;
-
 /// Bounded read-cache replay budget for the 29er kind:9 group-tree observed
-/// projection. Mirrors `nmp_feed::DEFAULT_FEED_WINDOW_LIMIT` (80) — kept as a
+/// feed source. Mirrors `nmp_feed::DEFAULT_FEED_WINDOW_LIMIT` (80) — kept as a
 /// local const so this crate does not take an `nmp-feed` dependency just for
 /// one number.
 const GROUP_TREE_REPLAY_LIMIT: usize = 80;
 
-/// The live `"nmp.29er.group_tree"` composition opened by
+/// The live `"app.29er.group_tree"` composition opened by
 /// [`GroupSessions::open_discovery`].
 struct DiscoverySession {
     handle: Nip29GroupDiscoveryHandle,
-    tree_observer_id: ObservedProjectionId,
+    tree_feed_handle: FeedHandle,
     tree_projection: Arc<GroupTreeProjection>,
 }
 
-/// The live `"nmp.29er.group_chat"` composition opened by
+/// The live `"app.29er.group_chat"` composition opened by
 /// [`GroupSessions::open_chat`].
 struct ChatSession {
     handle: Nip29GroupEventsHandle,
@@ -102,7 +97,7 @@ pub(crate) struct GroupSessions {
     joined_relay: Arc<Mutex<Option<String>>>,
     joined: Arc<Mutex<Option<Nip29JoinedGroupsHandle>>>,
     /// The live joined-groups projection reader, shared with the
-    /// `"nmp.29er.group_tree"` composition closure so membership stays
+    /// `"app.29er.group_tree"` composition closure so membership stays
     /// reactive across an account switch (re-read every snapshot tick).
     joined_reader: Arc<Mutex<Option<Arc<JoinedGroupsProjection>>>>,
 }
@@ -184,8 +179,7 @@ impl GroupSessions {
         sync_joined_session(app, None, None, &self.joined, &self.joined_reader);
         if let Ok(mut slot) = self.discovery.lock() {
             if let Some(session) = slot.take() {
-                app.close_observed_projection(session.tree_observer_id);
-                app.remove_snapshot_projection(GROUP_TREE_SCHEMA_ID);
+                app.close_feed(&session.tree_feed_handle);
                 app.close_nip29_group_discovery_session(session.handle);
             }
         }
@@ -304,7 +298,7 @@ fn sync_joined_session(
 
 /// Open NMP's canonical discovery door and layer the 29er-owned kind:9
 /// group-tree composite on top. Returns `None` (D6 fail-closed) when the
-/// kernel refuses the kind:9 observed projection.
+/// kernel refuses the observed feed-source session.
 fn build_discovery_session(
     app: &NmpApp,
     relay_url: String,
@@ -315,65 +309,82 @@ fn build_discovery_session(
     );
 
     let tree_messages = Arc::new(GroupTreeProjection::new());
-    let filter_json = format!(r#"{{"kinds":[{KIND_CHAT_MESSAGE}]}}"#);
-    let Some(mut shape) = nmp_planner::InterestShape::from_filter_json(&filter_json) else {
-        app.close_nip29_group_discovery_session(discovery_handle);
-        return None;
+    let tree_feed_params = FeedParams {
+        primary_kinds: vec![KIND_CHAT_MESSAGE],
+        render: FeedRender::Flat,
+        acquisition: FeedScope::ActiveUserHostedGroups,
+        admission: FeedAdmission::All,
+        ranking: FeedRanking::ChronologicalDesc,
+        window: FeedWindow {
+            initial_limit: GROUP_TREE_REPLAY_LIMIT,
+        },
+        projection: ProjectionKey::app_owned(GROUP_TREE_SCHEMA_ID)
+            .expect("29er group-tree projection key must stay app-owned"),
     };
-    shape.relay_pin = Some(relay_url.clone());
-    let tree_observer_id = app.open_observed_projection(ObservedProjection::from_shape(
+    let reset_tree: Arc<dyn Fn() + Send + Sync> = {
+        let tree_messages = Arc::clone(&tree_messages);
+        Arc::new(move || tree_messages.clear())
+    };
+    let tree_feed_handle = match app.open_observed_feed_source(
+        &tree_feed_params,
         Arc::clone(&tree_messages) as Arc<dyn ObservedProjectionSink>,
-        format!("29er.facade.group_tree.kind9:{relay_url}"),
-        SCOPE_GLOBAL,
-        shape,
         GROUP_TREE_REPLAY_LIMIT,
-    ));
-    if tree_observer_id.0 == 0 {
-        app.close_nip29_group_discovery_session(discovery_handle);
-        return None;
-    }
+        Some(reset_tree),
+    ) {
+        Ok(handle) => handle,
+        Err(_) => {
+            app.close_nip29_group_discovery_session(discovery_handle);
+            return None;
+        }
+    };
 
     let tree_discovered = Arc::clone(&discovered);
     let tree_messages_for_sidecar = Arc::clone(&tree_messages);
     let active_account = app.active_account_handle();
     let joined_reader_for_sidecar = Arc::clone(joined_reader);
-    app.register_typed_snapshot_projection(GROUP_TREE_SCHEMA_ID, move || {
-        let snapshot = tree_discovered.snapshot();
-        let messages = tree_messages_for_sidecar.snapshot();
-        // Re-read the live active pubkey + joined reader every tick so
-        // membership is recomputed on an account switch and never leaks a
-        // previous account's truth.
-        let active_pubkey = active_account
-            .lock()
-            .ok()
-            .and_then(|slot| slot.clone())
-            .unwrap_or_default();
-        let joined_snapshot = joined_reader_for_sidecar
-            .lock()
-            .ok()
-            .and_then(|slot| slot.clone())
-            .map(|projection| projection.snapshot())
-            .unwrap_or_default();
-        let membership = membership_from_joined(&joined_snapshot, &active_pubkey);
-        Some(TypedProjectionData {
-            key: GROUP_TREE_SCHEMA_ID.to_string(),
-            schema_id: GROUP_TREE_SCHEMA_ID.to_string(),
-            schema_version: GROUP_TREE_SCHEMA_VERSION,
-            file_identifier: String::from_utf8_lossy(GROUP_TREE_FILE_IDENTIFIER).into_owned(),
-            payload: encode_group_tree_snapshot(&snapshot, &messages, &membership),
-            ..Default::default()
-        })
-    });
+    app.register_typed_snapshot_projection(
+        tree_feed_params.projection.dynamic_token(),
+        move || {
+            let snapshot = tree_discovered.snapshot();
+            let messages = tree_messages_for_sidecar.snapshot();
+            // Re-read the live active pubkey + joined reader every tick so
+            // membership is recomputed on an account switch and never leaks a
+            // previous account's truth.
+            let active_pubkey = active_account
+                .lock()
+                .ok()
+                .and_then(|slot| slot.clone())
+                .unwrap_or_default();
+            let joined_snapshot = joined_reader_for_sidecar
+                .lock()
+                .ok()
+                .and_then(|slot| slot.clone())
+                .map(|projection| projection.snapshot())
+                .unwrap_or_default();
+            let membership = membership_from_joined(&joined_snapshot, &active_pubkey);
+            Some(TypedProjectionData {
+                key: GROUP_TREE_SCHEMA_ID.to_string(),
+                schema_id: GROUP_TREE_SCHEMA_ID.to_string(),
+                schema_version: GROUP_TREE_SCHEMA_VERSION,
+                file_identifier: String::from_utf8_lossy(GROUP_TREE_FILE_IDENTIFIER).into_owned(),
+                payload: encode_group_tree_snapshot(&snapshot, &messages, &membership),
+                ..Default::default()
+            })
+        },
+    );
 
     Some(DiscoverySession {
         handle: discovery_handle,
-        tree_observer_id,
+        tree_feed_handle,
         tree_projection: tree_messages,
     })
 }
 
 fn register_group_chat_snapshot(app: &NmpApp, reader: Arc<GroupEventsProjection>) {
-    app.register_typed_snapshot_projection(GROUP_CHAT_SCHEMA_ID, move || {
+    let registration_key = ProjectionKey::app_owned(GROUP_CHAT_SCHEMA_ID)
+        .expect("29er group-chat projection key must stay app-owned")
+        .dynamic_token();
+    app.register_typed_snapshot_projection(registration_key, move || {
         let snapshot = reader.snapshot();
         Some(TypedProjectionData {
             key: GROUP_CHAT_SCHEMA_ID.to_string(),
@@ -403,7 +414,7 @@ impl TwentyNinerApp {
     /// Open a NIP-29 group-discovery session for one host relay: NMP's
     /// canonical discovery + joined-groups doors, plus the 29er-owned kind:9
     /// group-tree composite (per-group unread + last-message preview +
-    /// viewer membership), folded into the `"nmp.29er.group_tree"` typed
+    /// viewer membership), folded into the `"app.29er.group_tree"` typed
     /// snapshot the iOS shell reads through [`crate::UpdateSink`].
     ///
     /// Replaces any previously open discovery session. `false` (D6) on an
@@ -539,7 +550,7 @@ mod tests {
         let app = TwentyNinerApp::new();
         assert!(app.open_group_discovery("wss://groups.example.com".to_string()));
         assert!(app.open_group_discovery("wss://other-groups.example.com".to_string()));
-        // Only ONE "nmp.29er.group_tree" registration should be live — the
+        // Only ONE "app.29er.group_tree" registration should be live — the
         // first session's observer/sidecar must have been torn down, not
         // leaked alongside the second.
         let count = app

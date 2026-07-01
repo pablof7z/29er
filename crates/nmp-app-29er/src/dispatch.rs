@@ -24,7 +24,7 @@ const CHAT_SEND_NAMESPACE: &str = "nmp.nip29.post_chat_message";
 /// 29er's app-level child-channel doorway. The shell supplies only the parent
 /// group and display fields; this Rust app crate owns the child local-id policy
 /// and re-emits the typed NIP-29 create-group action.
-const CREATE_CHILD_GROUP_NAMESPACE: &str = "nmp.29er.create_child_group";
+const CREATE_CHILD_GROUP_NAMESPACE: &str = "app.29er.create_child_group";
 /// The real NIP-29 generic-publish action namespace the composed chat send is
 /// dispatched under.
 const PUBLISH_GROUP_EVENT_NAMESPACE: &str = "nmp.nip29.publish_group_event";

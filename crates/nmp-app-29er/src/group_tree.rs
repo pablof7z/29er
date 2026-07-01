@@ -13,7 +13,7 @@ mod generated;
 
 use generated::nmp_app_29er as fb;
 
-pub const GROUP_TREE_SCHEMA_ID: &str = "nmp.29er.group_tree";
+pub const GROUP_TREE_SCHEMA_ID: &str = "app.29er.group_tree";
 pub const GROUP_TREE_SCHEMA_VERSION: u32 = 1;
 pub const GROUP_TREE_FILE_IDENTIFIER: &[u8; 4] = b"N29T";
 
@@ -163,6 +163,12 @@ impl GroupTreeProjection {
         };
         let bucket = groups.entry(group_id.to_string()).or_default();
         bucket.unread_count = 0;
+    }
+
+    pub fn clear(&self) {
+        if let Ok(mut groups) = self.groups.lock() {
+            groups.clear();
+        }
     }
 
     #[must_use]

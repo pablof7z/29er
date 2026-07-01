@@ -17,13 +17,13 @@ use nmp_app_29er::{compose_29er_runtime, dispatch_nip29_action, DispatchOutcome}
 use nmp_content::embed_projection::EmbeddedEventEnvelope;
 use nmp_content::wire::{decode_ref_event_envelopes, EMBED_SIDECAR_PROJECTION_KEY};
 use nmp_core::refs::{RefProfileStore, REFS_PROFILE_KEY};
-use nmp_core::substrate::{ObservedProjection, ObservedProjectionRegistrar};
 use nmp_core::typed_projections::{decode_publish_outbox, PUBLISH_OUTBOX_SCHEMA_ID};
-use nmp_core::{ObservedProjectionId, ObservedProjectionSink};
+use nmp_core::ObservedProjectionSink;
 use nmp_native_runtime::{
-    new_app, Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
+    new_app, FeedAdmission, FeedHandle, FeedParams, FeedRanking, FeedRender, FeedScope, FeedWindow,
+    Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
     Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
-    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
+    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp, ProjectionKey,
 };
 use nmp_nip29::projection::{
     DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, GroupRosterMember,
@@ -414,7 +414,7 @@ pub struct App {
     /// Event refs currently claimed from visible chat messages. The Rust-owned
     /// group-chat projection supplies primary IDs; the TUI only refcounts them.
     claimed_event_refs: HashSet<String>,
-    group_tree_observer_id: Option<ObservedProjectionId>,
+    group_tree_feed_handle: Option<FeedHandle>,
     latest: ProjectionView,
     screen: Screen,
     focus: Focus,
@@ -469,7 +469,7 @@ impl App {
             discovery_handle: None,
             claimed_profile_authors: HashSet::new(),
             claimed_event_refs: HashSet::new(),
-            group_tree_observer_id: None,
+            group_tree_feed_handle: None,
             screen: Screen::Login,
             focus: Focus::RoomList,
             focus_stack: Vec::new(),
@@ -547,22 +547,32 @@ impl App {
             *slot = Some(discovered);
         }
 
-        let mut tree_shape = nmp_planner::InterestShape::from_filter_json(&format!(
-            r#"{{"kinds":[{KIND_CHAT_MESSAGE}]}}"#
-        ))
-        .ok_or_else(|| anyhow::anyhow!("failed to build group-tree interest shape"))?;
-        tree_shape.relay_pin = Some(relay.clone());
-        let tree_observer_id = app.open_observed_projection(ObservedProjection::from_shape(
+        let tree_feed_params = FeedParams {
+            primary_kinds: vec![KIND_CHAT_MESSAGE],
+            render: FeedRender::Flat,
+            acquisition: FeedScope::ActiveUserHostedGroups,
+            admission: FeedAdmission::All,
+            ranking: FeedRanking::ChronologicalDesc,
+            window: FeedWindow { initial_limit: 80 },
+            projection: ProjectionKey::app_owned("app.29er.tui.group_tree")
+                .expect("29er TUI group-tree projection key must stay app-owned"),
+        };
+        let reset_tree: Arc<dyn Fn() + Send + Sync> = {
+            let group_tree = Arc::clone(&self.shared.group_tree);
+            Arc::new(move || group_tree.clear())
+        };
+        let tree_feed_handle = match app.open_observed_feed_source(
+            &tree_feed_params,
             Arc::clone(&self.shared.group_tree) as Arc<dyn ObservedProjectionSink>,
-            format!("29er.tui.group_tree.kind9:{relay}"),
-            1,
-            tree_shape,
             80,
-        ));
-        if tree_observer_id.0 == 0 {
-            app.close_nip29_group_discovery_session(discovery_handle);
-            anyhow::bail!("failed to open group-tree observer");
-        }
+            Some(reset_tree),
+        ) {
+            Ok(handle) => handle,
+            Err(error) => {
+                app.close_nip29_group_discovery_session(discovery_handle);
+                anyhow::bail!("failed to open group-tree feed source: {error:?}");
+            }
+        };
 
         // `nmp-native-runtime` owns the app by value now (no `*mut NmpApp`), so
         // it is wrapped in an `Arc` here purely so the `'static` identity-change
@@ -632,7 +642,7 @@ impl App {
         );
         self.app = Some(app);
         self.discovery_handle = Some(discovery_handle);
-        self.group_tree_observer_id = Some(tree_observer_id);
+        self.group_tree_feed_handle = Some(tree_feed_handle);
 
         let discover_body = serde_json::json!({ "relay_url": relay }).to_string();
         self.dispatch_json("nmp.nip29.discover", &discover_body);
@@ -941,7 +951,7 @@ impl App {
         })
         .to_string();
         self.set_status_message("Creating channel\u{2026}".to_string());
-        let result = self.dispatch_json("nmp.29er.create_child_group", &body);
+        let result = self.dispatch_json("app.29er.create_child_group", &body);
         self.record_dispatch_error(result);
         self.close_form();
     }
@@ -1157,8 +1167,8 @@ impl Drop for App {
             self.release_event_ref(&primary_id);
         }
         let Some(app) = self.app.take() else { return };
-        if let Some(id) = self.group_tree_observer_id.take() {
-            app.close_observed_projection(id);
+        if let Some(handle) = self.group_tree_feed_handle.take() {
+            app.close_feed(&handle);
         }
         if let Some(handle) = self.discovery_handle.take() {
             app.close_nip29_group_discovery_session(handle);

@@ -10,7 +10,7 @@ mod generated;
 
 use generated::nmp_app_29er as fb;
 
-pub const GROUP_CHAT_SCHEMA_ID: &str = "nmp.29er.group_chat";
+pub const GROUP_CHAT_SCHEMA_ID: &str = "app.29er.group_chat";
 pub const GROUP_CHAT_SCHEMA_VERSION: u32 = 1;
 pub const GROUP_CHAT_FILE_IDENTIFIER: &[u8; 4] = b"N29C";
 
@@ -117,7 +117,10 @@ fn derive_group_chat_message(
                 }
             }
             WireNode::EventRef { uri } => {
-                if matches!(uri.kind, WireNostrUriKind::Event | WireNostrUriKind::Address) {
+                if matches!(
+                    uri.kind,
+                    WireNostrUriKind::Event | WireNostrUriKind::Address
+                ) {
                     if !uri.uri.is_empty() {
                         event_ref_uris.insert(uri.uri.clone());
                         snapshot_event_ref_uris.insert(uri.uri.clone());
@@ -157,8 +160,7 @@ fn encode_group_chat_projection(snapshot: &GroupChatSnapshot) -> Vec<u8> {
         .map(|message| encode_message(&mut fbb, message))
         .collect();
     let messages = fbb.create_vector(&message_offsets);
-    let profile_demand_pubkeys =
-        encode_string_vector(&mut fbb, &snapshot.profile_demand_pubkeys);
+    let profile_demand_pubkeys = encode_string_vector(&mut fbb, &snapshot.profile_demand_pubkeys);
     let event_ref_uris = encode_string_vector(&mut fbb, &snapshot.event_ref_uris);
     let event_ref_primary_ids = encode_string_vector(&mut fbb, &snapshot.event_ref_primary_ids);
 
@@ -210,7 +212,10 @@ fn encode_string_vector<'a>(
     fbb: &mut flatbuffers::FlatBufferBuilder<'a>,
     values: &[String],
 ) -> flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>> {
-    let offsets: Vec<_> = values.iter().map(|value| fbb.create_string(value)).collect();
+    let offsets: Vec<_> = values
+        .iter()
+        .map(|value| fbb.create_string(value))
+        .collect();
     fbb.create_vector(&offsets)
 }
 
