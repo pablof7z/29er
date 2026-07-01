@@ -9,7 +9,7 @@
 //!
 //! * [`TwentyNinerApp`] — a `uniffi::Object` that OWNS an
 //!   `nmp-native-runtime` app, composes 29er in its constructor, and exposes
-//!   29er's lifecycle, relay selector, refs, content tokenizer, reactions,
+//!   29er's lifecycle, relay selector, refs, reactions,
 //!   and NIP-29 group-read sessions through UniFFI. The iOS shell consumes
 //!   generated Swift bindings (see `src/bin/uniffi_bindgen.rs`).
 //! * [`group_sessions`] — the NIP-29 group-discovery / group-chat /
@@ -17,7 +17,7 @@
 //!   a second `impl TwentyNinerApp` block.
 //! * [`composition::compose_29er_runtime`] — the shared composition root,
 //!   also called directly by the native Rust TUI on its own app instance.
-//! * Pure modules ([`compose`], [`config`], [`group_tree`],
+//! * Pure modules ([`compose`], [`config`], [`group_chat`], [`group_tree`],
 //!   [`relay_seeding`], [`dispatch`]) reused by both the facade and the TUI.
 //!
 //! ## Doctrine
@@ -35,8 +35,8 @@ pub mod capability;
 pub mod compose;
 pub mod composition;
 pub mod config;
-pub mod content;
 pub mod dispatch;
+pub mod group_chat;
 mod group_sessions;
 pub mod group_tree;
 pub mod kinds;
@@ -49,5 +49,4 @@ pub use app::{DispatchOutcome, TwentyNinerApp, UpdateSink};
 pub use capability::CapabilitySink;
 pub use compose::{compose_chat_message, ComposedGroupMessage};
 pub use composition::compose_29er_runtime;
-pub use content::tokenize_content;
 pub use dispatch::dispatch_nip29_action;

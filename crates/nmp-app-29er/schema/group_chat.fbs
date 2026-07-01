@@ -1,0 +1,25 @@
+namespace nmp_app_29er;
+
+table GroupChatMessage {
+  id:string (required);
+  pubkey:string (required);
+  raw_content:string (required);
+  copy_text:string (required);
+  created_at:uint64;
+  kind:uint32;
+  content_tree_bytes:[ubyte];
+  mention_pubkeys:[string];
+  event_ref_uris:[string];
+  event_ref_primary_ids:[string];
+}
+
+table GroupChatSnapshot {
+  schema_version:uint32 = 1;
+  messages:[GroupChatMessage];
+  profile_demand_pubkeys:[string];
+  event_ref_uris:[string];
+  event_ref_primary_ids:[string];
+}
+
+root_type GroupChatSnapshot;
+file_identifier "N29C";

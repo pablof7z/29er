@@ -6,13 +6,16 @@
 //! composition root the `TwentyNinerApp` UniFFI facade uses) and talks to
 //! `nmp_native_runtime::NmpApp`'s NIP-29 session methods directly, instead of
 //! going through the facade object.
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use nmp_app_29er::group_chat::{GroupChatMessage, GroupChatProjection};
 use nmp_app_29er::group_tree::{GroupTreeMessageState, GroupTreeProjection};
 use nmp_app_29er::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use nmp_app_29er::{compose_29er_runtime, dispatch_nip29_action, DispatchOutcome};
+use nmp_content::embed_projection::EmbeddedEventEnvelope;
+use nmp_content::wire::{decode_ref_event_envelopes, EMBED_SIDECAR_PROJECTION_KEY};
 use nmp_core::refs::{RefProfileStore, REFS_PROFILE_KEY};
 use nmp_core::substrate::{ObservedProjection, ObservedProjectionRegistrar};
 use nmp_core::{ObservedProjectionId, ObservedProjectionSink};
@@ -21,8 +24,7 @@ use nmp_native_runtime::{
     Nip29GroupEventsSession, Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
 };
 use nmp_nip29::projection::{
-    DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot,
-    GroupEvent as GroupChatMessage, GroupEventsProjection, JoinedGroupsProjection,
+    DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, JoinedGroupsProjection,
 };
 use nmp_nip29::GroupId;
 use tokio::sync::watch;
@@ -177,6 +179,7 @@ pub struct TuiSnapshot {
     pub selected_messages: Vec<GroupChatMessage>,
     pub selected_members: Vec<GroupMemberRow>,
     pub profiles: HashMap<String, TuiProfile>,
+    pub event_envelopes: BTreeMap<String, EmbeddedEventEnvelope>,
     pub is_admin: bool,
     pub my_pubkey: Option<String>,
     pub publish_outbox: Vec<PublishOutboxItem>,
@@ -212,6 +215,7 @@ pub struct ProjectionView {
     pub selected_messages: Vec<GroupChatMessage>,
     pub selected_members: Vec<GroupMemberRow>,
     pub profiles: HashMap<String, TuiProfile>,
+    pub event_envelopes: BTreeMap<String, EmbeddedEventEnvelope>,
     pub is_admin: bool,
     pub my_pubkey: Option<String>,
     pub identity_state: IdentityState,
@@ -248,9 +252,10 @@ pub struct SharedProjections {
     /// closure, which runs on the actor thread.
     pub joined_handle: Mutex<Option<Nip29JoinedGroupsHandle>>,
     pub active_account: Mutex<ActiveAccountSlot>,
-    pub selected_chat: Mutex<Option<Arc<GroupEventsProjection>>>,
+    pub selected_chat: Mutex<Option<Arc<GroupChatProjection>>>,
     pub selected_group: Mutex<Option<GroupId>>,
     pub profile_refs: Mutex<RefProfileStore>,
+    pub event_envelopes: Mutex<BTreeMap<String, EmbeddedEventEnvelope>>,
     /// Set on each pushed snapshot that returns non-empty data; drives relay-state indicator.
     pub last_update_at: Mutex<Option<std::time::Instant>>,
 }
@@ -274,7 +279,7 @@ impl SharedProjections {
             .selected_chat
             .lock()
             .ok()
-            .and_then(|c| c.as_ref().map(|c| c.snapshot().events))
+            .and_then(|c| c.as_ref().map(|c| c.snapshot().messages))
             .unwrap_or_default();
         // The per-member roster API was removed in v0.8.0; no source yet.
         let members: Vec<GroupMemberRow> = Vec::new();
@@ -320,12 +325,18 @@ impl SharedProjections {
                     .collect()
             })
             .unwrap_or_default();
+        let event_envelopes = self
+            .event_envelopes
+            .lock()
+            .map(|entries| entries.clone())
+            .unwrap_or_default();
         let last_data_at = self.last_update_at.lock().ok().and_then(|ts| *ts);
         ProjectionView {
             channel_tree,
             selected_messages,
             selected_members: members,
             profiles,
+            event_envelopes,
             is_admin,
             my_pubkey: me,
             identity_state,
@@ -354,6 +365,9 @@ pub struct App {
     /// ([`Self::sync_visible_profile_refs`]) to claim newly-visible authors
     /// and release no-longer-visible ones.
     claimed_profile_authors: HashSet<String>,
+    /// Event refs currently claimed from visible chat messages. The Rust-owned
+    /// group-chat projection supplies primary IDs; the TUI only refcounts them.
+    claimed_event_refs: HashSet<String>,
     group_tree_observer_id: Option<ObservedProjectionId>,
     latest: ProjectionView,
     screen: Screen,
@@ -394,6 +408,7 @@ impl App {
             selected_chat: Mutex::new(None),
             selected_group: Mutex::new(None),
             profile_refs: Mutex::new(RefProfileStore::new()),
+            event_envelopes: Mutex::new(BTreeMap::new()),
             last_update_at: Mutex::new(None),
         });
         Self {
@@ -405,6 +420,7 @@ impl App {
             latest: ProjectionView::default(),
             discovery_handle: None,
             claimed_profile_authors: HashSet::new(),
+            claimed_event_refs: HashSet::new(),
             group_tree_observer_id: None,
             screen: Screen::Login,
             focus: Focus::RoomList,
@@ -581,6 +597,7 @@ impl App {
             .unwrap_or(false);
         self.latest = view;
         self.sync_visible_profile_refs();
+        self.sync_visible_event_refs();
         // Record the first moment we see fresh relay data (drives the 2s Connected flash).
         let is_connected_now = self
             .latest
@@ -629,7 +646,7 @@ impl App {
                     return m.id == *eid;
                 }
                 // Fallback: trimmed content equality (same pubkey already verified).
-                m.content.trim() == item.content.trim()
+                m.raw_content.trim() == item.content.trim()
             });
             if confirmed {
                 item.status = OutboxStatus::Confirmed;
@@ -644,6 +661,7 @@ impl App {
             selected_messages: self.latest.selected_messages.clone(),
             selected_members: self.latest.selected_members.clone(),
             profiles: self.latest.profiles.clone(),
+            event_envelopes: self.latest.event_envelopes.clone(),
             is_admin: self.latest.is_admin,
             my_pubkey: self.latest.my_pubkey.clone(),
             publish_outbox: self.outbox.clone(),
@@ -688,7 +706,10 @@ impl App {
             .latest
             .selected_messages
             .iter()
-            .map(|message| message.pubkey.clone())
+            .flat_map(|message| {
+                std::iter::once(message.pubkey.clone())
+                    .chain(message.mention_pubkeys.iter().cloned())
+            })
             .filter(|pubkey| !pubkey.is_empty())
             .collect();
         for pubkey in visible.difference(&self.claimed_profile_authors) {
@@ -698,6 +719,26 @@ impl App {
             self.release_profile_ref(pubkey);
         }
         self.claimed_profile_authors = visible;
+    }
+
+    fn sync_visible_event_refs(&mut self) {
+        if self.app.is_none() {
+            return;
+        }
+        let visible: HashSet<String> = self
+            .latest
+            .selected_messages
+            .iter()
+            .flat_map(|message| message.event_ref_primary_ids.iter().cloned())
+            .filter(|primary_id| !primary_id.is_empty())
+            .collect();
+        for primary_id in visible.difference(&self.claimed_event_refs) {
+            self.resolve_event_ref(primary_id);
+        }
+        for primary_id in self.claimed_event_refs.difference(&visible) {
+            self.release_event_ref(primary_id);
+        }
+        self.claimed_event_refs = visible;
     }
 
     /// Mirrors the deleted `nmp_ffi::nmp_app_resolve_profile_ref` typed
@@ -728,6 +769,30 @@ impl App {
         );
     }
 
+    fn resolve_event_ref(&self, primary_id: &str) {
+        let Some(app) = self.app.as_ref() else {
+            return;
+        };
+        app.resolve_ref(
+            nmp_core::RefNamespace::Event,
+            primary_id.to_string(),
+            "29er-tui.chat-embed".to_string(),
+            nmp_core::RefShape::Event(nmp_core::EventShape::Embed),
+            nmp_core::RefLiveness::CacheOk,
+        );
+    }
+
+    fn release_event_ref(&self, primary_id: &str) {
+        let Some(app) = self.app.as_ref() else {
+            return;
+        };
+        app.release_ref(
+            nmp_core::RefNamespace::Event,
+            primary_id.to_string(),
+            "29er-tui.chat-embed".to_string(),
+        );
+    }
+
     pub fn select_channel(&mut self, group: GroupId) {
         // Freeze the read marker for the channel we are leaving so that messages
         // arriving while the user is away will appear after the separator on return.
@@ -741,6 +806,9 @@ impl App {
         // one replaces (and closes) the prior one, so there is no per-group
         // cache to maintain — just track the latest handle for teardown.
         if let Some(app) = &self.app {
+            if let Some(handle) = self.group_events_handle.take() {
+                app.close_nip29_group_events_session(handle);
+            }
             let (handle, reader) =
                 app.open_nip29_group_events_session_with_reader(Nip29GroupEventsSession::new(
                     group.clone(),
@@ -748,7 +816,7 @@ impl App {
                 ));
             self.group_events_handle = Some(handle);
             if let Ok(mut slot) = self.shared.selected_chat.lock() {
-                *slot = Some(reader);
+                *slot = Some(Arc::new(GroupChatProjection::new(reader)));
             }
         }
         if let Ok(mut g) = self.shared.selected_group.lock() {
@@ -1098,6 +1166,10 @@ impl Drop for App {
         for pubkey in claimed {
             self.release_profile_ref(&pubkey);
         }
+        let claimed_events: Vec<String> = self.claimed_event_refs.drain().collect();
+        for primary_id in claimed_events {
+            self.release_event_ref(&primary_id);
+        }
         let Some(app) = self.app.take() else { return };
         if let Some(id) = self.group_tree_observer_id.take() {
             app.close_observed_projection(id);
@@ -1151,6 +1223,17 @@ fn on_nmp_update(bridge: &ProjectionUpdateBridge, bytes: Vec<u8>) {
         if let Some(entry) = typed.iter().find(|entry| entry.key == REFS_PROFILE_KEY) {
             if let Ok(mut store) = bridge.shared.profile_refs.lock() {
                 store.apply_sidecar(&entry.payload, envelope.session_id, envelope.snapshot_epoch);
+            }
+        }
+        if let Some(entry) = typed
+            .iter()
+            .find(|entry| entry.key == EMBED_SIDECAR_PROJECTION_KEY)
+        {
+            if let (Ok(next), Ok(mut store)) = (
+                decode_ref_event_envelopes(&entry.payload),
+                bridge.shared.event_envelopes.lock(),
+            ) {
+                *store = next;
             }
         }
     }
@@ -1299,7 +1382,6 @@ mod tests {
     use super::*;
     use nmp_app_29er::kinds::KIND_CHAT_MESSAGE;
     use nmp_core::substrate::KernelEvent;
-    use nmp_nip29::projection::GroupEvent as GroupChatMessage;
 
     fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
         DiscoveredGroup {
@@ -1340,6 +1422,23 @@ mod tests {
     fn make_app() -> (App, watch::Receiver<ProjectionView>) {
         let (tx, rx) = watch::channel(ProjectionView::default());
         (App::new("wss://relay.example.com", tx), rx)
+    }
+
+    fn chat_msg(id: &str, pubkey: &str, created_at: u64, content: &str) -> GroupChatMessage {
+        let tree = nmp_content::tokenize_with_kind(content, &[], nmp_content::RenderMode::Auto, 9)
+            .to_wire();
+        GroupChatMessage {
+            id: id.to_string(),
+            pubkey: pubkey.to_string(),
+            raw_content: content.to_string(),
+            copy_text: content.to_string(),
+            created_at,
+            kind: 9,
+            content_tree_bytes: nmp_content::wire::encode_content_tree(&tree),
+            mention_pubkeys: Vec::new(),
+            event_ref_uris: Vec::new(),
+            event_ref_primary_ids: Vec::new(),
+        }
     }
 
     // --- existing tests (issue #11 baseline) ---
@@ -1421,13 +1520,7 @@ mod tests {
         let snap = TuiSnapshot {
             channel_tree: vec![],
             selected_channel_id: Some(gid.clone()),
-            selected_messages: vec![GroupChatMessage {
-                id: "e1".to_string(),
-                pubkey: "pk1".to_string(),
-                content: "hello".to_string(),
-                created_at: 1000,
-                kind: 9,
-            }],
+            selected_messages: vec![chat_msg("e1", "pk1", 1000, "hello")],
             selected_members: vec![GroupMemberRow {
                 pubkey: "pk1".to_string(),
                 display_name: Some("Alice".to_string()),
@@ -1435,6 +1528,7 @@ mod tests {
                 role: None,
             }],
             profiles: HashMap::new(),
+            event_envelopes: BTreeMap::new(),
             is_admin: true,
             my_pubkey: Some("pk1".to_string()),
             publish_outbox: vec![PublishOutboxItem {
@@ -1574,13 +1668,7 @@ mod tests {
         });
 
         // The matching message MUST carry the same pubkey as my_pubkey.
-        let matching_msg = GroupChatMessage {
-            id: "event-1".to_string(),
-            pubkey: "my-pk".to_string(),
-            content: "hello world".to_string(),
-            created_at: 12345,
-            kind: 9,
-        };
+        let matching_msg = chat_msg("event-1", "my-pk", 12345, "hello world");
         let mut view = ProjectionView::default();
         view.my_pubkey = Some("my-pk".to_string());
         view.selected_messages = vec![matching_msg];
@@ -1614,13 +1702,7 @@ mod tests {
         });
 
         // Matching content, but my_pubkey is None — must NOT confirm.
-        let matching_msg = GroupChatMessage {
-            id: "event-1".to_string(),
-            pubkey: "any-pubkey".to_string(),
-            content: "hello world".to_string(),
-            created_at: 12345,
-            kind: 9,
-        };
+        let matching_msg = chat_msg("event-1", "any-pubkey", 12345, "hello world");
         let mut view = ProjectionView::default();
         // Intentionally NOT setting view.my_pubkey.
         view.selected_messages = vec![matching_msg];
@@ -1651,13 +1733,7 @@ mod tests {
             dispatched_at: Instant::now(),
         });
 
-        let msg = GroupChatMessage {
-            id: "event-2".to_string(),
-            pubkey: "pk".to_string(),
-            content: "oops".to_string(),
-            created_at: 9999,
-            kind: 9,
-        };
+        let msg = chat_msg("event-2", "pk", 9999, "oops");
         let mut view = ProjectionView::default();
         view.selected_messages = vec![msg];
         app.ingest_projection(view);

@@ -16,7 +16,7 @@ use crate::ui::login::LoginComponent;
 use crate::ui::room_list::RoomListComponent;
 use crate::ui::status_bar::StatusBar;
 use crate::Component;
-use nmp_nip29::projection::GroupEvent as GroupChatMessage;
+use nmp_app_29er::group_chat::GroupChatMessage;
 use nmp_nip29::GroupId;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -38,12 +38,19 @@ fn render_component<C: Component>(c: &mut C, w: u16, h: u16) -> String {
 }
 
 fn fake_msg(pk: &str, ts: u64, content: &str) -> GroupChatMessage {
+    let tree = nmp_content::tokenize_with_kind(content, &[], nmp_content::RenderMode::Auto, 9)
+        .to_wire();
     GroupChatMessage {
         id: format!("{pk}-{ts}"),
         pubkey: pk.to_string(),
-        content: content.to_string(),
+        raw_content: content.to_string(),
+        copy_text: content.to_string(),
         created_at: ts,
         kind: 9,
+        content_tree_bytes: nmp_content::wire::encode_content_tree(&tree),
+        mention_pubkeys: Vec::new(),
+        event_ref_uris: Vec::new(),
+        event_ref_primary_ids: Vec::new(),
     }
 }
 
@@ -70,6 +77,7 @@ fn base_snapshot() -> TuiSnapshot {
         selected_messages: vec![],
         selected_members: vec![],
         profiles: Default::default(),
+        event_envelopes: Default::default(),
         is_admin: false,
         my_pubkey: None,
         publish_outbox: vec![],

@@ -66,10 +66,10 @@ enum TypedDiscoveredGroupsDecoder {
     }
 }
 
-enum TypedGroupEventsDecoder {
-    static let key = "nmp.nip29.group_events"
-    static let schemaId = "nmp.nip29.group_events"
-    static let fileIdentifier = "NGEV"
+enum TypedGroupChatDecoder {
+    static let key = "nmp.29er.group_chat"
+    static let schemaId = "nmp.29er.group_chat"
+    static let fileIdentifier = "N29C"
 
     static func decode(from projections: [TypedProjectionEnvelope]) -> GroupChatSnapshot? {
         guard let projection = projections.first(where: {
@@ -83,8 +83,8 @@ enum TypedGroupEventsDecoder {
     static func decode(bytes: Data) -> GroupChatSnapshot? {
         guard !bytes.isEmpty else { return nil }
         var buffer = ByteBuffer(data: bytes)
-        let reader: nmp_nip29_GroupEventsSnapshot = getRoot(byteBuffer: &buffer)
-        return TypedProjectionGlue.groupEvents(reader)
+        let reader: nmp_app_29er_GroupChatSnapshot = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.groupChat(reader)
     }
 }
 
@@ -217,5 +217,27 @@ enum TypedRelayDiagnosticsDecoder {
         var buffer = ByteBuffer(data: bytes)
         let reader: nmp_kernel_RelayDiagnosticsSnapshot = getRoot(byteBuffer: &buffer)
         return TypedProjectionGlue.relayDiagnostics(reader)
+    }
+}
+
+enum TypedRefEventEnvelopesDecoder {
+    static let key = "refs.event.envelopes"
+    static let schemaId = "refs.event.envelopes"
+    static let fileIdentifier = "NEMB"
+
+    static func decode(from projections: [TypedProjectionEnvelope]) -> [String: EmbeddedEventEnvelope]? {
+        guard let projection = projections.first(where: {
+            $0.key == key && $0.schemaId == schemaId
+        }), !projection.payload.isEmpty else {
+            return nil
+        }
+        return decode(bytes: projection.payload)
+    }
+
+    static func decode(bytes: Data) -> [String: EmbeddedEventEnvelope]? {
+        guard !bytes.isEmpty else { return nil }
+        var buffer = ByteBuffer(data: bytes)
+        let reader: nmp_embed_RefEventEnvelopes = getRoot(byteBuffer: &buffer)
+        return TypedProjectionGlue.refEventEnvelopes(reader)
     }
 }

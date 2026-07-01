@@ -37,6 +37,10 @@ extension KernelModel {
            ) {
             profileRefsRevision &+= 1
         }
+        if let refEvents = result.typedProjectionPayload(key: TypedRefEventEnvelopesDecoder.key),
+           eventEnvelopes.replace(payload: refEvents) {
+            eventRefsRevision &+= 1
+        }
         typedRelaySelector = result.typedRelaySelector
         typedRelayDiagnostics = result.typedRelayDiagnostics
 
@@ -124,6 +128,8 @@ extension KernelModel {
         typedGroupDefaults = nil
         profileRefs.reset()
         profileRefsRevision &+= 1
+        eventEnvelopes.reset()
+        eventRefsRevision &+= 1
         typedRelaySelector = nil
         typedRelayDiagnostics = nil
     }

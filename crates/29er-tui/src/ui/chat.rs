@@ -6,20 +6,22 @@
 //! (`components::nostr_content::NostrContentView`) so mentions, links,
 //! hashtags, media, markdown, and embedded Nostr entities render properly —
 //! no shell-side content parsing. Uses tui-scrollview for scroll state.
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::actions::Action;
 use crate::app::{Focus, RelayState, TuiProfile, TuiSnapshot};
 use crate::components::nostr_content::{
+    content_kind_registry::NostrKindRegistry,
     content_render_data::{ContentProfileRenderData, ContentRenderData},
+    content_tree_from_nfct_bytes,
     content_tree_wire::ContentTreeWire,
     nostr_content_view::NostrContentView,
-    tokenize_message,
 };
 use crate::ui;
 use crate::Component;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
-use nmp_nip29::projection::GroupEvent as GroupChatMessage;
+use nmp_app_29er::group_chat::GroupChatMessage;
+use nmp_content::embed_projection::EmbeddedEventEnvelope;
 use ratatui::layout::{Alignment, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -36,11 +38,9 @@ const GUTTER: u16 = 2;
 
 pub struct ChatComponent {
     messages: Vec<GroupChatMessage>,
-    /// Per-message tokenized content tree, keyed by event id. Built in
-    /// `update` from the shared `nmp-content` substrate so `draw` is pure
-    /// rendering and never re-tokenizes on every frame.
-    trees: HashMap<String, ContentTreeWire>,
     profiles: HashMap<String, TuiProfile>,
+    event_envelopes: BTreeMap<String, EmbeddedEventEnvelope>,
+    kind_registry: NostrKindRegistry,
     render_data: ContentRenderData,
     my_pubkey: Option<String>,
     title: String,
@@ -95,8 +95,9 @@ impl ChatComponent {
     pub fn new() -> Self {
         Self {
             messages: Vec::new(),
-            trees: HashMap::new(),
             profiles: HashMap::new(),
+            event_envelopes: BTreeMap::new(),
+            kind_registry: NostrKindRegistry::make_default(),
             render_data: ContentRenderData::default(),
             my_pubkey: None,
             title: " chat ".to_string(),
@@ -138,21 +139,9 @@ impl ChatComponent {
         self.prev_msg_count = new_count;
 
         self.messages = s.selected_messages.clone();
-        // Tokenize any messages we have not seen yet, and drop trees for
-        // messages no longer present (e.g. channel switch). The `GroupChatMessage`
-        // projection carries no tags, so emoji-tag resolution is a no-op here.
-        let live: std::collections::HashSet<&str> =
-            self.messages.iter().map(|m| m.id.as_str()).collect();
-        self.trees.retain(|id, _| live.contains(id.as_str()));
-        for m in &self.messages {
-            if !self.trees.contains_key(&m.id) {
-                if let Some(tree) = tokenize_message(&m.content, &[], m.kind) {
-                    self.trees.insert(m.id.clone(), tree);
-                }
-            }
-        }
 
         self.profiles = s.profiles.clone();
+        self.event_envelopes = s.event_envelopes.clone();
         self.render_data =
             ContentRenderData::from_profiles(self.profiles.values().map(|profile| {
                 ContentProfileRenderData {
@@ -205,11 +194,13 @@ impl ChatComponent {
     /// Rendered height of a message body at `body_width` — via the content
     /// renderer when a tree is available, else the raw-text estimate.
     fn body_height(&self, m: &GroupChatMessage, body_width: u16) -> u16 {
-        match self.trees.get(&m.id) {
-            Some(tree) => NostrContentView::new(tree)
+        match message_tree(m) {
+            Some(tree) => NostrContentView::new(&tree)
                 .render_data(Some(&self.render_data))
+                .kind_registry(Some(&self.kind_registry))
+                .embedded_events(Some(&self.event_envelopes))
                 .preferred_height(body_width as usize),
-            None => Self::raw_line_count(&m.content, body_width),
+            None => Self::raw_line_count(&m.raw_content, body_width),
         }
     }
 
@@ -305,18 +296,21 @@ impl ChatComponent {
                 let body_w = content_width.saturating_sub(GUTTER).max(1);
                 let h = self.body_height(m, body_w);
                 let rect = Rect::new(GUTTER, y, body_w, h);
-                match self.trees.get(&m.id) {
+                match message_tree(m) {
                     Some(tree) => {
                         sv.render_widget(
-                            NostrContentView::new(tree).render_data(Some(&self.render_data)),
+                            NostrContentView::new(&tree)
+                                .render_data(Some(&self.render_data))
+                                .kind_registry(Some(&self.kind_registry))
+                                .embedded_events(Some(&self.event_envelopes)),
                             rect,
                         );
                     }
                     None => {
-                        // Tokenization fell through — render the raw content so
+                        // Projection decode fell through — render the raw content so
                         // no message is ever dropped.
                         sv.render_widget(
-                            Paragraph::new(m.content.clone())
+                            Paragraph::new(m.raw_content.clone())
                                 .style(Style::default().fg(ui::TEXT))
                                 .wrap(Wrap { trim: false }),
                             rect,
@@ -326,6 +320,10 @@ impl ChatComponent {
             }
         }
     }
+}
+
+fn message_tree(message: &GroupChatMessage) -> Option<ContentTreeWire> {
+    content_tree_from_nfct_bytes(&message.content_tree_bytes)
 }
 
 impl Component for ChatComponent {
@@ -482,12 +480,48 @@ mod tests {
     use ratatui::Terminal;
 
     fn msg(pk: &str, ts: u64, c: &str) -> GroupChatMessage {
+        let tree =
+            nmp_content::tokenize_with_kind(c, &[], nmp_content::RenderMode::Auto, 9).to_wire();
         GroupChatMessage {
             id: format!("{pk}{ts}"),
             pubkey: pk.to_string(),
-            content: c.to_string(),
+            raw_content: c.to_string(),
+            copy_text: c.to_string(),
             created_at: ts,
             kind: 9,
+            content_tree_bytes: nmp_content::wire::encode_content_tree(&tree),
+            mention_pubkeys: Vec::new(),
+            event_ref_uris: Vec::new(),
+            event_ref_primary_ids: Vec::new(),
+        }
+    }
+
+    fn event_ref_msg(pk: &str, ts: u64, primary_id: &str, uri: &str) -> GroupChatMessage {
+        let tree = nmp_content::ContentTreeWire {
+            nodes: vec![nmp_content::WireNode::EventRef {
+                uri: nmp_content::WireNostrUri {
+                    uri: uri.to_string(),
+                    kind: nmp_content::WireNostrUriKind::Event,
+                    primary_id: primary_id.to_string(),
+                    relays: Vec::new(),
+                    author: None,
+                    event_kind: Some(1),
+                },
+            }],
+            roots: vec![0],
+            mode: nmp_content::RenderMode::Auto,
+        };
+        GroupChatMessage {
+            id: format!("{pk}{ts}"),
+            pubkey: pk.to_string(),
+            raw_content: uri.to_string(),
+            copy_text: uri.to_string(),
+            created_at: ts,
+            kind: 9,
+            content_tree_bytes: nmp_content::wire::encode_content_tree(&tree),
+            mention_pubkeys: Vec::new(),
+            event_ref_uris: vec![uri.to_string()],
+            event_ref_primary_ids: vec![primary_id.to_string()],
         }
     }
 
@@ -602,6 +636,45 @@ mod tests {
         assert_eq!(c.new_since_scroll, 0);
     }
 
+    #[test]
+    fn resolved_event_ref_renders_embedded_note_body() {
+        use nmp_content::embed_projection::{
+            EmbedKindProjection, EmbeddedEventEnvelope, RenderContextWire, ShortNoteProjection,
+        };
+
+        let primary_id = "c".repeat(64);
+        let uri = "nostr:note1fixture";
+        let note_tree =
+            nmp_content::tokenize_with_kind("embedded body", &[], nmp_content::RenderMode::Auto, 1)
+                .to_wire();
+        let envelope = EmbeddedEventEnvelope {
+            uri: uri.to_string(),
+            primary_id: primary_id.clone(),
+            render_context: RenderContextWire::from(&nmp_content::RenderContext::new()),
+            projection: EmbedKindProjection::ShortNote(ShortNoteProjection {
+                id: primary_id.clone(),
+                author_pubkey: "a".repeat(64),
+                created_at: 0,
+                content_tree: note_tree,
+                media_urls: Vec::new(),
+            }),
+            collapsed: false,
+            collapse_reason: None,
+        };
+        let mut snapshot = snap(
+            vec![event_ref_msg("pk1", 1, &primary_id, uri)],
+            true,
+            Some("wss://h".into()),
+        );
+        snapshot.event_envelopes.insert(primary_id, envelope);
+
+        let mut c = ChatComponent::new();
+        c.update(&snapshot);
+        let out = render(&mut c, 80, 16);
+        assert!(out.contains("embedded body"), "{out}");
+        assert!(!out.contains("quote cccccccc"), "{out}");
+    }
+
     fn snap(
         messages: Vec<GroupChatMessage>,
         connected: bool,
@@ -614,6 +687,7 @@ mod tests {
             selected_messages: messages,
             selected_members: vec![],
             profiles: Default::default(),
+            event_envelopes: Default::default(),
             is_admin: false,
             my_pubkey: None,
             publish_outbox: vec![],

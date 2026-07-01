@@ -45,8 +45,9 @@ final class KernelModel: ObservableObject {
     /// this from the NIP-29 discovery projection; Swift only renders it.
     @Published var typedGroupTree: GroupTreeSnapshot?
 
-    /// Typed `nmp.nip29.group_events` sidecar (`NGEV`). Rust owns the
-    /// selected group's event filter and newest-first ordering; Swift renders it.
+    /// Typed app-owned `nmp.29er.group_chat` sidecar (`N29C`). Rust owns the
+    /// selected group's event filter, newest-first ordering, content tree, and
+    /// demand lists; Swift renders it.
     @Published var typedGroupChat: GroupChatSnapshot?
 
     /// Typed `nmp.nip29.group_roster` sidecar (`NGRS`). Rust owns selected
@@ -72,6 +73,10 @@ final class KernelModel: ObservableObject {
     /// actual rows live in `profileRefs`; this published scalar redraws views
     /// that read the registry `NostrProfileHost` environment.
     @Published var profileRefsRevision: UInt64 = 0
+
+    /// Monotonic UI invalidation token for the whole-value `refs.event.envelopes`
+    /// sidecar. The envelope map itself lives in `eventEnvelopes`.
+    @Published var eventRefsRevision: UInt64 = 0
 
     /// Typed app-owned `nmp.29er.relay_selector` sidecar (`N29R`). Rust owns
     /// active relay selection and the NIP-51 kind:30002 relay-set list.
@@ -160,6 +165,7 @@ final class KernelModel: ObservableObject {
     private(set) lazy var discoveredGroups = DiscoveredGroupsStore(kernel: kernel)
 
     let profileRefs = ProfileRefStore()
+    let eventEnvelopes = EventEnvelopeStore()
 
     init() {
         if let v = ProcessInfo.processInfo.environment["NMP_VISIBLE_LIMIT"].flatMap(UInt32.init) {

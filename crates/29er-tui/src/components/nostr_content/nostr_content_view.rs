@@ -18,7 +18,7 @@ use ratatui_image::protocol::Protocol;
 mod nostr_content_widget;
 
 use super::{
-    content_kind_registry::NostrKindRegistry,
+    content_kind_registry::{EmbeddedEvent, NostrKindRegistry},
     content_render_data::ContentRenderData,
     content_tree_wire::{ContentTreeWire, WireNode, WireUri},
     nostr_media_grid::NostrMediaGrid,
@@ -410,6 +410,19 @@ impl<'a> NostrContentView<'a> {
         wrap_prefixed(&label, width, "", muted_style())
     }
 
+    fn embedded_event_height(&self, uri: &WireUri, width: u16) -> Option<u16> {
+        let registry = self.kind_registry?;
+        let events = self.embedded_events?;
+        let envelope = events
+            .get(&uri.primary_id)
+            .or_else(|| events.get(&uri.uri))?;
+        Some(
+            EmbeddedEvent::new(envelope, registry)
+                .preferred_height(width)
+                .max(1),
+        )
+    }
+
     fn node_height(&self, index: usize, width: usize) -> u16 {
         let Some(node) = self.tree.node(index) else {
             return 0;
@@ -426,7 +439,9 @@ impl<'a> NostrContentView<'a> {
                     .preferred_height()
                     .saturating_add(1)
             }
-            WireNode::EventRef(uri) => self.event_ref_lines(uri, width).len().max(1) as u16,
+            WireNode::EventRef(uri) => self
+                .embedded_event_height(uri, width as u16)
+                .unwrap_or_else(|| self.event_ref_lines(uri, width).len().max(1) as u16),
             WireNode::BlockQuote { children } => {
                 self.blockquote_lines(children, width).len().max(1) as u16
             }

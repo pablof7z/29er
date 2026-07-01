@@ -363,6 +363,7 @@ mod tests {
             selected_messages: vec![],
             selected_members: vec![],
             profiles: std::collections::HashMap::new(),
+            event_envelopes: Default::default(),
             is_admin: false,
             my_pubkey: None,
             publish_outbox: vec![],
