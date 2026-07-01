@@ -356,18 +356,18 @@ mod tests {
     fn ctrl_r_retries_latest_nmp_retryable_item() {
         let mut c = Composer::new();
         c.outbox = vec![PublishOutboxItem {
-            correlation_id: "29er-1".into(),
-            group_local_id: "g".into(),
+            correlation_id: "event-handle".into(),
             content: "x".into(),
             status: OutboxStatus::Failed,
             error: None,
-            mention_pubkeys: Vec::new(),
             event_id: None,
             retry_handle: Some("event-handle".into()),
             can_retry: true,
-            dispatched_at: std::time::Instant::now(),
+            created_at: 1_700_000_000,
         }];
         let ev = Event::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
-        assert!(matches!(c.handle_event(&ev), Some(Action::RetryOutbox(id)) if id == "29er-1"));
+        assert!(
+            matches!(c.handle_event(&ev), Some(Action::RetryOutbox(id)) if id == "event-handle")
+        );
     }
 }

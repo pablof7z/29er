@@ -163,24 +163,18 @@ pub struct ChannelListItem {
 #[derive(Clone, Debug)]
 pub struct PublishOutboxItem {
     pub correlation_id: String,
-    pub group_local_id: String,
     pub content: String,
     pub status: OutboxStatus,
     pub error: Option<String>,
-    /// Pubkeys of @mentioned users (hex-encoded). Stored so retry can re-send
-    /// the same `p` tags without re-parsing the message text.
-    pub mention_pubkeys: Vec<String>,
     /// Nostr event-id echoed back by NMP after a successful dispatch.
-    /// When present, confirmation is matched on this id alone (precise match).
     pub event_id: Option<String>,
     /// NMP publish handle. Only this handle may be sent to `retry_publish`;
     /// the TUI must not reconstruct and republish the event body for retry.
     pub retry_handle: Option<String>,
     /// Retry eligibility as emitted by NMP's publish-outbox projection.
     pub can_retry: bool,
-    /// Wall-clock instant the item was dispatched. Used to enforce
-    /// a 30-second content-match window and a 60-second timeout.
-    pub dispatched_at: std::time::Instant,
+    /// Raw Unix-seconds timestamp emitted by the kernel publish-outbox projection.
+    pub created_at: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -191,6 +185,7 @@ pub struct NmpPublishOutboxItem {
     pub status: String,
     pub can_retry: bool,
     pub error: Option<String>,
+    pub created_at: u64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -427,7 +422,6 @@ pub struct App {
     focus_stack: Vec<Focus>,
     selected_index: usize,
     selected_channel: Option<GroupId>,
-    outbox: Vec<PublishOutboxItem>,
     errors: Vec<String>,
     palette_open: bool,
     active_form: Option<FormKind>,
@@ -481,7 +475,6 @@ impl App {
             focus_stack: Vec::new(),
             selected_index: 0,
             selected_channel: None,
-            outbox: Vec::new(),
             errors: Vec::new(),
             palette_open: false,
             active_form: None,
@@ -647,7 +640,7 @@ impl App {
         Ok(())
     }
 
-    /// Store the latest projection view; clamp selection; reconcile the outbox.
+    /// Store the latest projection view and clamp selection.
     pub fn ingest_projection(&mut self, view: ProjectionView) {
         let was_connected = self
             .latest
@@ -671,106 +664,6 @@ impl App {
         } else if self.selected_index >= self.latest.channel_tree.len() {
             self.selected_index = self.latest.channel_tree.len() - 1;
         }
-        self.sync_nmp_publish_outbox();
-        self.reconcile_outbox();
-    }
-
-    fn sync_nmp_publish_outbox(&mut self) {
-        let rows = self.latest.nmp_publish_outbox.clone();
-        for row in rows {
-            let status = outbox_status_from_nmp(&row.status);
-            let matching_idx = self.outbox.iter().position(|item| {
-                !matches!(item.status, OutboxStatus::Confirmed)
-                    && (item.retry_handle.as_deref() == Some(row.handle.as_str())
-                        || (!row.event_id.is_empty()
-                            && item.event_id.as_deref() == Some(row.event_id.as_str()))
-                        || (matches!(item.status, OutboxStatus::Pending)
-                            && item.content == row.content))
-            });
-            if let Some(idx) = matching_idx {
-                let item = &mut self.outbox[idx];
-                item.correlation_id = row.handle.clone();
-                item.retry_handle = Some(row.handle.clone());
-                if !row.event_id.is_empty() {
-                    item.event_id = Some(row.event_id.clone());
-                }
-                item.content = row.content.clone();
-                item.status = status;
-                item.error = row.error.clone();
-                item.can_retry = row.can_retry;
-                continue;
-            }
-            let already_confirmed = self.outbox.iter().any(|item| {
-                matches!(item.status, OutboxStatus::Confirmed)
-                    && ((!row.event_id.is_empty()
-                        && item.event_id.as_deref() == Some(row.event_id.as_str()))
-                        || item.content == row.content)
-            });
-            if already_confirmed {
-                continue;
-            }
-            self.outbox.push(PublishOutboxItem {
-                correlation_id: row.handle.clone(),
-                group_local_id: self
-                    .selected_channel
-                    .as_ref()
-                    .map(|group| group.local_id.clone())
-                    .unwrap_or_default(),
-                content: row.content.clone(),
-                status,
-                error: row.error.clone(),
-                mention_pubkeys: Vec::new(),
-                event_id: if row.event_id.is_empty() {
-                    None
-                } else {
-                    Some(row.event_id.clone())
-                },
-                retry_handle: Some(row.handle),
-                can_retry: row.can_retry,
-                dispatched_at: Instant::now(),
-            });
-        }
-    }
-
-    fn reconcile_outbox(&mut self) {
-        // Guard: never confirm outbox items if my_pubkey is not yet known.
-        let me = match self.latest.my_pubkey.as_deref() {
-            Some(pk) if !pk.is_empty() => pk.to_string(),
-            _ => return,
-        };
-        let now = Instant::now();
-        for item in self.outbox.iter_mut() {
-            if !matches!(item.status, OutboxStatus::Pending) {
-                continue;
-            }
-            let elapsed = now.duration_since(item.dispatched_at);
-            // Items pending for more than 60 s are timed out (treated as Failed).
-            if elapsed >= Duration::from_secs(60) {
-                item.status = OutboxStatus::Failed;
-                item.error = Some("timed out waiting for confirmation".to_string());
-                item.can_retry = false;
-                continue;
-            }
-            // Only attempt matching within the 30-second dispatch window.
-            if elapsed >= Duration::from_secs(30) {
-                continue;
-            }
-            let confirmed = self.latest.selected_messages.iter().any(|m| {
-                if m.pubkey != me {
-                    return false;
-                }
-                // Prefer precise event-id match when NMP returned one.
-                if let Some(ref eid) = item.event_id {
-                    return m.id == *eid;
-                }
-                // Fallback: trimmed content equality (same pubkey already verified).
-                m.raw_content.trim() == item.content.trim()
-            });
-            if confirmed {
-                item.status = OutboxStatus::Confirmed;
-                item.can_retry = false;
-            }
-        }
     }
 
     pub fn snapshot(&self) -> TuiSnapshot {
@@ -783,7 +676,7 @@ impl App {
             event_envelopes: self.latest.event_envelopes.clone(),
             is_admin: self.latest.is_admin,
             my_pubkey: self.latest.my_pubkey.clone(),
-            publish_outbox: self.outbox.clone(),
+            publish_outbox: project_publish_outbox(&self.latest.nmp_publish_outbox),
             identity_state: self.latest.identity_state.clone(),
             relay_state: if let Some(ref err) = self.relay_error {
                 RelayState::Error(err.clone())
@@ -864,7 +757,7 @@ impl App {
     /// adapter: namespace=Profile, shape=Ref, liveness=CacheOk — the
     /// feed-avatar shape, suitable for a chat-message author byline.
     fn resolve_profile_ref(&self, pubkey: &str) {
-        let Some(app) = self.app.as_ref() else {
+        let Some(app) = self.app.as_ref().cloned() else {
             return;
         };
         app.resolve_ref(
@@ -969,9 +862,6 @@ impl App {
             self.errors.push("No channel selected".to_string());
             return;
         };
-        // Assign an optimistic local id immediately so the item is identifiable
-        // before NMP echoes back a correlation_id.
-        let optimistic_id = generate_local_id();
         let json = serde_json::json!({
             "group": group,
             "content": trimmed,
@@ -979,70 +869,40 @@ impl App {
         })
         .to_string();
         let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
-        let mut item = PublishOutboxItem {
-            correlation_id: optimistic_id,
-            group_local_id: group.local_id.clone(),
-            content: trimmed,
-            status: OutboxStatus::Pending,
-            error: None,
-            mention_pubkeys: mention_pubkeys.clone(),
-            event_id: None,
-            retry_handle: None,
-            can_retry: false,
-            dispatched_at: Instant::now(),
-        };
-        Self::apply_dispatch_result(&mut item, result);
-        self.outbox.push(item);
-        // Explicitly pull fresh projection data so the outbox strip renders
-        // before the runtime echoes the published event back.
+        self.record_dispatch_error(result);
         self.refresh_projection();
     }
 
     pub fn retry_outbox(&mut self, correlation_id: String) {
-        let Some(idx) = self.outbox.iter().position(|i| {
-            i.correlation_id == correlation_id
-                || i.retry_handle.as_deref() == Some(correlation_id.as_str())
-        }) else {
+        let Some(row) = self
+            .latest
+            .nmp_publish_outbox
+            .iter()
+            .find(|item| item.handle == correlation_id)
+        else {
             return;
         };
-        let Some(handle) = self.outbox[idx].retry_handle.clone() else {
-            return;
-        };
-        if !self.outbox[idx].can_retry {
+        if !row.can_retry {
             return;
         }
-        let Some(app) = self.app.as_ref() else {
+        let handle = row.handle.clone();
+        let Some(app) = self.app.as_ref().cloned() else {
             return;
         };
+        self.set_status_message("Retrying publish...".to_string());
         app.retry_publish(handle);
-        let item = &mut self.outbox[idx];
-        item.status = OutboxStatus::Pending;
-        item.error = None;
-        item.can_retry = false;
-        item.dispatched_at = Instant::now();
-        self.set_status_message("Retrying publish\u{2026}".to_string());
+        self.refresh_projection();
     }
 
-    /// Note: [`DispatchOutcome`] (the same outcome shape PR-3 will wire onto
-    /// the `TwentyNinerApp` facade) carries `correlation_id` /
-    /// `error` / `code` only — no `event_id`. Outbox confirmation therefore
-    /// always falls back to the existing trimmed-content match in
-    /// [`Self::reconcile_outbox`] rather than the old precise event-id match;
-    /// a future PR can thread an event-id back through if NMP's dispatch
-    /// outcome grows one.
-    fn apply_dispatch_result(item: &mut PublishOutboxItem, result: Option<DispatchOutcome>) {
+    fn record_dispatch_error(&mut self, result: Option<DispatchOutcome>) {
         match result {
             Some(outcome) => {
-                if let Some(cid) = outcome.correlation_id {
-                    item.correlation_id = cid;
-                } else if let Some(err) = outcome.error {
-                    item.status = OutboxStatus::Failed;
-                    item.error = Some(err);
+                if let Some(err) = outcome.error {
+                    self.errors.push(err);
                 }
             }
             None => {
-                item.status = OutboxStatus::Failed;
-                item.error = Some("dispatch failed".to_string());
+                self.errors.push("dispatch failed".to_string());
             }
         }
     }
@@ -1073,14 +933,16 @@ impl App {
         self.close_form();
     }
     pub fn create_child(&mut self, parent: GroupId, name: String) {
-        let local_id = generate_local_id();
         let body = serde_json::json!({
-            "group": { "host_relay_url": parent.host_relay_url, "local_id": local_id },
-            "name": name, "visibility": "public", "access": "open", "parent": parent.local_id,
+            "parent": parent,
+            "name": name,
+            "visibility": "public",
+            "access": "open",
         })
         .to_string();
         self.set_status_message("Creating channel\u{2026}".to_string());
-        self.dispatch_json("nmp.nip29.create_public_group", &body);
+        let result = self.dispatch_json("nmp.29er.create_child_group", &body);
+        self.record_dispatch_error(result);
         self.close_form();
     }
     pub fn move_channel(&mut self, group: GroupId, parent: Option<String>) {
@@ -1387,6 +1249,7 @@ fn on_nmp_update(bridge: &ProjectionUpdateBridge, bytes: Vec<u8>) {
                             status: item.status,
                             can_retry: item.can_retry,
                             error,
+                            created_at: item.created_at,
                         }
                     })
                     .collect();
@@ -1396,19 +1259,31 @@ fn on_nmp_update(bridge: &ProjectionUpdateBridge, bytes: Vec<u8>) {
     let _ = bridge.projection_tx.send(bridge.shared.project());
 }
 
-fn generate_local_id() -> String {
-    let n = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("ch-{n:x}")
-}
-
 fn outbox_status_from_nmp(status: &str) -> OutboxStatus {
     match status {
         "failed" => OutboxStatus::Failed,
+        "published" => OutboxStatus::Confirmed,
         _ => OutboxStatus::Pending,
     }
+}
+
+fn project_publish_outbox(rows: &[NmpPublishOutboxItem]) -> Vec<PublishOutboxItem> {
+    rows.iter()
+        .map(|row| PublishOutboxItem {
+            correlation_id: row.handle.clone(),
+            content: row.content.clone(),
+            status: outbox_status_from_nmp(&row.status),
+            error: row.error.clone(),
+            event_id: if row.event_id.is_empty() {
+                None
+            } else {
+                Some(row.event_id.clone())
+            },
+            retry_handle: Some(row.handle.clone()),
+            can_retry: row.can_retry,
+            created_at: row.created_at,
+        })
+        .collect()
 }
 
 fn name_for(d: &DiscoveredGroupsSnapshot, id: &str) -> String {
@@ -1710,15 +1585,13 @@ mod tests {
             my_pubkey: Some("pk1".to_string()),
             publish_outbox: vec![PublishOutboxItem {
                 correlation_id: "cid".to_string(),
-                group_local_id: "grp1".to_string(),
                 content: "hi".to_string(),
                 status: OutboxStatus::Pending,
                 error: None,
-                mention_pubkeys: Vec::new(),
                 event_id: None,
                 retry_handle: None,
                 can_retry: false,
-                dispatched_at: Instant::now(),
+                created_at: 1_700_000_000,
             }],
             identity_state: IdentityState::LoggedIn {
                 npub: "npub1test".to_string(),
@@ -1828,98 +1701,59 @@ mod tests {
         );
     }
 
-    /// T6: reconcile_outbox promotes a Pending item to Confirmed when a
-    /// matching message (same trimmed content, same pubkey as my_pubkey) arrives.
     #[test]
-    fn test_reconcile_outbox_pending_becomes_confirmed() {
+    fn projected_outbox_status_maps_published_to_confirmed() {
         let (mut app, _rx) = make_app();
-
-        // Inject a Pending item directly (private field visible from child mod).
-        app.outbox.push(PublishOutboxItem {
-            correlation_id: "cid-pending".to_string(),
-            group_local_id: "grp".to_string(),
-            content: "hello world".to_string(),
-            status: OutboxStatus::Pending,
-            error: None,
-            mention_pubkeys: Vec::new(),
-            event_id: None,
-            retry_handle: None,
-            can_retry: false,
-            dispatched_at: Instant::now(),
-        });
-
-        // The matching message MUST carry the same pubkey as my_pubkey.
-        let matching_msg = chat_msg("event-1", "my-pk", 12345, "hello world");
         let mut view = ProjectionView::default();
-        view.my_pubkey = Some("my-pk".to_string());
-        view.selected_messages = vec![matching_msg];
+        view.nmp_publish_outbox = vec![NmpPublishOutboxItem {
+            handle: "event-handle".to_string(),
+            event_id: "event-id".to_string(),
+            content: "hello world".to_string(),
+            status: "published".to_string(),
+            can_retry: false,
+            error: None,
+            created_at: 1_700_000_001,
+        }];
 
         app.ingest_projection(view);
 
         let snap = app.snapshot();
         assert_eq!(snap.publish_outbox.len(), 1);
-        assert_eq!(
-            snap.publish_outbox[0].status,
-            OutboxStatus::Confirmed,
-            "pending item must become Confirmed once matching message with correct pubkey arrives"
-        );
+        let item = &snap.publish_outbox[0];
+        assert_eq!(item.correlation_id, "event-handle");
+        assert_eq!(item.retry_handle.as_deref(), Some("event-handle"));
+        assert_eq!(item.event_id.as_deref(), Some("event-id"));
+        assert_eq!(item.status, OutboxStatus::Confirmed);
+        assert_eq!(item.created_at, 1_700_000_001);
     }
 
-    /// T6b_guard: reconcile_outbox does NOT confirm a Pending item when my_pubkey
-    /// is unknown — the guard must return early and leave all items as Pending.
     #[test]
-    fn test_reconcile_outbox_no_pubkey_stays_pending() {
+    fn selected_message_match_does_not_create_outbox_rows() {
         let (mut app, _rx) = make_app();
-
-        app.outbox.push(PublishOutboxItem {
-            correlation_id: "cid-pending".to_string(),
-            group_local_id: "grp".to_string(),
-            content: "hello world".to_string(),
-            status: OutboxStatus::Pending,
-            error: None,
-            mention_pubkeys: Vec::new(),
-            event_id: None,
-            retry_handle: None,
-            can_retry: false,
-            dispatched_at: Instant::now(),
-        });
-
-        // Matching content, but my_pubkey is None — must NOT confirm.
         let matching_msg = chat_msg("event-1", "any-pubkey", 12345, "hello world");
         let mut view = ProjectionView::default();
-        // Intentionally NOT setting view.my_pubkey.
+        view.my_pubkey = Some("any-pubkey".to_string());
         view.selected_messages = vec![matching_msg];
 
         app.ingest_projection(view);
 
-        let snap = app.snapshot();
-        assert_eq!(
-            snap.publish_outbox[0].status,
-            OutboxStatus::Pending,
-            "item must remain Pending when my_pubkey is not known"
-        );
+        assert!(app.snapshot().publish_outbox.is_empty());
     }
 
-    /// T6b: a Failed outbox item is NOT promoted even if a matching message arrives.
     #[test]
-    fn test_reconcile_outbox_failed_stays_failed() {
+    fn projected_failed_outbox_row_stays_failed_even_with_matching_message() {
         let (mut app, _rx) = make_app();
-
-        app.outbox.push(PublishOutboxItem {
-            correlation_id: "cid-failed".to_string(),
-            group_local_id: "grp".to_string(),
-            content: "oops".to_string(),
-            status: OutboxStatus::Failed,
-            error: Some("dispatch failed".to_string()),
-            mention_pubkeys: Vec::new(),
-            event_id: None,
-            retry_handle: None,
-            can_retry: false,
-            dispatched_at: Instant::now(),
-        });
-
         let msg = chat_msg("event-2", "pk", 9999, "oops");
         let mut view = ProjectionView::default();
+        view.nmp_publish_outbox = vec![NmpPublishOutboxItem {
+            handle: "event-handle".to_string(),
+            event_id: "event-2".to_string(),
+            content: "oops".to_string(),
+            status: "failed".to_string(),
+            can_retry: true,
+            error: Some("relay failed".to_string()),
+            created_at: 1_700_000_002,
+        }];
         view.selected_messages = vec![msg];
         app.ingest_projection(view);
 
@@ -1927,7 +1761,12 @@ mod tests {
         assert_eq!(
             snap.publish_outbox[0].status,
             OutboxStatus::Failed,
-            "a Failed item must NOT be re-confirmed by reconcile"
+            "TUI must render the Rust-projected outbox status without message matching"
+        );
+        assert!(snap.publish_outbox[0].can_retry);
+        assert_eq!(
+            snap.publish_outbox[0].error.as_deref(),
+            Some("relay failed")
         );
     }
 
@@ -2058,6 +1897,7 @@ mod tests {
             status: "failed".to_string(),
             can_retry: true,
             error: Some("relay failed".to_string()),
+            created_at: 1_700_000_003,
         }];
 
         app.ingest_projection(view);

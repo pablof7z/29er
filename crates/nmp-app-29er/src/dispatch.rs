@@ -21,9 +21,15 @@ use crate::kinds::KIND_CHAT_MESSAGE;
 /// by [`encode_chat_send_payload`], and re-emitted under
 /// [`PUBLISH_GROUP_EVENT_NAMESPACE`].
 const CHAT_SEND_NAMESPACE: &str = "nmp.nip29.post_chat_message";
+/// 29er's app-level child-channel doorway. The shell supplies only the parent
+/// group and display fields; this Rust app crate owns the child local-id policy
+/// and re-emits the typed NIP-29 create-public-group action.
+const CREATE_CHILD_GROUP_NAMESPACE: &str = "nmp.29er.create_child_group";
 /// The real NIP-29 generic-publish action namespace the composed chat send is
 /// dispatched under.
 const PUBLISH_GROUP_EVENT_NAMESPACE: &str = "nmp.nip29.publish_group_event";
+/// The real NIP-29 create action namespace used by the app-owned child doorway.
+const CREATE_PUBLIC_GROUP_NAMESPACE: &str = "nmp.nip29.create_public_group";
 
 /// Build the typed payload + open `DispatchEnvelope` for a NIP-29 action and
 /// dispatch it through the byte lane, returning the typed [`DispatchOutcome`].
@@ -39,6 +45,13 @@ pub fn dispatch_nip29_action(app: &NmpApp, namespace: &str, body_json: &str) -> 
             Some(p) => (PUBLISH_GROUP_EVENT_NAMESPACE.to_string(), p),
             None => {
                 return DispatchOutcome::error("could not compose chat message from body");
+            }
+        }
+    } else if namespace == CREATE_CHILD_GROUP_NAMESPACE {
+        match encode_child_group_payload(body_json) {
+            Some(p) => (CREATE_PUBLIC_GROUP_NAMESPACE.to_string(), p),
+            None => {
+                return DispatchOutcome::error("could not compose child channel create action");
             }
         }
     } else {
@@ -87,6 +100,21 @@ struct ChatSendBody {
     mention_pubkeys: Vec<String>,
 }
 
+#[derive(serde::Deserialize)]
+struct CreateChildGroupBody {
+    parent: GroupId,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    about: Option<String>,
+    #[serde(default)]
+    picture: Option<String>,
+    #[serde(default)]
+    visibility: Option<nmp_nip29::action::GroupVisibility>,
+    #[serde(default)]
+    access: Option<nmp_nip29::action::GroupAccess>,
+}
+
 /// Compose a raw chat-send body into the typed [`ActionPayload`] bytes for a
 /// kind:9 `PublishGroupEventInput`. NIP-21 mention rewriting + `["p", …]` tags
 /// are produced by the shared [`crate::compose::compose_chat_message`] (the
@@ -101,6 +129,28 @@ fn encode_chat_send_payload(json: &str) -> Option<Vec<u8>> {
         tags: composed.tags,
     };
     Some(input.encode())
+}
+
+fn encode_child_group_payload(json: &str) -> Option<Vec<u8>> {
+    let body: CreateChildGroupBody = serde_json::from_str(json).ok()?;
+    let name = body.name.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let input = nmp_nip29::action::CreatePublicGroupInput {
+        group: GroupId::new(body.parent.host_relay_url.clone(), mint_group_local_id()),
+        name,
+        about: body.about.filter(|value| !value.trim().is_empty()),
+        picture: body.picture.filter(|value| !value.trim().is_empty()),
+        visibility: body.visibility.unwrap_or_default(),
+        access: body.access.unwrap_or_default(),
+        parent: Some(body.parent.local_id),
+    };
+    Some(input.encode())
+}
+
+fn mint_group_local_id() -> String {
+    format!("ch-{}", uuid::Uuid::new_v4().simple())
 }
 
 /// Encode `json` into the typed [`ActionPayload`] FlatBuffers bytes for
@@ -222,6 +272,36 @@ mod tests {
             .tags
             .iter()
             .all(|t| t.first().map(String::as_str) != Some("previous")));
+    }
+
+    #[test]
+    fn child_group_doorway_mints_local_id_in_rust() {
+        let bytes = encode_child_group_payload(
+            r#"{"parent":{"host_relay_url":"wss://groups.example.com","local_id":"root"},"name":"Child Room"}"#,
+        )
+        .expect("child group composes");
+        let input = <nmp_nip29::action::CreatePublicGroupInput as ActionPayload>::decode(&bytes)
+            .expect("decodes");
+
+        assert_eq!(input.group.host_relay_url, "wss://groups.example.com");
+        assert!(input.group.local_id.starts_with("ch-"));
+        assert_ne!(input.group.local_id, "root");
+        assert!(input
+            .group
+            .local_id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
+        assert_eq!(input.name, "Child Room");
+        assert_eq!(input.parent.as_deref(), Some("root"));
+    }
+
+    #[test]
+    fn child_group_doorway_fails_closed_without_name_or_parent() {
+        assert!(encode_child_group_payload(r#"{"name":"Child"}"#).is_none());
+        assert!(encode_child_group_payload(
+            r#"{"parent":{"host_relay_url":"wss://groups.example.com","local_id":"root"},"name":"   "}"#
+        )
+        .is_none());
     }
 
     #[test]
