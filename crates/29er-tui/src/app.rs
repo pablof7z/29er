@@ -1212,57 +1212,63 @@ impl TuiProfile {
 /// runtime now delivers owned update-frame bytes straight to a safe Rust
 /// closure/fn over the sink type, no raw pointers involved.
 fn on_nmp_update(bridge: &ProjectionUpdateBridge, bytes: Vec<u8>) {
-    let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        (
-            nmp_core::decode_snapshot_envelope(&bytes),
-            nmp_core::decode_snapshot_typed_projections(&bytes),
-        )
-    }));
-    if let Ok((Ok(envelope), Ok(typed))) = decoded {
-        if let Some(entry) = typed.iter().find(|entry| entry.key == REFS_PROFILE_KEY) {
-            if let Ok(mut store) = bridge.shared.profile_refs.lock() {
-                store.apply_sidecar(&entry.payload, envelope.session_id, envelope.snapshot_epoch);
+    if !bytes.is_empty() {
+        let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            (
+                nmp_core::decode_snapshot_envelope(&bytes),
+                nmp_core::decode_snapshot_typed_projections(&bytes),
+            )
+        }));
+        if let Ok((Ok(envelope), Ok(typed))) = decoded {
+            if let Some(entry) = typed.iter().find(|entry| entry.key == REFS_PROFILE_KEY) {
+                if let Ok(mut store) = bridge.shared.profile_refs.lock() {
+                    store.apply_sidecar(
+                        &entry.payload,
+                        envelope.session_id,
+                        envelope.snapshot_epoch,
+                    );
+                }
             }
-        }
-        if let Some(entry) = typed
-            .iter()
-            .find(|entry| entry.key == EMBED_SIDECAR_PROJECTION_KEY)
-        {
-            if let (Ok(next), Ok(mut store)) = (
-                decode_ref_event_envelopes(&entry.payload),
-                bridge.shared.event_envelopes.lock(),
-            ) {
-                *store = next;
+            if let Some(entry) = typed
+                .iter()
+                .find(|entry| entry.key == EMBED_SIDECAR_PROJECTION_KEY)
+            {
+                if let (Ok(next), Ok(mut store)) = (
+                    decode_ref_event_envelopes(&entry.payload),
+                    bridge.shared.event_envelopes.lock(),
+                ) {
+                    *store = next;
+                }
             }
-        }
-        if let Some(entry) = typed
-            .iter()
-            .find(|entry| entry.key == PUBLISH_OUTBOX_SCHEMA_ID)
-        {
-            if let (Ok(model), Ok(mut store)) = (
-                decode_publish_outbox(&entry.payload),
-                bridge.shared.nmp_publish_outbox.lock(),
-            ) {
-                *store = model
-                    .items
-                    .into_iter()
-                    .map(|item| {
-                        let error = item
-                            .relays
-                            .iter()
-                            .find(|relay| !relay.message.is_empty())
-                            .map(|relay| relay.message.clone());
-                        NmpPublishOutboxItem {
-                            handle: item.handle,
-                            event_id: item.event_id,
-                            content: item.content,
-                            status: item.status,
-                            can_retry: item.can_retry,
-                            error,
-                            created_at: item.created_at,
-                        }
-                    })
-                    .collect();
+            if let Some(entry) = typed
+                .iter()
+                .find(|entry| entry.key == PUBLISH_OUTBOX_SCHEMA_ID)
+            {
+                if let (Ok(model), Ok(mut store)) = (
+                    decode_publish_outbox(&entry.payload),
+                    bridge.shared.nmp_publish_outbox.lock(),
+                ) {
+                    *store = model
+                        .items
+                        .into_iter()
+                        .map(|item| {
+                            let error = item
+                                .relays
+                                .iter()
+                                .find(|relay| !relay.message.is_empty())
+                                .map(|relay| relay.message.clone());
+                            NmpPublishOutboxItem {
+                                handle: item.handle,
+                                event_id: item.event_id,
+                                content: item.content,
+                                status: item.status,
+                                can_retry: item.can_retry,
+                                error,
+                                created_at: item.created_at,
+                            }
+                        })
+                        .collect();
+                }
             }
         }
     }
@@ -1430,6 +1436,7 @@ mod tests {
     use super::*;
     use nmp_app_29er::kinds::KIND_CHAT_MESSAGE;
     use nmp_core::substrate::KernelEvent;
+    use nmp_nip29::kinds::KIND_GROUP_METADATA;
 
     fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
         DiscoveredGroup {
@@ -1464,6 +1471,20 @@ mod tests {
             created_at: ts,
             tags: vec![vec!["h".to_string(), g.to_string()]],
             content: c.to_string(),
+            relay_provenance: Vec::new(),
+        }
+    }
+    fn metadata_evt(id: &str, g: &str, ts: u64, name: &str) -> KernelEvent {
+        KernelEvent {
+            id: id.to_string(),
+            author: "relay".to_string(),
+            kind: KIND_GROUP_METADATA,
+            created_at: ts,
+            tags: vec![
+                vec!["d".to_string(), g.to_string()],
+                vec!["name".to_string(), name.to_string()],
+            ],
+            content: String::new(),
             relay_provenance: Vec::new(),
         }
     }
@@ -1950,5 +1971,40 @@ mod tests {
         assert!(matches!(rx.has_changed(), Ok(true)));
         let view = rx.borrow_and_update().clone();
         assert_eq!(view.identity_state, IdentityState::LoggingIn);
+    }
+
+    #[test]
+    fn nmp_update_push_refreshes_group_tree_without_polling() {
+        let (app, mut rx) = make_app();
+        let discovered = Arc::new(DiscoveredGroupsProjection::new("wss://h"));
+        discovered.on_kernel_event(&metadata_evt("meta-child", "child", 100, "child"));
+        app.shared.group_tree.on_kernel_event(&evt(
+            "message-child",
+            "child",
+            200,
+            "pushed through group tree",
+        ));
+        if let Ok(mut slot) = app.shared.discovered.lock() {
+            *slot = Some(discovered);
+        }
+
+        let bridge = ProjectionUpdateBridge {
+            shared: Arc::clone(&app.shared),
+            projection_tx: app.projection_tx.clone(),
+        };
+        on_nmp_update(&bridge, Vec::new());
+
+        assert!(matches!(rx.has_changed(), Ok(true)));
+        let view = rx.borrow_and_update().clone();
+        let child = view
+            .channel_tree
+            .iter()
+            .find(|item| item.local_id == "child")
+            .expect("pushed group-tree event should surface the group row");
+        assert_eq!(child.unread, 1);
+        assert_eq!(
+            child.last_preview.as_deref(),
+            Some("pushed through group tree")
+        );
     }
 }
