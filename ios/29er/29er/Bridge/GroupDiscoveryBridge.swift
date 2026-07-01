@@ -99,7 +99,7 @@ extension KernelHandle {
             payload["parent"] = parent
         }
         return dispatchNip29(
-            "nmp.nip29.create_public_group",
+            "nmp.nip29.create_group",
             payload: payload,
             label: "createPublicGroup"
         )
@@ -240,8 +240,8 @@ extension KernelModel {
         access: String = "open",
         parent: String? = nil
     ) -> Bool {
-        let activeRelayUrl = relaySelector.activeRelayUrl
-        let hostRelayUrl = activeRelayUrl.isEmpty ? groupDefaults.suggestedRelayUrl : activeRelayUrl
+        let hostRelayUrl = relaySelector.activeRelayUrl
+        guard !hostRelayUrl.isEmpty else { return false }
         let group = GroupId(hostRelayUrl: hostRelayUrl, localId: localId)
         return kernel.createPublicGroup(
             group: group,

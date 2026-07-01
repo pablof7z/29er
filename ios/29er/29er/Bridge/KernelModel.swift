@@ -63,12 +63,6 @@ final class KernelModel: ObservableObject {
     /// `activeAccountPubkey` accessor.
     @Published var typedActiveAccount: String?
 
-    /// Typed `nmp.nip29.group_defaults` sidecar (`NGDF`). `nil` ⇒ the defaults
-    /// projection sidecar was absent/malformed on the last tick. Carries 29er's
-    /// Rust-owned suggested public-group host relay URL. Read through the
-    /// `groupDefaults` accessor.
-    @Published var typedGroupDefaults: GroupDefaultsSnapshot?
-
     /// Monotonic UI invalidation token for `refs.profile` row commits. The
     /// actual rows live in `profileRefs`; this published scalar redraws views
     /// that read the registry `NostrProfileHost` environment.
