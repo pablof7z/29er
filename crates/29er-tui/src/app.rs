@@ -18,13 +18,16 @@ use nmp_content::embed_projection::EmbeddedEventEnvelope;
 use nmp_content::wire::{decode_ref_event_envelopes, EMBED_SIDECAR_PROJECTION_KEY};
 use nmp_core::refs::{RefProfileStore, REFS_PROFILE_KEY};
 use nmp_core::substrate::{ObservedProjection, ObservedProjectionRegistrar};
+use nmp_core::typed_projections::{decode_publish_outbox, PUBLISH_OUTBOX_SCHEMA_ID};
 use nmp_core::{ObservedProjectionId, ObservedProjectionSink};
 use nmp_native_runtime::{
     new_app, Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
-    Nip29GroupEventsSession, Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
+    Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
+    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
 };
 use nmp_nip29::projection::{
-    DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, JoinedGroupsProjection,
+    DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, GroupRosterMember,
+    GroupRosterProjection, JoinedGroupsProjection,
 };
 use nmp_nip29::GroupId;
 use tokio::sync::watch;
@@ -32,19 +35,30 @@ use tokio::sync::watch;
 type ActiveAccountSlot = Arc<Mutex<Option<String>>>;
 
 /// A single member row rendered by the composer `@mention` popup and the
-/// members panel.
-///
-/// v0.8.0 removed `nmp_nip29::projection::GroupMembersProjection` /
-/// `GroupMemberRow` (NIP-29 no longer surfaces a per-member roster; membership
-/// now derives from [`JoinedGroupsProjection`] and `DiscoveredGroup` counts).
-/// 29er keeps this view-model shape locally so the roster UI compiles and is
-/// ready to be repopulated once a custom roster observer lands.
+/// members panel. This is a TUI view row over the NMP-owned
+/// [`GroupRosterProjection`]; it carries display-ready fallbacks only, not
+/// membership truth.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GroupMemberRow {
     pub pubkey: String,
     pub display_name: Option<String>,
     pub admin: bool,
     pub role: Option<String>,
+}
+
+impl From<GroupRosterMember> for GroupMemberRow {
+    fn from(member: GroupRosterMember) -> Self {
+        Self {
+            pubkey: member.pubkey,
+            display_name: None,
+            admin: member.is_admin,
+            role: if member.roles.is_empty() {
+                None
+            } else {
+                Some(member.roles.join(", "))
+            },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -113,6 +127,7 @@ pub enum FormKind {
     CreateChild(GroupId),
     PutUser(GroupId),
     MoveChannel(GroupId),
+    ShowMembers(GroupId),
 }
 
 /// Priority tier for a channel in the hotlist / room-list sidebar.
@@ -158,9 +173,24 @@ pub struct PublishOutboxItem {
     /// Nostr event-id echoed back by NMP after a successful dispatch.
     /// When present, confirmation is matched on this id alone (precise match).
     pub event_id: Option<String>,
+    /// NMP publish handle. Only this handle may be sent to `retry_publish`;
+    /// the TUI must not reconstruct and republish the event body for retry.
+    pub retry_handle: Option<String>,
+    /// Retry eligibility as emitted by NMP's publish-outbox projection.
+    pub can_retry: bool,
     /// Wall-clock instant the item was dispatched. Used to enforce
     /// a 30-second content-match window and a 60-second timeout.
     pub dispatched_at: std::time::Instant,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NmpPublishOutboxItem {
+    pub handle: String,
+    pub event_id: String,
+    pub content: String,
+    pub status: String,
+    pub can_retry: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -216,6 +246,7 @@ pub struct ProjectionView {
     pub selected_members: Vec<GroupMemberRow>,
     pub profiles: HashMap<String, TuiProfile>,
     pub event_envelopes: BTreeMap<String, EmbeddedEventEnvelope>,
+    pub nmp_publish_outbox: Vec<NmpPublishOutboxItem>,
     pub is_admin: bool,
     pub my_pubkey: Option<String>,
     pub identity_state: IdentityState,
@@ -253,9 +284,11 @@ pub struct SharedProjections {
     pub joined_handle: Mutex<Option<Nip29JoinedGroupsHandle>>,
     pub active_account: Mutex<ActiveAccountSlot>,
     pub selected_chat: Mutex<Option<Arc<GroupChatProjection>>>,
+    pub selected_roster: Mutex<Option<Arc<GroupRosterProjection>>>,
     pub selected_group: Mutex<Option<GroupId>>,
     pub profile_refs: Mutex<RefProfileStore>,
     pub event_envelopes: Mutex<BTreeMap<String, EmbeddedEventEnvelope>>,
+    pub nmp_publish_outbox: Mutex<Vec<NmpPublishOutboxItem>>,
     /// Set on each pushed snapshot that returns non-empty data; drives relay-state indicator.
     pub last_update_at: Mutex<Option<std::time::Instant>>,
 }
@@ -281,8 +314,19 @@ impl SharedProjections {
             .ok()
             .and_then(|c| c.as_ref().map(|c| c.snapshot().messages))
             .unwrap_or_default();
-        // The per-member roster API was removed in v0.8.0; no source yet.
-        let members: Vec<GroupMemberRow> = Vec::new();
+        let members: Vec<GroupMemberRow> = self
+            .selected_roster
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|projection| projection.snapshot()))
+            .map(|snapshot| {
+                snapshot
+                    .members
+                    .into_iter()
+                    .map(GroupMemberRow::from)
+                    .collect()
+            })
+            .unwrap_or_default();
         // Derive admin status for the selected group from the joined-groups
         // projection (relay-signed 39002), the canonical v0.8.0 source.
         let selected_local = self
@@ -330,6 +374,11 @@ impl SharedProjections {
             .lock()
             .map(|entries| entries.clone())
             .unwrap_or_default();
+        let nmp_publish_outbox = self
+            .nmp_publish_outbox
+            .lock()
+            .map(|entries| entries.clone())
+            .unwrap_or_default();
         let last_data_at = self.last_update_at.lock().ok().and_then(|ts| *ts);
         ProjectionView {
             channel_tree,
@@ -337,6 +386,7 @@ impl SharedProjections {
             selected_members: members,
             profiles,
             event_envelopes,
+            nmp_publish_outbox,
             is_admin,
             my_pubkey: me,
             identity_state,
@@ -358,6 +408,7 @@ pub struct App {
     /// new one (in [`Self::select_channel`]) replaces this at the kernel
     /// level, so there is no per-group cache to maintain here.
     group_events_handle: Option<Nip29GroupEventsHandle>,
+    group_roster_handle: Option<Nip29GroupRosterHandle>,
     discovery_handle: Option<Nip29GroupDiscoveryHandle>,
     /// Pubkeys of authors of currently-visible chat messages whose profile
     /// ref is currently claimed (resolved) via [`Self::resolve_profile_ref`].
@@ -406,9 +457,11 @@ impl App {
             joined_handle: Mutex::new(None),
             active_account: Mutex::new(Arc::new(Mutex::new(None))),
             selected_chat: Mutex::new(None),
+            selected_roster: Mutex::new(None),
             selected_group: Mutex::new(None),
             profile_refs: Mutex::new(RefProfileStore::new()),
             event_envelopes: Mutex::new(BTreeMap::new()),
+            nmp_publish_outbox: Mutex::new(Vec::new()),
             last_update_at: Mutex::new(None),
         });
         Self {
@@ -417,6 +470,7 @@ impl App {
             shared,
             projection_tx,
             group_events_handle: None,
+            group_roster_handle: None,
             latest: ProjectionView::default(),
             discovery_handle: None,
             claimed_profile_authors: HashSet::new(),
@@ -612,7 +666,65 @@ impl App {
         } else if self.selected_index >= self.latest.channel_tree.len() {
             self.selected_index = self.latest.channel_tree.len() - 1;
         }
+        self.sync_nmp_publish_outbox();
         self.reconcile_outbox();
+    }
+
+    fn sync_nmp_publish_outbox(&mut self) {
+        let rows = self.latest.nmp_publish_outbox.clone();
+        for row in rows {
+            let status = outbox_status_from_nmp(&row.status);
+            let matching_idx = self.outbox.iter().position(|item| {
+                !matches!(item.status, OutboxStatus::Confirmed)
+                    && (item.retry_handle.as_deref() == Some(row.handle.as_str())
+                        || (!row.event_id.is_empty()
+                            && item.event_id.as_deref() == Some(row.event_id.as_str()))
+                        || (matches!(item.status, OutboxStatus::Pending)
+                            && item.content == row.content))
+            });
+            if let Some(idx) = matching_idx {
+                let item = &mut self.outbox[idx];
+                item.correlation_id = row.handle.clone();
+                item.retry_handle = Some(row.handle.clone());
+                if !row.event_id.is_empty() {
+                    item.event_id = Some(row.event_id.clone());
+                }
+                item.content = row.content.clone();
+                item.status = status;
+                item.error = row.error.clone();
+                item.can_retry = row.can_retry;
+                continue;
+            }
+            let already_confirmed = self.outbox.iter().any(|item| {
+                matches!(item.status, OutboxStatus::Confirmed)
+                    && ((!row.event_id.is_empty()
+                        && item.event_id.as_deref() == Some(row.event_id.as_str()))
+                        || item.content == row.content)
+            });
+            if already_confirmed {
+                continue;
+            }
+            self.outbox.push(PublishOutboxItem {
+                correlation_id: row.handle.clone(),
+                group_local_id: self
+                    .selected_channel
+                    .as_ref()
+                    .map(|group| group.local_id.clone())
+                    .unwrap_or_default(),
+                content: row.content.clone(),
+                status,
+                error: row.error.clone(),
+                mention_pubkeys: Vec::new(),
+                event_id: if row.event_id.is_empty() {
+                    None
+                } else {
+                    Some(row.event_id.clone())
+                },
+                retry_handle: Some(row.handle),
+                can_retry: row.can_retry,
+                dispatched_at: Instant::now(),
+            });
+        }
     }
 
     fn reconcile_outbox(&mut self) {
@@ -631,6 +743,7 @@ impl App {
             if elapsed >= Duration::from_secs(60) {
                 item.status = OutboxStatus::Failed;
                 item.error = Some("timed out waiting for confirmation".to_string());
+                item.can_retry = false;
                 continue;
             }
             // Only attempt matching within the 30-second dispatch window.
@@ -650,6 +763,7 @@ impl App {
             });
             if confirmed {
                 item.status = OutboxStatus::Confirmed;
+                item.can_retry = false;
             }
         }
     }
@@ -818,6 +932,16 @@ impl App {
             if let Ok(mut slot) = self.shared.selected_chat.lock() {
                 *slot = Some(Arc::new(GroupChatProjection::new(reader)));
             }
+            if let Some(handle) = self.group_roster_handle.take() {
+                app.close_nip29_group_roster_session(handle);
+            }
+            let (handle, reader) = app.open_nip29_group_roster_session_with_reader(
+                Nip29GroupRosterSession::new(group.clone()),
+            );
+            self.group_roster_handle = Some(handle);
+            if let Ok(mut slot) = self.shared.selected_roster.lock() {
+                *slot = Some(reader);
+            }
         }
         if let Ok(mut g) = self.shared.selected_group.lock() {
             *g = Some(group.clone());
@@ -858,6 +982,8 @@ impl App {
             error: None,
             mention_pubkeys: mention_pubkeys.clone(),
             event_id: None,
+            retry_handle: None,
+            can_retry: false,
             dispatched_at: Instant::now(),
         };
         Self::apply_dispatch_result(&mut item, result);
@@ -868,41 +994,28 @@ impl App {
     }
 
     pub fn retry_outbox(&mut self, correlation_id: String) {
-        let Some(idx) = self
-            .outbox
-            .iter()
-            .position(|i| i.correlation_id == correlation_id)
-        else {
+        let Some(idx) = self.outbox.iter().position(|i| {
+            i.correlation_id == correlation_id
+                || i.retry_handle.as_deref() == Some(correlation_id.as_str())
+        }) else {
             return;
         };
-        let (content, local_id, mention_pubkeys) = {
-            let it = &self.outbox[idx];
-            (
-                it.content.clone(),
-                it.group_local_id.clone(),
-                it.mention_pubkeys.clone(),
-            )
-        };
-        let Some(group) = self
-            .selected_channel
-            .clone()
-            .filter(|g| g.local_id == local_id)
-        else {
+        let Some(handle) = self.outbox[idx].retry_handle.clone() else {
             return;
         };
-        let json = serde_json::json!({
-            "group": group,
-            "content": content,
-            "mention_pubkeys": mention_pubkeys,
-        })
-        .to_string();
-        let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
+        if !self.outbox[idx].can_retry {
+            return;
+        }
+        let Some(app) = self.app.as_ref() else {
+            return;
+        };
+        app.retry_publish(handle);
         let item = &mut self.outbox[idx];
         item.status = OutboxStatus::Pending;
         item.error = None;
-        item.event_id = None;
+        item.can_retry = false;
         item.dispatched_at = Instant::now();
-        Self::apply_dispatch_result(item, result);
+        self.set_status_message("Retrying publish\u{2026}".to_string());
     }
 
     /// Note: [`DispatchOutcome`] (the same outcome shape PR-3 will wire onto
@@ -972,7 +1085,13 @@ impl App {
         self.close_form();
     }
     pub fn show_members(&mut self, group: GroupId) {
-        let _ = group;
+        if self.palette_open {
+            self.set_palette(false);
+        }
+        if self.selected_channel.as_ref() != Some(&group) {
+            self.select_channel(group.clone());
+        }
+        self.open_form(FormKind::ShowMembers(group));
     }
 
     fn dispatch_json(&mut self, namespace: &str, body: &str) -> Option<DispatchOutcome> {
@@ -1180,6 +1299,9 @@ impl Drop for App {
         if let Some(handle) = self.group_events_handle.take() {
             app.close_nip29_group_events_session(handle);
         }
+        if let Some(handle) = self.group_roster_handle.take() {
+            app.close_nip29_group_roster_session(handle);
+        }
         if let Ok(mut slot) = self.shared.joined_handle.lock() {
             if let Some(handle) = slot.take() {
                 app.close_nip29_joined_groups_session(handle);
@@ -1236,6 +1358,35 @@ fn on_nmp_update(bridge: &ProjectionUpdateBridge, bytes: Vec<u8>) {
                 *store = next;
             }
         }
+        if let Some(entry) = typed
+            .iter()
+            .find(|entry| entry.key == PUBLISH_OUTBOX_SCHEMA_ID)
+        {
+            if let (Ok(model), Ok(mut store)) = (
+                decode_publish_outbox(&entry.payload),
+                bridge.shared.nmp_publish_outbox.lock(),
+            ) {
+                *store = model
+                    .items
+                    .into_iter()
+                    .map(|item| {
+                        let error = item
+                            .relays
+                            .iter()
+                            .find(|relay| !relay.message.is_empty())
+                            .map(|relay| relay.message.clone());
+                        NmpPublishOutboxItem {
+                            handle: item.handle,
+                            event_id: item.event_id,
+                            content: item.content,
+                            status: item.status,
+                            can_retry: item.can_retry,
+                            error,
+                        }
+                    })
+                    .collect();
+            }
+        }
     }
     let _ = bridge.projection_tx.send(bridge.shared.project());
 }
@@ -1246,6 +1397,13 @@ fn generate_local_id() -> String {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     format!("ch-{n:x}")
+}
+
+fn outbox_status_from_nmp(status: &str) -> OutboxStatus {
+    match status {
+        "failed" => OutboxStatus::Failed,
+        _ => OutboxStatus::Pending,
+    }
 }
 
 fn name_for(d: &DiscoveredGroupsSnapshot, id: &str) -> String {
@@ -1441,6 +1599,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn roster_member_maps_to_tui_member_row() {
+        let row = GroupMemberRow::from(GroupRosterMember {
+            pubkey: "alice-pubkey".to_string(),
+            roles: vec!["moderator".to_string(), "ops".to_string()],
+            is_admin: true,
+            is_member: true,
+        });
+        assert_eq!(row.pubkey, "alice-pubkey");
+        assert_eq!(row.display_name, None);
+        assert!(row.admin);
+        assert_eq!(row.role.as_deref(), Some("moderator, ops"));
+    }
+
     // --- existing tests (issue #11 baseline) ---
 
     #[test]
@@ -1539,6 +1711,8 @@ mod tests {
                 error: None,
                 mention_pubkeys: Vec::new(),
                 event_id: None,
+                retry_handle: None,
+                can_retry: false,
                 dispatched_at: Instant::now(),
             }],
             identity_state: IdentityState::LoggedIn {
@@ -1664,6 +1838,8 @@ mod tests {
             error: None,
             mention_pubkeys: Vec::new(),
             event_id: None,
+            retry_handle: None,
+            can_retry: false,
             dispatched_at: Instant::now(),
         });
 
@@ -1698,6 +1874,8 @@ mod tests {
             error: None,
             mention_pubkeys: Vec::new(),
             event_id: None,
+            retry_handle: None,
+            can_retry: false,
             dispatched_at: Instant::now(),
         });
 
@@ -1730,6 +1908,8 @@ mod tests {
             error: Some("dispatch failed".to_string()),
             mention_pubkeys: Vec::new(),
             event_id: None,
+            retry_handle: None,
+            can_retry: false,
             dispatched_at: Instant::now(),
         });
 
@@ -1844,6 +2024,45 @@ mod tests {
             app.snapshot().status_message.is_none(),
             "expired message must be cleared by tick()"
         );
+    }
+
+    #[test]
+    fn show_members_opens_members_modal_and_closes_palette() {
+        let (mut app, _rx) = make_app();
+        let group = GroupId::new("wss://h", "room");
+        app.set_palette(true);
+        assert!(app.palette_open());
+
+        app.show_members(group.clone());
+        let snap = app.snapshot();
+
+        assert!(!snap.palette_open);
+        assert!(matches!(snap.active_form, Some(FormKind::ShowMembers(ref g)) if g == &group));
+        assert_eq!(snap.focus, Focus::Modal);
+        assert_eq!(snap.selected_channel_id.as_ref(), Some(&group));
+    }
+
+    #[test]
+    fn nmp_publish_outbox_projection_sets_retry_policy() {
+        let (mut app, _rx) = make_app();
+        let mut view = ProjectionView::default();
+        view.nmp_publish_outbox = vec![NmpPublishOutboxItem {
+            handle: "event-handle".to_string(),
+            event_id: "event-id".to_string(),
+            content: "retry me".to_string(),
+            status: "failed".to_string(),
+            can_retry: true,
+            error: Some("relay failed".to_string()),
+        }];
+
+        app.ingest_projection(view);
+        let item = &app.snapshot().publish_outbox[0];
+
+        assert_eq!(item.correlation_id, "event-handle");
+        assert_eq!(item.retry_handle.as_deref(), Some("event-handle"));
+        assert_eq!(item.status, OutboxStatus::Failed);
+        assert!(item.can_retry);
+        assert_eq!(item.error.as_deref(), Some("relay failed"));
     }
 
     /// T10: refresh_projection() updates `latest` immediately from an explicit

@@ -14,7 +14,7 @@
 pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 use crate::actions::Action;
-use crate::app::{Focus, IdentityState, RelayState, TuiSnapshot};
+use crate::app::{Focus, FormKind, IdentityState, RelayState, TuiSnapshot};
 use crate::ui;
 use crate::Component;
 use crossterm::event::Event;
@@ -58,6 +58,7 @@ static HINTS_FORM: &[HintEntry] = &[
     ("[Tab]", "next field"),
     ("[Esc]", "cancel"),
 ];
+static HINTS_MEMBERS: &[HintEntry] = &[("[Esc]", "close members")];
 static HINTS_HELP: &[HintEntry] = &[("[? / Esc]", "close help")];
 
 pub struct StatusBar {
@@ -107,6 +108,8 @@ impl StatusBar {
         self.connected_at = s.connected_at;
         self.hints = if s.help_open {
             HINTS_HELP
+        } else if matches!(s.active_form, Some(FormKind::ShowMembers(_))) {
+            HINTS_MEMBERS
         } else if s.active_form.is_some() || matches!(s.focus, Focus::Modal) {
             HINTS_FORM
         } else {

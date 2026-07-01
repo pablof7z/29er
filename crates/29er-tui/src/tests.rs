@@ -9,10 +9,12 @@ use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::Terminal;
 
 use crate::app::{
-    ChannelListItem, ChannelTier, Focus, IdentityState, RelayState, Screen, TuiSnapshot,
+    ChannelListItem, ChannelTier, Focus, FormKind, GroupMemberRow, IdentityState, RelayState,
+    Screen, TuiSnapshot,
 };
 use crate::ui::chat::ChatComponent;
 use crate::ui::login::LoginComponent;
+use crate::ui::membership::Membership;
 use crate::ui::room_list::RoomListComponent;
 use crate::ui::status_bar::StatusBar;
 use crate::Component;
@@ -38,8 +40,8 @@ fn render_component<C: Component>(c: &mut C, w: u16, h: u16) -> String {
 }
 
 fn fake_msg(pk: &str, ts: u64, content: &str) -> GroupChatMessage {
-    let tree = nmp_content::tokenize_with_kind(content, &[], nmp_content::RenderMode::Auto, 9)
-        .to_wire();
+    let tree =
+        nmp_content::tokenize_with_kind(content, &[], nmp_content::RenderMode::Auto, 9).to_wire();
     GroupChatMessage {
         id: format!("{pk}-{ts}"),
         pubkey: pk.to_string(),
@@ -195,6 +197,29 @@ fn test_status_bar_shows_keybinds() {
         out.contains("j/k") || out.contains("move") || out.contains("quit"),
         "key-hint text missing from status bar: {out:?}"
     );
+}
+
+#[test]
+fn test_membership_modal_renders_selected_members() {
+    let mut c = Membership::new();
+    let mut snap = base_snapshot();
+    snap.active_form = Some(FormKind::ShowMembers(GroupId::new(
+        "wss://relay.test",
+        "general",
+    )));
+    snap.selected_members = vec![GroupMemberRow {
+        pubkey: "alice-pubkey".to_string(),
+        display_name: Some("Alice".to_string()),
+        admin: true,
+        role: Some("moderator".to_string()),
+    }];
+
+    c.update(&snap);
+    let out = render_component(&mut c, 80, 24);
+
+    assert!(out.contains("members"), "members modal title missing");
+    assert!(out.contains("Alice"), "member display name missing");
+    assert!(out.contains("moderator"), "member role missing");
 }
 
 /// `LoginComponent` renders a form that contains the word "nsec".

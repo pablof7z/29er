@@ -1,19 +1,19 @@
 //! Membership + admin forms (issue #9). Forms emit typed Actions; App dispatches.
 //! Modal forms are rendered as tui-popup overlays with focus-trapped fields
 //! and inline error display.
+use crate::actions::Action;
+use crate::app::GroupMemberRow;
+use crate::app::{FormKind, TuiSnapshot};
+use crate::ui;
+use crate::Component;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Paragraph, Widget};
 use ratatui::Frame;
 use tui_popup::{KnownSize, Popup};
-use crate::app::GroupMemberRow;
-use crate::actions::Action;
-use crate::app::{FormKind, TuiSnapshot};
-use crate::ui;
-use crate::Component;
 
 // ── FormBody: popup inner widget ──────────────────────────────────────────────
 
@@ -41,8 +41,12 @@ impl FormBody {
 
 impl KnownSize for FormBody {
     /// Fixed inner width (popup adds 2 more for its border).
-    fn width(&self) -> usize { 54 }
-    fn height(&self) -> usize { self.body_height() }
+    fn width(&self) -> usize {
+        54
+    }
+    fn height(&self) -> usize {
+        self.body_height()
+    }
 }
 
 impl Widget for FormBody {
@@ -50,7 +54,9 @@ impl Widget for FormBody {
         let has_error = self.error.is_some();
         let mut constraints: Vec<Constraint> =
             self.labels.iter().map(|_| Constraint::Length(3)).collect();
-        if has_error { constraints.push(Constraint::Length(1)); }
+        if has_error {
+            constraints.push(Constraint::Length(1));
+        }
         constraints.push(Constraint::Length(1)); // hint row
 
         let areas = Layout::vertical(constraints).split(area);
@@ -109,12 +115,15 @@ pub struct Membership {
     is_admin: bool,
     fields: Vec<String>,
     field: usize,
+    members: Vec<GroupMemberRow>,
     /// Inline error shown inside the popup after a failed submission.
     pub error: Option<String>,
 }
 
 impl Membership {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn update(&mut self, s: &TuiSnapshot) {
         let changed = match (&self.form, &s.active_form) {
@@ -125,6 +134,7 @@ impl Membership {
         };
         self.form = s.active_form.clone();
         self.is_admin = s.is_admin;
+        self.members = s.selected_members.clone();
         if changed {
             self.fields = self.empty_fields();
             self.field = 0;
@@ -135,12 +145,15 @@ impl Membership {
     fn empty_fields(&self) -> Vec<String> {
         match &self.form {
             Some(FormKind::PutUser(_)) => vec![String::new(), String::new()],
+            Some(FormKind::ShowMembers(_)) => Vec::new(),
             Some(_) => vec![String::new()],
             None => Vec::new(),
         }
     }
 
-    pub fn is_open(&self) -> bool { self.form.is_some() }
+    pub fn is_open(&self) -> bool {
+        self.form.is_some()
+    }
 
     fn labels(&self) -> (&'static str, Vec<&'static str>) {
         match &self.form {
@@ -154,6 +167,7 @@ impl Membership {
             Some(FormKind::MoveChannel(_)) => {
                 ("Move channel", vec!["new parent id (empty = root)"])
             }
+            Some(FormKind::ShowMembers(_)) => ("Members", vec![]),
             None => ("", vec![]),
         }
     }
@@ -173,34 +187,67 @@ impl Membership {
                     .map(|c| c.trim().to_string())
                     .filter(|c| !c.is_empty())
                     .collect();
-                Some(Action::CreateInvite { group: g.clone(), codes })
+                Some(Action::CreateInvite {
+                    group: g.clone(),
+                    codes,
+                })
             }
             Some(FormKind::CreateChild(g)) if self.is_admin => {
                 if f0.is_empty() {
                     None
                 } else {
-                    Some(Action::CreateChild { parent: g.clone(), name: f0 })
+                    Some(Action::CreateChild {
+                        parent: g.clone(),
+                        name: f0,
+                    })
                 }
             }
             Some(FormKind::PutUser(g)) if self.is_admin => {
-                if f0.is_empty() { return None; }
-                let role = self.fields
+                if f0.is_empty() {
+                    return None;
+                }
+                let role = self
+                    .fields
                     .get(1)
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty());
-                Some(Action::PutUser { group: g.clone(), target_pubkey: f0, role })
+                Some(Action::PutUser {
+                    group: g.clone(),
+                    target_pubkey: f0,
+                    role,
+                })
             }
             Some(FormKind::MoveChannel(g)) if self.is_admin => Some(Action::MoveChannel {
                 group: g.clone(),
                 parent: if f0.is_empty() { None } else { Some(f0) },
             }),
+            Some(FormKind::ShowMembers(_)) => None,
             _ => None,
         }
     }
 
     pub fn draw_members(&self, f: &mut Frame, area: Rect, members: &[GroupMemberRow]) {
+        let max_w = area.width.saturating_sub(4).max(1);
+        let max_h = area.height.saturating_sub(4).max(1);
+        let modal_w = 66u16.min(max_w);
+        let desired_h = (members.len() as u16).saturating_add(4).min(18);
+        let modal_h = desired_h.max(8u16.min(max_h)).min(max_h);
+        let vertical = Layout::vertical([
+            Constraint::Length((area.height.saturating_sub(modal_h)) / 2),
+            Constraint::Length(modal_h),
+            Constraint::Min(0),
+        ])
+        .split(area);
+        let horizontal = Layout::horizontal([
+            Constraint::Length((area.width.saturating_sub(modal_w)) / 2),
+            Constraint::Length(modal_w),
+            Constraint::Min(0),
+        ])
+        .split(vertical[1]);
+        let modal = horizontal[1];
+        f.render_widget(Clear, modal);
         let block = Block::default()
-            .title(" members ")
+            .title(" members  Esc close ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(ui::OVERLAY0));
@@ -233,13 +280,19 @@ impl Membership {
                 })
                 .collect()
         };
-        f.render_widget(List::new(items).block(block), area);
+        f.render_widget(List::new(items).block(block), modal);
     }
 }
 
 impl Component for Membership {
     fn draw(&mut self, f: &mut Frame, area: Rect) {
-        if self.form.is_none() { return; }
+        if self.form.is_none() {
+            return;
+        }
+        if matches!(self.form, Some(FormKind::ShowMembers(_))) {
+            self.draw_members(f, area, &self.members);
+            return;
+        }
         let (title, labels) = self.labels();
         let admin_blocked = matches!(
             self.form,
@@ -266,9 +319,13 @@ impl Component for Membership {
     }
 
     fn handle_event(&mut self, event: &Event) -> Option<Action> {
-        if self.form.is_none() { return None; }
+        if self.form.is_none() {
+            return None;
+        }
         let Event::Key(key) = event else { return None };
-        if key.kind != KeyEventKind::Press { return None; }
+        if key.kind != KeyEventKind::Press {
+            return None;
+        }
         // Focus trap: all key events are consumed while a popup is open.
         match key.code {
             KeyCode::Esc => Some(Action::CloseForm),
@@ -288,11 +345,15 @@ impl Component for Membership {
                 None
             }
             KeyCode::Char(c) => {
-                if let Some(buf) = self.fields.get_mut(self.field) { buf.push(c); }
+                if let Some(buf) = self.fields.get_mut(self.field) {
+                    buf.push(c);
+                }
                 None
             }
             KeyCode::Backspace => {
-                if let Some(buf) = self.fields.get_mut(self.field) { buf.pop(); }
+                if let Some(buf) = self.fields.get_mut(self.field) {
+                    buf.pop();
+                }
                 None
             }
             _ => None,
@@ -304,7 +365,9 @@ impl Component for Membership {
 mod tests {
     use super::*;
     use nmp_nip29::GroupId;
-    fn g() -> GroupId { GroupId::new("wss://h", "room") }
+    fn g() -> GroupId {
+        GroupId::new("wss://h", "room")
+    }
 
     #[test]
     fn join_form_emits_join_with_optional_code() {
@@ -343,7 +406,11 @@ mod tests {
         m.is_admin = true;
         m.fields = vec!["deadbeef".into(), "admin".into()];
         match m.submit() {
-            Some(Action::PutUser { target_pubkey, role, .. }) => {
+            Some(Action::PutUser {
+                target_pubkey,
+                role,
+                ..
+            }) => {
                 assert_eq!(target_pubkey, "deadbeef");
                 assert_eq!(role.as_deref(), Some("admin"));
             }
