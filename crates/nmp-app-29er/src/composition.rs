@@ -3,7 +3,7 @@
 //! The single Rust entry point that turns a fresh, unstarted NMP app host into
 //! a fully-composed 29er app: the substrate floor (routing, NIP-65 mailbox
 //! cache, coverage gate, blocked-relay handling — everything `nmp-substrate`
-//! owns) and the NIP-29 action namespaces.
+//! owns) and the NIP-29 protocol installer.
 //!
 //! It is shared by BOTH 29er shells:
 //! * [`crate::TwentyNinerApp`] (the UniFFI facade) calls it on its own,
@@ -24,12 +24,12 @@
 //! `register_defaults*` entry point are banned doctrine-lint tokens as of the
 //! pin in this workspace's `Cargo.toml`). That bundle also contradicted 29er's
 //! own stated S01 scope — this crate's module docs have always said 29er
-//! "carries no DM / Marmot / Wallet / Search / Embed projections in S01" —
+//! "carries no DM / Marmot / Wallet / Embed projections in S01" —
 //! so composing only the substrate floor + NIP-29 here is both the only
 //! available option and the architecturally correct one: 29er now declares
 //! exactly what it uses instead of inheriting an all-in bundle it never
 //! wanted. A future PR can add explicit, named feature installs (e.g.
-//! `nmp_nip17::register_actions` for DMs) the same way, if/when 29er's product
+//! `nmp_nip17::register` for DMs) the same way, if/when 29er's product
 //! scope grows to need them.
 
 use nmp_core::substrate::AppHost;
@@ -48,17 +48,17 @@ use nmp_core::substrate::AppHost;
 ///    trimming, NIP-77 interceptors, and native NIP-11 relay metadata. Every
 ///    NMP app/runtime root needs this; it carries no product-specific
 ///    features (no DMs, no follows, no zaps — see the module doc above).
-/// 2. The NIP-29 action namespaces (`nmp.nip29.discover` / `join` / etc.).
+/// 2. The NIP-29 protocol installer (actions, input scopes, and search scopes).
 pub fn compose_29er_runtime(app: &mut impl AppHost) {
     let _substrate_handles = nmp_substrate::install(app, nmp_substrate::SubstrateConfig::default());
 
-    // 29er-specific: register the NIP-29 action namespaces against the action
-    // registry. Lives in this crate (not NMP) because NIP-29 is not part of
-    // the canonical substrate floor every Nostr app inherits.
-    let registered = nmp_nip29::register::register_actions(app);
+    // 29er-specific: install the NIP-29 protocol surface. Lives in this crate
+    // (not NMP) because NIP-29 is not part of the canonical substrate floor
+    // every Nostr app inherits.
+    let registered = nmp_nip29::register(app, nmp_nip29::Config::default());
     debug_assert!(
         registered.is_ok(),
-        "nmp-nip29 register_actions reported a namespace collision: {registered:?}"
+        "nmp-nip29 register reported a namespace collision: {registered:?}"
     );
     let _ = registered;
 }

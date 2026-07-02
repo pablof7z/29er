@@ -342,36 +342,33 @@ fn build_discovery_session(
     let tree_messages_for_sidecar = Arc::clone(&tree_messages);
     let active_account = app.active_account_handle();
     let joined_reader_for_sidecar = Arc::clone(joined_reader);
-    app.register_typed_snapshot_projection(
-        tree_feed_params.key.dynamic_token(),
-        move || {
-            let snapshot = tree_discovered.snapshot();
-            let messages = tree_messages_for_sidecar.snapshot();
-            // Re-read the live active pubkey + joined reader every tick so
-            // membership is recomputed on an account switch and never leaks a
-            // previous account's truth.
-            let active_pubkey = active_account
-                .lock()
-                .ok()
-                .and_then(|slot| slot.clone())
-                .unwrap_or_default();
-            let joined_snapshot = joined_reader_for_sidecar
-                .lock()
-                .ok()
-                .and_then(|slot| slot.clone())
-                .map(|projection| projection.snapshot())
-                .unwrap_or_default();
-            let membership = membership_from_joined(&joined_snapshot, &active_pubkey);
-            Some(TypedProjectionData {
-                key: GROUP_TREE_SCHEMA_ID.to_string(),
-                schema_id: GROUP_TREE_SCHEMA_ID.to_string(),
-                schema_version: GROUP_TREE_SCHEMA_VERSION,
-                file_identifier: String::from_utf8_lossy(GROUP_TREE_FILE_IDENTIFIER).into_owned(),
-                payload: encode_group_tree_snapshot(&snapshot, &messages, &membership),
-                ..Default::default()
-            })
-        },
-    );
+    app.register_typed_snapshot_projection(tree_feed_params.key.dynamic_token(), move || {
+        let snapshot = tree_discovered.snapshot();
+        let messages = tree_messages_for_sidecar.snapshot();
+        // Re-read the live active pubkey + joined reader every tick so
+        // membership is recomputed on an account switch and never leaks a
+        // previous account's truth.
+        let active_pubkey = active_account
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .unwrap_or_default();
+        let joined_snapshot = joined_reader_for_sidecar
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .map(|projection| projection.snapshot())
+            .unwrap_or_default();
+        let membership = membership_from_joined(&joined_snapshot, &active_pubkey);
+        Some(TypedProjectionData {
+            key: GROUP_TREE_SCHEMA_ID.to_string(),
+            schema_id: GROUP_TREE_SCHEMA_ID.to_string(),
+            schema_version: GROUP_TREE_SCHEMA_VERSION,
+            file_identifier: String::from_utf8_lossy(GROUP_TREE_FILE_IDENTIFIER).into_owned(),
+            payload: encode_group_tree_snapshot(&snapshot, &messages, &membership),
+            ..Default::default()
+        })
+    });
 
     Some(DiscoverySession {
         handle: discovery_handle,
