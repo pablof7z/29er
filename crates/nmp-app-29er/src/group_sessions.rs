@@ -42,10 +42,11 @@ use std::sync::{Arc, Mutex};
 use nmp_core::ObservedProjectionSink;
 use nmp_core::TypedProjectionData;
 use nmp_native_runtime::{
-    FeedAdmission, FeedHandle, FeedParams, FeedRanking, FeedRender, FeedScope, FeedWindow,
-    Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
-    Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
-    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp, ProjectionKey,
+    FeedAdmission, FeedHandle, FeedItemProjection, FeedOrder, FeedParams, FeedScope, FeedShape,
+    FeedWindowPolicy, Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession,
+    Nip29GroupEventsHandle, Nip29GroupEventsSession, Nip29GroupRosterHandle,
+    Nip29GroupRosterSession, Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
+    ProjectionKey,
 };
 use nmp_nip29::{GroupEventsProjection, GroupId, JoinedGroupsProjection};
 
@@ -311,15 +312,14 @@ fn build_discovery_session(
     let tree_messages = Arc::new(GroupTreeProjection::new());
     let tree_feed_params = FeedParams {
         primary_kinds: vec![KIND_CHAT_MESSAGE],
-        render: FeedRender::Flat,
-        acquisition: FeedScope::ActiveUserHostedGroups,
+        shape: FeedShape::Flat,
+        source: FeedScope::ActiveUserHostedGroups,
         admission: FeedAdmission::All,
-        ranking: FeedRanking::ChronologicalDesc,
-        window: FeedWindow {
-            initial_limit: GROUP_TREE_REPLAY_LIMIT,
-        },
-        projection: ProjectionKey::app_owned(GROUP_TREE_SCHEMA_ID)
+        order: FeedOrder::NewestByFeedPosition,
+        window: FeedWindowPolicy::bounded(GROUP_TREE_REPLAY_LIMIT),
+        key: ProjectionKey::app_owned(GROUP_TREE_SCHEMA_ID)
             .expect("29er group-tree projection key must stay app-owned"),
+        item_projection: FeedItemProjection::FeedRows,
     };
     let reset_tree: Arc<dyn Fn() + Send + Sync> = {
         let tree_messages = Arc::clone(&tree_messages);
@@ -343,7 +343,7 @@ fn build_discovery_session(
     let active_account = app.active_account_handle();
     let joined_reader_for_sidecar = Arc::clone(joined_reader);
     app.register_typed_snapshot_projection(
-        tree_feed_params.projection.dynamic_token(),
+        tree_feed_params.key.dynamic_token(),
         move || {
             let snapshot = tree_discovered.snapshot();
             let messages = tree_messages_for_sidecar.snapshot();
