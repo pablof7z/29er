@@ -20,10 +20,11 @@ use nmp_core::refs::{RefProfileStore, REFS_PROFILE_KEY};
 use nmp_core::typed_projections::{decode_publish_outbox, PUBLISH_OUTBOX_SCHEMA_ID};
 use nmp_core::ObservedProjectionSink;
 use nmp_native_runtime::{
-    new_app, FeedAdmission, FeedHandle, FeedParams, FeedRanking, FeedRender, FeedScope, FeedWindow,
-    Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
-    Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
-    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp, ProjectionKey,
+    new_app, FeedAdmission, FeedHandle, FeedItemProjection, FeedOrder, FeedParams, FeedScope,
+    FeedShape, FeedWindowPolicy, Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession,
+    Nip29GroupEventsHandle, Nip29GroupEventsSession, Nip29GroupRosterHandle,
+    Nip29GroupRosterSession, Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
+    ProjectionKey,
 };
 use nmp_nip29::projection::{
     DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, GroupRosterMember,
@@ -540,40 +541,6 @@ impl App {
         compose_29er_runtime(&mut app);
         app.consume_all_builtin_projections();
 
-        let (discovery_handle, discovered) = app.open_nip29_group_discovery_session_with_reader(
-            Nip29GroupDiscoverySession::new(relay.clone()),
-        );
-        if let Ok(mut slot) = self.shared.discovered.lock() {
-            *slot = Some(discovered);
-        }
-
-        let tree_feed_params = FeedParams {
-            primary_kinds: vec![KIND_CHAT_MESSAGE],
-            render: FeedRender::Flat,
-            acquisition: FeedScope::ActiveUserHostedGroups,
-            admission: FeedAdmission::All,
-            ranking: FeedRanking::ChronologicalDesc,
-            window: FeedWindow { initial_limit: 80 },
-            projection: ProjectionKey::app_owned("app.29er.tui.group_tree")
-                .expect("29er TUI group-tree projection key must stay app-owned"),
-        };
-        let reset_tree: Arc<dyn Fn() + Send + Sync> = {
-            let group_tree = Arc::clone(&self.shared.group_tree);
-            Arc::new(move || group_tree.clear())
-        };
-        let tree_feed_handle = match app.open_observed_feed_source(
-            &tree_feed_params,
-            Arc::clone(&self.shared.group_tree) as Arc<dyn ObservedProjectionSink>,
-            80,
-            Some(reset_tree),
-        ) {
-            Ok(handle) => handle,
-            Err(error) => {
-                app.close_nip29_group_discovery_session(discovery_handle);
-                anyhow::bail!("failed to open group-tree feed source: {error:?}");
-            }
-        };
-
         // `nmp-native-runtime` owns the app by value now (no `*mut NmpApp`), so
         // it is wrapped in an `Arc` here purely so the `'static` identity-change
         // observer closure below (which runs on the actor thread) can hold a
@@ -599,27 +566,29 @@ impl App {
             let Some(pk) = pubkey.filter(|p| !p.is_empty()) else {
                 return;
             };
-            let Ok(mut slot) = joined_shared.joined.lock() else {
-                return;
-            };
-            if slot
-                .as_ref()
-                .map(|projection| projection.snapshot().active_pubkey == pk)
-                .unwrap_or(false)
             {
-                return;
+                let Ok(mut slot) = joined_shared.joined.lock() else {
+                    return;
+                };
+                if slot
+                    .as_ref()
+                    .map(|projection| projection.snapshot().active_pubkey == pk)
+                    .unwrap_or(false)
+                {
+                    return;
+                }
+                let opened = joined_app.open_nip29_joined_groups_session_with_reader(
+                    Nip29JoinedGroupsSession::new(pk, joined_relay.clone()),
+                );
+                let (handle, reader) = match opened {
+                    Some((handle, reader)) => (Some(handle), Some(reader)),
+                    None => (None, None),
+                };
+                if let Ok(mut handle_slot) = joined_shared.joined_handle.lock() {
+                    *handle_slot = handle;
+                }
+                *slot = reader;
             }
-            let opened = joined_app.open_nip29_joined_groups_session_with_reader(
-                Nip29JoinedGroupsSession::new(pk, joined_relay.clone()),
-            );
-            let (handle, reader) = match opened {
-                Some((handle, reader)) => (Some(handle), Some(reader)),
-                None => (None, None),
-            };
-            if let Ok(mut handle_slot) = joined_shared.joined_handle.lock() {
-                *handle_slot = handle;
-            }
-            *slot = reader;
             let _ = joined_projection_tx.send(joined_shared.project());
         });
 
@@ -634,8 +603,44 @@ impl App {
         });
         nmp_uniffi_support::set_update_sink(&app, Some(update_bridge), on_nmp_update);
 
-        app.add_relay(relay.clone(), "read".to_string());
+        app.add_relay(relay.clone(), "both".to_string());
         nmp_uniffi_support::start_runtime(&app, 80, 4);
+
+        let (discovery_handle, discovered) = app.open_nip29_group_discovery_session_with_reader(
+            Nip29GroupDiscoverySession::new(relay.clone()),
+        );
+        if let Ok(mut slot) = self.shared.discovered.lock() {
+            *slot = Some(discovered);
+        }
+
+        let tree_feed_params = FeedParams {
+            primary_kinds: vec![KIND_CHAT_MESSAGE],
+            shape: FeedShape::Flat,
+            source: FeedScope::ActiveUserHostedGroups,
+            admission: FeedAdmission::All,
+            order: FeedOrder::NewestByFeedPosition,
+            window: FeedWindowPolicy::bounded(80),
+            key: ProjectionKey::app_owned("app.29er.tui.group_tree")
+                .expect("29er TUI group-tree projection key must stay app-owned"),
+            item_projection: FeedItemProjection::FeedRows,
+        };
+        let reset_tree: Arc<dyn Fn() + Send + Sync> = {
+            let group_tree = Arc::clone(&self.shared.group_tree);
+            Arc::new(move || group_tree.clear())
+        };
+        let tree_feed_handle = match app.open_observed_feed_source(
+            &tree_feed_params,
+            Arc::clone(&self.shared.group_tree) as Arc<dyn ObservedProjectionSink>,
+            80,
+            Some(reset_tree),
+        ) {
+            Ok(handle) => handle,
+            Err(error) => {
+                app.close_nip29_group_discovery_session(discovery_handle);
+                anyhow::bail!("failed to open group-tree feed source: {error:?}");
+            }
+        };
+
         app.add_signer(
             nmp_core::SignerSource::LocalNsec(zeroize::Zeroizing::new(nsec.to_string())),
             true,

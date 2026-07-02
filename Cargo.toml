@@ -9,7 +9,7 @@ repository = "https://github.com/pablof7z/29er"
 version = "0.1.0"
 
 # NMP is consumed as an external git dependency — never vendored.
-# Pinned to NMP master rev 3fe772189 — UniFFI is NMP's sole native FFI
+# Pinned to NMP master rev b3c9b9985 — UniFFI is NMP's sole native FFI
 # surface (the C-ABI `nmp-ffi` crate was deleted; see ADR-0030 and
 # docs/builder-guide/15-codegen-and-ffi.md "App-owned UniFFI facades
 # (#2494)"). 29er owns its own `TwentyNinerApp` UniFFI facade
@@ -20,16 +20,16 @@ version = "0.1.0"
 # composition root (`nmp_app_29er::composition::compose_29er_runtime`) calls
 # `nmp_substrate::install` + `nmp_nip29::register` directly.
 [workspace.dependencies]
-nmp-core = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "3fe772189c3576c222c763360cc779205ab6593a" }
-nmp-native-runtime = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "3fe772189c3576c222c763360cc779205ab6593a" }
-nmp-uniffi-support = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "3fe772189c3576c222c763360cc779205ab6593a" }
-nmp-substrate = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "3fe772189c3576c222c763360cc779205ab6593a" }
-nmp-nip25 = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "3fe772189c3576c222c763360cc779205ab6593a" }
-nmp-nip29 = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "3fe772189c3576c222c763360cc779205ab6593a" }
-nmp-nostr-id = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "3fe772189c3576c222c763360cc779205ab6593a" }
-nmp-planner = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "3fe772189c3576c222c763360cc779205ab6593a" }
-nmp-signer-iface = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "3fe772189c3576c222c763360cc779205ab6593a" }
-nmp-content = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "3fe772189c3576c222c763360cc779205ab6593a" }
+nmp-core = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "d1cf909436a32503386feb43f836819e5b33d3b0" }
+nmp-native-runtime = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "d1cf909436a32503386feb43f836819e5b33d3b0" }
+nmp-uniffi-support = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "d1cf909436a32503386feb43f836819e5b33d3b0" }
+nmp-substrate = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "d1cf909436a32503386feb43f836819e5b33d3b0" }
+nmp-nip25 = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "d1cf909436a32503386feb43f836819e5b33d3b0" }
+nmp-nip29 = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "d1cf909436a32503386feb43f836819e5b33d3b0" }
+nmp-nostr-id = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "d1cf909436a32503386feb43f836819e5b33d3b0" }
+nmp-planner = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "d1cf909436a32503386feb43f836819e5b33d3b0" }
+nmp-signer-iface = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "d1cf909436a32503386feb43f836819e5b33d3b0" }
+nmp-content = { git = "https://github.com/pablof7z/nostr-multi-platform.git", rev = "d1cf909436a32503386feb43f836819e5b33d3b0" }
 nmp-app-29er = { path = "crates/nmp-app-29er" }
 uniffi = { version = "0.29" }
 flatbuffers = "25.12.19"
