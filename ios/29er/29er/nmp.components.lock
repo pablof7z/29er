@@ -132,3 +132,63 @@ role = "source"
 source = "swiftui/content-view/NostrSelectableText.swift"
 source_sha256 = "85f8db21a3f53d728b30dd521406e3e5841dd9175b88481bcadfd2a0fc720355"
 
+[[components]]
+id = "swiftui/chat-core"
+version = "0.1.0"
+registry = "nmp-local"
+target = "swiftui"
+
+[[components.files]]
+path = "Components/NostrChat/NostrGroupChatWire.swift"
+role = "source"
+source = "swiftui/chat-core/NostrGroupChatWire.swift"
+source_sha256 = "127a8ef76d57d84daa5b60fcaa691e46828dc11bed15025548273f0d8a202894"
+
+[[components]]
+id = "swiftui/user-name"
+version = "0.1.0"
+registry = "nmp-local"
+target = "swiftui"
+
+[[components.files]]
+path = "Components/NostrUser/NostrProfileName.swift"
+role = "source"
+source = "swiftui/user-name/NostrProfileName.swift"
+source_sha256 = "7a6d20d9010c858a170ddd52b9a6d959aa011576393db496e38cc376e105849c"
+
+[[components]]
+id = "swiftui/chat-message-row"
+version = "0.1.0"
+registry = "nmp-local"
+target = "swiftui"
+
+[[components.files]]
+path = "Components/NostrChat/NostrGroupMessageRow.swift"
+role = "source"
+source = "swiftui/chat-message-row/NostrGroupMessageRow.swift"
+source_sha256 = "f082c9f538f91055666887fc7f7a6fd0f36b751150caba2d5f209e567e6d8639"
+
+[[components]]
+id = "swiftui/chat-roster-list"
+version = "0.1.0"
+registry = "nmp-local"
+target = "swiftui"
+
+[[components.files]]
+path = "Components/NostrChat/NostrGroupRosterList.swift"
+role = "source"
+source = "swiftui/chat-roster-list/NostrGroupRosterList.swift"
+source_sha256 = "ed9f49a71b430f68b1b615058eb410a807e92dfd1645761f06b461a7fe23f25a"
+
+[[components]]
+id = "swiftui/chat-composer"
+version = "0.1.0"
+registry = "nmp-local"
+target = "swiftui"
+
+[[components.files]]
+path = "Components/NostrChat/NostrGroupComposer.swift"
+role = "source"
+source = "swiftui/chat-composer/NostrGroupComposer.swift"
+source_sha256 = "f80fa0b6a89f8830233868b6c1562a4c85cd741d00cd8108c5bdc8e0cfe23a2e"
+

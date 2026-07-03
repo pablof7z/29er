@@ -333,9 +333,6 @@ struct GroupEventsView: View {
     @State private var showingJoinSheet = false
     @State private var showingLeaveSheet = false
     @State private var showingAdminSheet = false
-    @State private var claimedChatProfilePubkeys: Set<String> = []
-    @State private var claimedChatEventRefs: Set<String> = []
-    @FocusState private var composerFocused: Bool
 
     private var node: GroupTreeNode? {
         model.groupTree.allNodes[groupId]
@@ -355,14 +352,6 @@ struct GroupEventsView: View {
         // eventId-keyed decoration via `outboxItem(for:)` (the kernel owns the
         // status token + retry decision), not a tag/kind policy join.
         Array(model.groupChat.messages.reversed())
-    }
-
-    private var trimmedDraft: String {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var canSend: Bool {
-        canCompose && !trimmedDraft.isEmpty
     }
 
     private var canCompose: Bool {
@@ -577,22 +566,8 @@ struct GroupEventsView: View {
             .task(id: groupId) {
                 model.openGroupEvents(groupId)
             }
-            .onAppear {
-                syncChatProfileClaims()
-                syncChatEventClaims()
-            }
             .onChange(of: model.groupChat.messages) { _, _ in
                 scrollToBottom(proxy)
-            }
-            .onChange(of: model.groupChat.profileDemandPubkeys) { _, _ in
-                syncChatProfileClaims()
-            }
-            .onChange(of: model.groupChat.eventRefPrimaryIds) { _, _ in
-                syncChatEventClaims()
-            }
-            .onDisappear {
-                releaseChatProfileClaims()
-                releaseChatEventClaims()
             }
         }
     }
@@ -693,15 +668,13 @@ struct GroupEventsView: View {
                     case let .dayDivider(_, label):
                         ChatDayDivider(label: label)
                             .padding(.vertical, 4)
-                    case let .group(group):
-                        SlackMessageGroupView(
-                            group: group,
-                            senderTitle: senderTitle(for: group.pubkey),
-                            timeLabel: Self.clockTime(group.messages[0].createdAt),
-                            outboxItem: { outboxItem(for: $0) },
+                    case let .message(message):
+                        RegistryChatMessageRow(
+                            message: message,
+                            wire: chatWire(for: message),
+                            pending: outboxItem(for: message.id),
                             onRetry: { model.retryPublish($0) },
-                            mentionLabel: mentionLabel(for:),
-                            onReact: { message in
+                            onReact: {
                                 model.reactToGroupMessage(
                                     groupId: groupId,
                                     eventId: message.id,
@@ -725,69 +698,47 @@ struct GroupEventsView: View {
         }
     }
 
-    // MARK: Slack-style grouping
+    private func chatWire(for message: GroupChatMessage) -> NostrGroupChatMessageWire {
+        NostrGroupChatMessageWire(
+            id: message.id,
+            authorPubkey: message.pubkey,
+            content: message.copyText.isEmpty ? message.rawContent : message.copyText,
+            createdAtLabel: Self.clockTime(message.createdAt),
+            reactions: [],
+            isOutgoing: message.pubkey == model.activeAccountPubkey
+        )
+    }
 
-    /// One entry in the rendered chat stream: either a day divider or a run of
-    /// consecutive same-author messages collapsed under a single header.
+    // MARK: Registry chat stream
+
+    /// One entry in the rendered chat stream: either a day divider or a
+    /// Rust-projected chat message rendered by the NMP registry row.
     private enum ChatStreamItem: Identifiable {
         case dayDivider(id: String, label: String)
-        case group(MessageGroup)
+        case message(GroupChatMessage)
 
         var id: String {
             switch self {
             case let .dayDivider(id, _): return "day-\(id)"
-            case let .group(group): return group.id
+            case let .message(message): return "message-\(message.id)"
             }
         }
     }
 
-    /// A consecutive run of messages from one author within the grouping window.
-    /// `fileprivate` so the file-private `SlackMessageGroupView` can name it.
-    fileprivate struct MessageGroup: Identifiable {
-        let id: String // first message's event id
-        let pubkey: String
-        let messages: [GroupChatMessage]
-    }
-
-    /// Messages from the same author within this window collapse into one group.
-    private static let groupingWindowSeconds: UInt64 = 7 * 60
-
-    /// Fold the chronological message list into day dividers + author groups.
+    /// Fold the chronological message list into day dividers + registry rows.
     private var chatStream: [ChatStreamItem] {
         _ = model.profileRefsRevision
-        _ = model.eventRefsRevision
         var items: [ChatStreamItem] = []
-        var bucket: [GroupChatMessage] = []
-        var currentAuthor: String?
         var currentDay: Int64?
-        var prevTs: UInt64 = 0
-
-        func flush() {
-            if let first = bucket.first {
-                items.append(.group(MessageGroup(id: first.id, pubkey: first.pubkey, messages: bucket)))
-            }
-            bucket.removeAll(keepingCapacity: true)
-        }
 
         for message in visibleMessages {
             let day = Int64(message.createdAt / 86_400)
             if currentDay != day {
-                flush()
                 items.append(.dayDivider(id: String(day), label: Self.dayLabel(message.createdAt)))
-                currentAuthor = nil
             }
-            let sameAuthor = currentAuthor == message.pubkey
-            let closeInTime = message.createdAt >= prevTs
-                && message.createdAt - prevTs <= Self.groupingWindowSeconds
-            if !(sameAuthor && closeInTime) {
-                flush()
-            }
-            bucket.append(message)
-            currentAuthor = message.pubkey
             currentDay = day
-            prevTs = message.createdAt
+            items.append(.message(message))
         }
-        flush()
         return items
     }
 
@@ -810,91 +761,24 @@ struct GroupEventsView: View {
         return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(unixSeconds)))
     }
 
-    private func senderTitle(for pubkey: String) -> String {
-        if pubkey == model.activeAccountPubkey { return "You" }
-        if let profile = model.profile(forPubkey: pubkey) {
-            return profile.display
-        }
-        return memberTitle(for: pubkey)
-    }
-
-    private func mentionLabel(for uri: NostrWireUri) -> String {
-        let pubkey = uri.primaryId
-        if let profile = model.profile(forPubkey: pubkey) {
-            return profile.display
-        }
-        return NostrContentView.defaultMentionLabel(uri)
-    }
-
     private var composer: some View {
         VStack(spacing: 0) {
             if canCompose && !mentionSuggestions.isEmpty {
                 mentionSuggestionBar
             }
 
-            Group {
-                if canCompose {
-                    HStack(alignment: .bottom, spacing: 8) {
-                        TextField("Message \(title)", text: $draft, axis: .vertical)
-                            .focused($composerFocused)
-                            .font(.body)
-                            .textFieldStyle(.plain)
-                            .lineLimit(1...4)
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 9)
-                            .background(
-                                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .fill(Color(.secondarySystemBackground))
-                            )
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                                    .stroke(Color(.separator).opacity(0.35), lineWidth: 0.5)
-                            }
-                            .accessibilityIdentifier("group-chat-message-editor")
-
-                        Button(action: sendDraft) {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 17, weight: .bold))
-                                .foregroundStyle(canSend ? .white : Color(.tertiaryLabel))
-                                .frame(width: 34, height: 34)
-                                .background(
-                                    Circle()
-                                        .fill(canSend ? Color.accentColor : Color(.tertiarySystemFill))
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!canSend)
-                        .accessibilityLabel("Send message")
-                        .accessibilityIdentifier("group-chat-send-button")
-                    }
-                } else {
-                    HStack(spacing: 8) {
-                        Image(systemName: composerPromptIcon)
-                            .foregroundStyle(.secondary)
-                        Text(composerPromptText)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Spacer(minLength: 8)
-                    }
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 20, style: .continuous)
-                            .fill(Color(.secondarySystemBackground))
-                    )
-                    .accessibilityIdentifier("group-chat-readonly-composer")
-                }
-            }
+            NostrGroupComposer(
+                text: $draft,
+                placeholder: canCompose ? "Message \(title)" : composerPromptText,
+                isEnabled: canCompose,
+                onSend: sendComposerText
+            )
+            .accessibilityIdentifier(canCompose ? "group-chat-registry-composer" : "group-chat-readonly-composer")
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
         }
         .background(Color(.systemBackground))
         .overlay(alignment: .top) { Divider() }
-    }
-
-    private var composerPromptIcon: String {
-        node?.isOpen == true ? "person.crop.circle.badge.plus" : "lock.fill"
     }
 
     private var composerPromptText: String {
@@ -925,9 +809,9 @@ struct GroupEventsView: View {
         .overlay(alignment: .bottom) { Divider() }
     }
 
-    private func sendDraft() {
-        let text = trimmedDraft
-        guard canSend else { return }
+    private func sendComposerText(_ text: String) {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canCompose && !text.isEmpty else { return }
 
         // Raw draft text + the user-picked mention pubkeys only. The shared
         // `compose_chat_message` helper in `nmp-app-29er` owns NIP-19/21
@@ -940,14 +824,14 @@ struct GroupEventsView: View {
             mentionPubkeys: Array(selectedMentionPubkeys)
         )
         guard accepted else {
-            composerFocused = true
+            DispatchQueue.main.async {
+                draft = text
+            }
             return
         }
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        draft = ""
         selectedMentionPubkeys.removeAll()
-        composerFocused = true
     }
 
     private func roomChromeSubtitle(_ node: GroupTreeNode) -> String {
@@ -992,52 +876,12 @@ struct GroupEventsView: View {
             parts[parts.count - 1] = mention
             draft = parts.joined(separator: " ") + " "
         }
-        composerFocused = true
-    }
-
-    private func syncChatProfileClaims() {
-        let next = Set(model.groupChat.profileDemandPubkeys.filter { !$0.isEmpty })
-        for pubkey in next.subtracting(claimedChatProfilePubkeys) {
-            model.resolveProfileRef(pubkey: pubkey, consumerID: "group-chat-content")
-        }
-        for pubkey in claimedChatProfilePubkeys.subtracting(next) {
-            model.releaseProfileRef(pubkey: pubkey, consumerID: "group-chat-content")
-        }
-        claimedChatProfilePubkeys = next
-    }
-
-    private func releaseChatProfileClaims() {
-        for pubkey in claimedChatProfilePubkeys {
-            model.releaseProfileRef(pubkey: pubkey, consumerID: "group-chat-content")
-        }
-        claimedChatProfilePubkeys.removeAll()
-    }
-
-    private func syncChatEventClaims() {
-        let next = Set(model.groupChat.eventRefPrimaryIds.filter { !$0.isEmpty })
-        for primaryId in next.subtracting(claimedChatEventRefs) {
-            model.kernel.resolveEventEmbed(key: primaryId, consumerID: "group-chat-content")
-        }
-        for primaryId in claimedChatEventRefs.subtracting(next) {
-            model.kernel.releaseEventRef(key: primaryId, consumerID: "group-chat-content")
-        }
-        claimedChatEventRefs = next
-    }
-
-    private func releaseChatEventClaims() {
-        for primaryId in claimedChatEventRefs {
-            model.kernel.releaseEventRef(key: primaryId, consumerID: "group-chat-content")
-        }
-        claimedChatEventRefs.removeAll()
     }
 
     private func outboxItem(for eventId: String) -> PublishOutboxItem? {
         model.publishOutbox.first { $0.eventId == eventId }
     }
 
-    private func memberTitle(for pubkey: String) -> String {
-        currentMembers.first { $0.pubkey == pubkey }?.title ?? pubkey.shortHex
-    }
 }
 
 private struct GroupParentCandidate: Identifiable, Hashable {
@@ -1484,10 +1328,13 @@ private struct AdminActionsSheet: View {
 }
 
 private struct MemberListSheet: View {
+    @EnvironmentObject private var model: KernelModel
+
     let title: String
     let members: [GroupRosterMember]
 
     var body: some View {
+        let _ = model.profileRefsRevision
         NavigationStack {
             Group {
                 if members.isEmpty {
@@ -1499,38 +1346,25 @@ private struct MemberListSheet: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(.systemGroupedBackground))
                 } else {
-                    List(members) { member in
-                        HStack(spacing: 10) {
-                            ChatAvatar(seed: member.pubkey)
-                                .frame(width: 30, height: 30)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 6) {
-                                    Text(member.title)
-                                        .font(.body.weight(.medium))
-                                        .lineLimit(1)
-                                    if member.isAdmin {
-                                        Image(systemName: "shield.fill")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .accessibilityLabel("Admin")
-                                    }
-                                }
-                                Text(member.pubkey.shortHex)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 3)
-                        .listRowBackground(Color.clear)
+                    ScrollView {
+                        NostrGroupRosterList(participants: participants)
+                            .padding(16)
                     }
-                    .listStyle(.insetGrouped)
-                    .scrollContentBackground(.hidden)
                     .background(Color(.systemGroupedBackground))
                 }
             }
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var participants: [NostrGroupChatParticipantWire] {
+        members.map { member in
+            NostrGroupChatParticipantWire(
+                pubkey: member.pubkey,
+                roleLabel: member.roleBadge,
+                statusLabel: member.pubkey.shortHex
+            )
         }
     }
 }
@@ -1553,73 +1387,18 @@ private struct ChatDayDivider: View {
     }
 }
 
-/// Slack-style group: one avatar + name + time header for a run of consecutive
-/// messages from a single author, with each message body stacked beneath and
-/// rendered through the NMP content renderer.
-private struct SlackMessageGroupView: View {
-    let group: MessageGroup
-    let senderTitle: String
-    let timeLabel: String
-    let outboxItem: (String) -> PublishOutboxItem?
-    let onRetry: (PublishOutboxItem) -> Void
-    let mentionLabel: (NostrWireUri) -> String
-    let onReact: (GroupChatMessage) -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            NostrAvatar(
-                pubkey: group.pubkey,
-                size: 36,
-                consumerID: "group-chat-author.\(group.pubkey)"
-            )
-
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(senderTitle)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    Text(timeLabel)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-
-                ForEach(group.messages) { message in
-                    SlackMessageBody(
-                        message: message,
-                        pending: outboxItem(message.id),
-                        onRetry: onRetry,
-                        mentionLabel: mentionLabel,
-                        onReact: { onReact(message) }
-                    )
-                    .id(message.id)
-                }
-            }
-
-            Spacer(minLength: 0)
-        }
-    }
-
-    // Re-declare the parent's grouping payload so this file-private view can name
-    // its parameter type. (Mirrors `GroupEventsView.MessageGroup`.)
-    typealias MessageGroup = GroupEventsView.MessageGroup
-}
-
-/// One message body within a Slack group: NMP-rendered content (no bubble),
-/// inline pending/retry status, and the per-message context menu.
-private struct SlackMessageBody: View {
-    @EnvironmentObject private var model: KernelModel
-
+/// Thin app chrome around the registry message row: retry/status and context
+/// menu remain iOS presentation, while the chat row itself is the NMP component.
+private struct RegistryChatMessageRow: View {
     let message: GroupChatMessage
+    let wire: NostrGroupChatMessageWire
     let pending: PublishOutboxItem?
     let onRetry: (PublishOutboxItem) -> Void
-    let mentionLabel: (NostrWireUri) -> String
     let onReact: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: wire.isOutgoing ? .trailing : .leading, spacing: 3) {
+            NostrGroupMessageRow(message: wire)
 
             if let pending {
                 HStack(spacing: 6) {
@@ -1638,7 +1417,7 @@ private struct SlackMessageBody: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: wire.isOutgoing ? .trailing : .leading)
         .contentShape(Rectangle())
         .contextMenu {
             Button(action: onReact) {
@@ -1657,20 +1436,6 @@ private struct SlackMessageBody: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("group-chat-message-\(message.id)")
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        if let tree = message.contentTree {
-            NostrContentView(tree: tree, font: .body, mentionLabel: mentionLabel)
-                .embedEnvelopeSource(model.eventEnvelopes, registry: NostrKindRegistry.makeDefault())
-        } else {
-            // Projection decode fell through — never drop a message.
-            Text(message.rawContent)
-                .font(.body)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-        }
     }
 }
 
