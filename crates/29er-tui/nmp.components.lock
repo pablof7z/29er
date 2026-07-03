@@ -102,3 +102,87 @@ role = "source"
 source = "tui/content-view/nostr_content_widget.rs"
 source_sha256 = "d8d7c964c7eb20c2e3b6f53a0eeb47ac249e6a72356f8dc04879baf4b058bdd4"
 
+[[components]]
+id = "tui/chat-core"
+version = "0.1.0"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_chat/nostr_group_chat_wire.rs"
+role = "source"
+source = "tui/chat-core/nostr_group_chat_wire.rs"
+source_sha256 = "b75baab551cf040783d04e44decbb20b2ed50990c6c07b6308f5ca7ee4bddbb8"
+
+[[components]]
+id = "tui/user-core"
+version = "0.1.0"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_user/profile_wire.rs"
+role = "source"
+source = "tui/user-core/profile_wire.rs"
+source_sha256 = "62393dd4c31b5c36055ab748458eeca5a5a9b87101c9da72c75fd75973257d48"
+
+[[components]]
+id = "tui/user-avatar"
+version = "0.1.1"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_user/nostr_avatar.rs"
+role = "source"
+source = "tui/user-avatar/nostr_avatar.rs"
+source_sha256 = "638bc7df0a09e1aa62703076e743aee15bc1f2dda9c1a8589328b09702db2e5a"
+
+[[components]]
+id = "tui/user-name"
+version = "0.1.0"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_user/nostr_profile_name.rs"
+role = "source"
+source = "tui/user-name/nostr_profile_name.rs"
+source_sha256 = "860dff81983fc7ca7c4a4d97e6b02de01d6e90522701b64f1b9f5393eb1dbd5e"
+
+[[components]]
+id = "tui/chat-message-row"
+version = "0.1.1"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_chat/nostr_group_message_row.rs"
+role = "source"
+source = "tui/chat-message-row/nostr_group_message_row.rs"
+source_sha256 = "549ad2c7075545b99033918daf3558f2cafaf428f60572d0b904671900d62b99"
+
+[[components]]
+id = "tui/chat-composer"
+version = "0.1.0"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_chat/nostr_group_composer.rs"
+role = "source"
+source = "tui/chat-composer/nostr_group_composer.rs"
+source_sha256 = "914031ccf18a1b97a13f54c78361f76f09880853a69e9c15dbf6fdac3d6daf92"
+
+[[components]]
+id = "tui/chat-roster-list"
+version = "0.1.0"
+registry = "nmp-local"
+target = "tui"
+
+[[components.files]]
+path = "src/components/nostr_chat/nostr_group_roster_list.rs"
+role = "source"
+source = "tui/chat-roster-list/nostr_group_roster_list.rs"
+source_sha256 = "f71df95d2adb715776909af4e4721e6dde5432fc3a17666ec74a40b97d8e0028"
+
