@@ -37,6 +37,8 @@ pub mod composition;
 pub mod config;
 pub mod dispatch;
 pub mod group_chat;
+pub mod group_presence;
+pub mod group_preview;
 mod group_sessions;
 pub mod group_tree;
 pub mod kinds;

@@ -3,7 +3,7 @@
 //!
 //! Mirrors the session-opening pattern the native Rust TUI
 //! (`crates/29er-tui/src/app.rs`) already drives directly against
-//! `nmp-native-runtime`'s `Nip29*Session` doors — this module is the same
+//! `nmp-nip29`'s `Nip29*Session` doors — this module is the same
 //! composition, exposed through `#[uniffi::export]` so the iOS shell can call
 //! it via generated Swift.
 //!
@@ -39,22 +39,30 @@
 
 use std::sync::{Arc, Mutex};
 
-use nmp_core::ObservedProjectionSink;
 use nmp_core::TypedProjectionData;
-use nmp_native_runtime::{
-    FeedAdmission, FeedHandle, FeedItemProjection, FeedOrder, FeedParams, FeedScope, FeedShape,
-    FeedWindowPolicy, Nip25GroupReactionsHandle, Nip25GroupReactionsSession,
-    Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
-    Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
-    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp, ProjectionKey,
-};
+use nmp_native_runtime::{NmpApp, ProjectionKey};
 use nmp_nip25::ReactionAggregateProjection;
-use nmp_nip29::{GroupEventsProjection, GroupId, JoinedGroupsProjection};
+use nmp_nip29::{
+    close_nip29_group_discovery_session, close_nip29_group_events_session,
+    close_nip29_group_roster_session, close_nip29_joined_groups_session,
+    open_nip29_group_discovery_session_with_reader, open_nip29_group_events_session_with_reader,
+    open_nip29_group_roster_session, open_nip29_joined_groups_session_with_reader,
+    GroupEventsProjection, GroupId, JoinedGroupsProjection, Nip29GroupDiscoveryHandle,
+    Nip29GroupDiscoverySession, Nip29GroupEventsHandle, Nip29GroupEventsSession,
+    Nip29GroupRosterHandle, Nip29GroupRosterSession, Nip29JoinedGroupsHandle,
+    Nip29JoinedGroupsSession,
+};
+use nmp_reactions::{
+    close_nip25_group_reactions_session, open_nip25_group_reactions_session_with_reader,
+    Nip25GroupReactionsHandle, Nip25GroupReactionsSession,
+};
 
 use crate::group_chat::{
     encode_group_chat_snapshot_with_reactions, GROUP_CHAT_FILE_IDENTIFIER, GROUP_CHAT_SCHEMA_ID,
     GROUP_CHAT_SCHEMA_VERSION,
 };
+use crate::group_presence::GroupPresenceSessions;
+use crate::group_preview::GroupPreviewSessions;
 use crate::group_tree::{
     encode_group_tree_snapshot, membership_from_joined, GroupTreeProjection,
     GROUP_TREE_FILE_IDENTIFIER, GROUP_TREE_SCHEMA_ID, GROUP_TREE_SCHEMA_VERSION,
@@ -63,18 +71,13 @@ use crate::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use crate::DispatchOutcome;
 use crate::TwentyNinerApp;
 
-/// Bounded read-cache replay budget for the 29er kind:9 group-tree observed
-/// feed source. Mirrors `nmp_feed::DEFAULT_FEED_WINDOW_LIMIT` (80) — kept as a
-/// local const so this crate does not take an `nmp-feed` dependency just for
-/// one number.
-const GROUP_TREE_REPLAY_LIMIT: usize = 80;
-
 /// The live `"app.29er.group_tree"` composition opened by
 /// [`GroupSessions::open_discovery`].
 struct DiscoverySession {
     handle: Nip29GroupDiscoveryHandle,
-    tree_feed_handle: FeedHandle,
     tree_projection: Arc<GroupTreeProjection>,
+    preview: Arc<GroupPreviewSessions>,
+    presence: Arc<GroupPresenceSessions>,
 }
 
 /// The live `"app.29er.group_chat"` composition opened by
@@ -146,10 +149,12 @@ impl GroupSessions {
     /// Callers MUST close any existing discovery session first (both
     /// `open_group_discovery` and `refresh_group_discovery` do so). `false`
     /// when the discovery composition could not be opened (D6).
-    pub(crate) fn open_discovery(&self, app: &NmpApp, host_relay_url: String) -> bool {
-        let Some(session) =
-            build_discovery_session(app, host_relay_url.clone(), &self.joined_reader)
-        else {
+    pub(crate) fn open_discovery(&self, app: Arc<NmpApp>, host_relay_url: String) -> bool {
+        let Some(session) = build_discovery_session(
+            Arc::clone(&app),
+            host_relay_url.clone(),
+            &self.joined_reader,
+        ) else {
             return false;
         };
         if let Ok(mut relay_slot) = self.joined_relay.lock() {
@@ -169,7 +174,13 @@ impl GroupSessions {
             .ok()
             .and_then(|slot| slot.clone());
         let relay = self.joined_relay.lock().ok().and_then(|slot| slot.clone());
-        sync_joined_session(app, active_pubkey, relay, &self.joined, &self.joined_reader);
+        sync_joined_session(
+            &app,
+            active_pubkey,
+            relay,
+            &self.joined,
+            &self.joined_reader,
+        );
         true
     }
 
@@ -182,19 +193,23 @@ impl GroupSessions {
         sync_joined_session(app, None, None, &self.joined, &self.joined_reader);
         if let Ok(mut slot) = self.discovery.lock() {
             if let Some(session) = slot.take() {
-                app.close_feed(&session.tree_feed_handle);
-                app.close_nip29_group_discovery_session(session.handle);
+                session.presence.close_all(app);
+                session.preview.close_all(app, &session.tree_projection);
+                app.remove_snapshot_projection(GROUP_TREE_SCHEMA_ID);
+                let _ = close_nip29_group_discovery_session(app, session.handle);
             }
         }
     }
 
-    /// Fold a direct kind:9 message read into the open group-tree
-    /// composition's unread accounting. A no-op when no discovery session is
-    /// open (D6).
+    /// Advance the NMP chat-presence read marker to the latest known direct
+    /// message for the group. A no-op when no discovery/presence session is
+    /// open or no latest message has been observed yet (D6).
     pub(crate) fn mark_group_read(&self, local_id: &str) {
         if let Ok(slot) = self.discovery.lock() {
             if let Some(session) = slot.as_ref() {
-                session.tree_projection.mark_read(local_id);
+                let messages = session.tree_projection.snapshot();
+                let latest = messages.last_message_for(local_id);
+                let _ = session.presence.mark_read_to_latest(local_id, latest);
             }
         }
     }
@@ -209,16 +224,17 @@ impl GroupSessions {
             .ok()
             .and_then(|slot| slot.clone())
             .unwrap_or_default();
-        let (handle, reader) =
-            app.open_nip29_group_events_session_with_reader(Nip29GroupEventsSession::new(
+        let (handle, reader) = open_nip29_group_events_session_with_reader(
+            app,
+            Nip29GroupEventsSession::new(
                 group_id.clone(),
                 vec![KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
-            ));
-        let (reactions_handle, reactions_reader) = app
-            .open_nip25_group_reactions_session_with_reader(Nip25GroupReactionsSession::new(
-                group_id,
-                active_pubkey,
-            ));
+            ),
+        );
+        let (reactions_handle, reactions_reader) = open_nip25_group_reactions_session_with_reader(
+            app,
+            Nip25GroupReactionsSession::new(group_id, active_pubkey),
+        );
         register_group_chat_snapshot(app, reader, reactions_reader);
         if let Ok(mut slot) = self.chat.lock() {
             *slot = Some(ChatSession {
@@ -233,8 +249,8 @@ impl GroupSessions {
         if let Ok(mut slot) = self.chat.lock() {
             if let Some(session) = slot.take() {
                 app.remove_snapshot_projection(GROUP_CHAT_SCHEMA_ID);
-                app.close_nip29_group_events_session(session.handle);
-                app.close_nip25_group_reactions_session(session.reactions_handle);
+                let _ = close_nip29_group_events_session(app, session.handle);
+                let _ = close_nip25_group_reactions_session(app, session.reactions_handle);
             }
         }
     }
@@ -242,7 +258,7 @@ impl GroupSessions {
     /// Open the member-roster read session for `group_id`, replacing any
     /// previously open roster session.
     pub(crate) fn open_roster(&self, app: &NmpApp, group_id: GroupId) {
-        let handle = app.open_nip29_group_roster_session(Nip29GroupRosterSession::new(group_id));
+        let handle = open_nip29_group_roster_session(app, Nip29GroupRosterSession::new(group_id));
         if let Ok(mut slot) = self.roster.lock() {
             *slot = Some(handle);
         }
@@ -252,7 +268,7 @@ impl GroupSessions {
     pub(crate) fn close_roster(&self, app: &NmpApp) {
         if let Ok(mut slot) = self.roster.lock() {
             if let Some(handle) = slot.take() {
-                app.close_nip29_group_roster_session(handle);
+                let _ = close_nip29_group_roster_session(app, handle);
             }
         }
     }
@@ -278,7 +294,7 @@ fn sync_joined_session(
     let (Some(pubkey), Some(relay)) = (pubkey, relay) else {
         if let Ok(mut handle_slot) = joined.lock() {
             if let Some(handle) = handle_slot.take() {
-                app.close_nip29_joined_groups_session(handle);
+                let _ = close_nip29_joined_groups_session(app, handle);
             }
         }
         if let Ok(mut reader_slot) = joined_reader.lock() {
@@ -297,15 +313,17 @@ fn sync_joined_session(
         return;
     }
 
-    let opened = app
-        .open_nip29_joined_groups_session_with_reader(Nip29JoinedGroupsSession::new(pubkey, relay));
+    let opened = open_nip29_joined_groups_session_with_reader(
+        app,
+        Nip29JoinedGroupsSession::new(pubkey, relay),
+    );
     let (handle, reader) = match opened {
         Some((handle, reader)) => (Some(handle), Some(reader)),
         None => (None, None),
     };
     if let Ok(mut handle_slot) = joined.lock() {
         if let Some(old) = handle_slot.take() {
-            app.close_nip29_joined_groups_session(old);
+            let _ = close_nip29_joined_groups_session(app, old);
         }
         *handle_slot = handle;
     }
@@ -318,49 +336,36 @@ fn sync_joined_session(
 /// group-tree composite on top. Returns `None` (D6 fail-closed) when the
 /// kernel refuses the observed feed-source session.
 fn build_discovery_session(
-    app: &NmpApp,
+    app: Arc<NmpApp>,
     relay_url: String,
     joined_reader: &Arc<Mutex<Option<Arc<JoinedGroupsProjection>>>>,
 ) -> Option<DiscoverySession> {
-    let (discovery_handle, discovered) = app.open_nip29_group_discovery_session_with_reader(
+    let (discovery_handle, discovered) = open_nip29_group_discovery_session_with_reader(
+        &*app,
         Nip29GroupDiscoverySession::new(relay_url.clone()),
     );
 
     let tree_messages = Arc::new(GroupTreeProjection::new());
-    let tree_feed_params = FeedParams {
-        primary_kinds: vec![KIND_CHAT_MESSAGE],
-        shape: FeedShape::Flat,
-        source: FeedScope::ActiveUserHostedGroups,
-        admission: FeedAdmission::All,
-        order: FeedOrder::NewestByFeedPosition,
-        window: FeedWindowPolicy::bounded(GROUP_TREE_REPLAY_LIMIT),
-        key: ProjectionKey::app_owned(GROUP_TREE_SCHEMA_ID)
-            .expect("29er group-tree projection key must stay app-owned"),
-        item_projection: FeedItemProjection::FeedRows,
-    };
-    let reset_tree: Arc<dyn Fn() + Send + Sync> = {
-        let tree_messages = Arc::clone(&tree_messages);
-        Arc::new(move || tree_messages.clear())
-    };
-    let tree_feed_handle = match app.open_observed_feed_source(
-        &tree_feed_params,
-        Arc::clone(&tree_messages) as Arc<dyn ObservedProjectionSink>,
-        GROUP_TREE_REPLAY_LIMIT,
-        Some(reset_tree),
-    ) {
-        Ok(handle) => handle,
-        Err(_) => {
-            app.close_nip29_group_discovery_session(discovery_handle);
-            return None;
-        }
-    };
+    let preview = Arc::new(GroupPreviewSessions::new());
+    let presence = Arc::new(GroupPresenceSessions::new());
 
     let tree_discovered = Arc::clone(&discovered);
     let tree_messages_for_sidecar = Arc::clone(&tree_messages);
+    let preview_for_sidecar = Arc::clone(&preview);
+    let presence_for_sidecar = Arc::clone(&presence);
+    let app_for_presence = Arc::clone(&app);
     let active_account = app.active_account_handle();
     let joined_reader_for_sidecar = Arc::clone(joined_reader);
-    app.register_typed_snapshot_projection(tree_feed_params.key.dynamic_token(), move || {
+    let registration_key = ProjectionKey::app_owned(GROUP_TREE_SCHEMA_ID)
+        .expect("29er group-tree projection key must stay app-owned")
+        .dynamic_token();
+    app.register_typed_snapshot_projection(registration_key, move || {
         let snapshot = tree_discovered.snapshot();
+        preview_for_sidecar.sync(
+            &app_for_presence,
+            &snapshot,
+            Arc::clone(&tree_messages_for_sidecar),
+        );
         let messages = tree_messages_for_sidecar.snapshot();
         // Re-read the live active pubkey + joined reader every tick so
         // membership is recomputed on an account switch and never leaks a
@@ -370,6 +375,8 @@ fn build_discovery_session(
             .ok()
             .and_then(|slot| slot.clone())
             .unwrap_or_default();
+        presence_for_sidecar.sync(&app_for_presence, &snapshot, &active_pubkey);
+        let presence_state = presence_for_sidecar.snapshot_state();
         let joined_snapshot = joined_reader_for_sidecar
             .lock()
             .ok()
@@ -382,15 +389,16 @@ fn build_discovery_session(
             schema_id: GROUP_TREE_SCHEMA_ID.to_string(),
             schema_version: GROUP_TREE_SCHEMA_VERSION,
             file_identifier: String::from_utf8_lossy(GROUP_TREE_FILE_IDENTIFIER).into_owned(),
-            payload: encode_group_tree_snapshot(&snapshot, &messages, &membership),
+            payload: encode_group_tree_snapshot(&snapshot, &messages, &presence_state, &membership),
             ..Default::default()
         })
     });
 
     Some(DiscoverySession {
         handle: discovery_handle,
-        tree_feed_handle,
         tree_projection: tree_messages,
+        preview,
+        presence,
     })
 }
 
@@ -431,9 +439,9 @@ impl TwentyNinerApp {
     }
 
     /// Open a NIP-29 group-discovery session for one host relay: NMP's
-    /// canonical discovery + joined-groups doors, plus the 29er-owned kind:9
-    /// group-tree composite (per-group unread + last-message preview +
-    /// viewer membership), folded into the `"app.29er.group_tree"` typed
+    /// canonical discovery + joined-groups doors, plus the 29er group-tree
+    /// composite (NMP-owned unread/typing, 29er-owned last-message preview,
+    /// and viewer membership), folded into the `"app.29er.group_tree"` typed
     /// snapshot the iOS shell reads through [`crate::UpdateSink`].
     ///
     /// Replaces any previously open discovery session. `false` (D6) on an
@@ -447,7 +455,7 @@ impl TwentyNinerApp {
             return false;
         }
         self.sessions().close_discovery(self.app());
-        self.sessions().open_discovery(self.app(), relay)
+        self.sessions().open_discovery(self.app_arc(), relay)
     }
 
     /// Close the open group-discovery session (idempotent, D6).
@@ -469,7 +477,10 @@ impl TwentyNinerApp {
         if relay.is_empty() {
             return false;
         }
-        if !self.sessions().open_discovery(self.app(), relay.clone()) {
+        if !self
+            .sessions()
+            .open_discovery(self.app_arc(), relay.clone())
+        {
             return false;
         }
         let outcome = crate::dispatch::dispatch_nip29_action(
@@ -480,11 +491,11 @@ impl TwentyNinerApp {
         outcome.error.is_none()
     }
 
-    /// Mark a group's direct kind:9 messages read inside the open group-tree
-    /// composition. `local_id` is the group's bare local id (NOT a
-    /// `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read`).
-    /// The next tree snapshot folds this into the group's aggregate unread
-    /// count. No-op when no discovery session is open (D6).
+    /// Mark a group's direct chat messages read inside the open NMP
+    /// chat-presence session. `local_id` is the group's bare local id (NOT a
+    /// `GroupId` JSON object). The next tree snapshot folds NMP's updated
+    /// unread count into the app group tree. No-op when no discovery/presence
+    /// session is open (D6).
     pub fn mark_group_read(&self, local_id: String) {
         self.sessions().mark_group_read(&local_id);
     }
@@ -510,7 +521,7 @@ impl TwentyNinerApp {
     /// Open the member-roster read session for one group. `group_id_json` is
     /// a JSON [`GroupId`] object (same shape as [`Self::open_group_chat`]).
     /// Uses the dedicated roster door
-    /// (`nmp_native_runtime::open_nip29_group_roster_session`). `false` (D6)
+    /// (`nmp_nip29::open_nip29_group_roster_session`). `false` (D6)
     /// on malformed JSON.
     pub fn open_group_roster(&self, group_id_json: String) -> bool {
         let Ok(group_id) = serde_json::from_str::<GroupId>(&group_id_json) else {

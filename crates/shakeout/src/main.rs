@@ -23,7 +23,8 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use nmp_core::SignerSource;
-use nmp_native_runtime::{new_app, Nip29GroupDiscoverySession, NmpApp};
+use nmp_native_runtime::{new_app, NmpApp};
+use nmp_nip29::{open_nip29_group_discovery_session_with_reader, Nip29GroupDiscoverySession};
 
 const WAIT_SECS: u64 = 12;
 
@@ -78,7 +79,8 @@ fn main() {
 
     println!("shakeout: opening group discovery session on {relay}");
     println!("shakeout: (open_nip29_group_discovery_session_with_reader registers the typed projection AND opens the tailing interest internally)");
-    let (_discovery_handle, _reader) = app.open_nip29_group_discovery_session_with_reader(
+    let (_discovery_handle, _reader) = open_nip29_group_discovery_session_with_reader(
+        &app,
         Nip29GroupDiscoverySession::new(relay.clone()),
     );
 

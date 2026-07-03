@@ -584,11 +584,11 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
     func lifecycleForeground()
 
     /**
-     * Mark a group's direct kind:9 messages read inside the open group-tree
-     * composition. `local_id` is the group's bare local id (NOT a
-     * `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read`).
-     * The next tree snapshot folds this into the group's aggregate unread
-     * count. No-op when no discovery session is open (D6).
+     * Mark a group's direct chat messages read inside the open NMP
+     * chat-presence session. `local_id` is the group's bare local id (NOT a
+     * `GroupId` JSON object). The next tree snapshot folds NMP's updated
+     * unread count into the app group tree. No-op when no discovery/presence
+     * session is open (D6).
      */
     func markGroupRead(localId: String)
 
@@ -603,9 +603,9 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
 
     /**
      * Open a NIP-29 group-discovery session for one host relay: NMP's
-     * canonical discovery + joined-groups doors, plus the 29er-owned kind:9
-     * group-tree composite (per-group unread + last-message preview +
-     * viewer membership), folded into the `"app.29er.group_tree"` typed
+     * canonical discovery + joined-groups doors, plus the 29er group-tree
+     * composite (NMP-owned unread/typing, 29er-owned last-message preview,
+     * and viewer membership), folded into the `"app.29er.group_tree"` typed
      * snapshot the iOS shell reads through [`crate::UpdateSink`].
      *
      * Replaces any previously open discovery session. `false` (D6) on an
@@ -620,7 +620,7 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
      * Open the member-roster read session for one group. `group_id_json` is
      * a JSON [`GroupId`] object (same shape as [`Self::open_group_chat`]).
      * Uses the dedicated roster door
-     * (`nmp_native_runtime::open_nip29_group_roster_session`). `false` (D6)
+     * (`nmp_nip29::open_nip29_group_roster_session`). `false` (D6)
      * on malformed JSON.
      */
     func openGroupRoster(groupIdJson: String)  -> Bool
@@ -961,11 +961,11 @@ open func lifecycleForeground()  {try! rustCall() {
 }
 
     /**
-     * Mark a group's direct kind:9 messages read inside the open group-tree
-     * composition. `local_id` is the group's bare local id (NOT a
-     * `GroupId` JSON object — mirrors `GroupTreeProjection::mark_read`).
-     * The next tree snapshot folds this into the group's aggregate unread
-     * count. No-op when no discovery session is open (D6).
+     * Mark a group's direct chat messages read inside the open NMP
+     * chat-presence session. `local_id` is the group's bare local id (NOT a
+     * `GroupId` JSON object). The next tree snapshot folds NMP's updated
+     * unread count into the app group tree. No-op when no discovery/presence
+     * session is open (D6).
      */
 open func markGroupRead(localId: String)  {try! rustCall() {
     uniffi_nmp_app_29er_fn_method_twentyninerapp_mark_group_read(self.uniffiClonePointer(),
@@ -991,9 +991,9 @@ open func openGroupChat(groupIdJson: String) -> Bool  {
 
     /**
      * Open a NIP-29 group-discovery session for one host relay: NMP's
-     * canonical discovery + joined-groups doors, plus the 29er-owned kind:9
-     * group-tree composite (per-group unread + last-message preview +
-     * viewer membership), folded into the `"app.29er.group_tree"` typed
+     * canonical discovery + joined-groups doors, plus the 29er group-tree
+     * composite (NMP-owned unread/typing, 29er-owned last-message preview,
+     * and viewer membership), folded into the `"app.29er.group_tree"` typed
      * snapshot the iOS shell reads through [`crate::UpdateSink`].
      *
      * Replaces any previously open discovery session. `false` (D6) on an
@@ -1014,7 +1014,7 @@ open func openGroupDiscovery(hostRelayUrl: String) -> Bool  {
      * Open the member-roster read session for one group. `group_id_json` is
      * a JSON [`GroupId`] object (same shape as [`Self::open_group_chat`]).
      * Uses the dedicated roster door
-     * (`nmp_native_runtime::open_nip29_group_roster_session`). `false` (D6)
+     * (`nmp_nip29::open_nip29_group_roster_session`). `false` (D6)
      * on malformed JSON.
      */
 open func openGroupRoster(groupIdJson: String) -> Bool  {
@@ -1793,16 +1793,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_lifecycle_foreground() != 44999) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_mark_group_read() != 42135) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_mark_group_read() != 43605) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_chat() != 61403) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_discovery() != 18040) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_discovery() != 10762) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_roster() != 63417) {
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_open_group_roster() != 34025) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_react_to_group_message() != 23629) {

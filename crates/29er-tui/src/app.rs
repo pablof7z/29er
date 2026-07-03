@@ -4,14 +4,18 @@
 //! directly. The TUI is a plain Rust consumer with no Swift/UniFFI boundary,
 //! so it composes 29er via [`nmp_app_29er::compose_29er_runtime`] (the same
 //! composition root the `TwentyNinerApp` UniFFI facade uses) and talks to
-//! `nmp_native_runtime::NmpApp`'s NIP-29 session methods directly, instead of
-//! going through the facade object.
+//! NIP-owned read-session doors directly, instead of going through the facade
+//! object.
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use nmp_app_29er::group_chat::{GroupChatMessage, GroupChatProjection};
-use nmp_app_29er::group_tree::{GroupTreeMessageState, GroupTreeProjection};
+use nmp_app_29er::group_presence::GroupPresenceSessions;
+use nmp_app_29er::group_preview::GroupPreviewSessions;
+use nmp_app_29er::group_tree::{
+    GroupTreeMessageState, GroupTreePresenceState, GroupTreeProjection,
+};
 use nmp_app_29er::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use nmp_app_29er::{compose_29er_runtime, dispatch_nip29_action, DispatchOutcome};
 use nmp_content::embed_projection::EmbeddedEventEnvelope;
@@ -21,19 +25,24 @@ use nmp_core::typed_projections::{
     decode_action_results, decode_publish_outbox, ACTION_RESULTS_SCHEMA_ID,
     PUBLISH_OUTBOX_SCHEMA_ID,
 };
-use nmp_core::ObservedProjectionSink;
-use nmp_native_runtime::{
-    new_app, FeedAdmission, FeedHandle, FeedItemProjection, FeedOrder, FeedParams, FeedScope,
-    FeedShape, FeedWindowPolicy, Nip25GroupReactionsHandle, Nip25GroupReactionsSession,
-    Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
-    Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
-    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp, ProjectionKey,
-};
+use nmp_native_runtime::{new_app, NmpApp};
 use nmp_nip29::projection::{
     DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, GroupRosterMember,
     GroupRosterProjection, JoinedGroupsProjection,
 };
-use nmp_nip29::GroupId;
+use nmp_nip29::{
+    close_nip29_group_discovery_session, close_nip29_group_events_session,
+    close_nip29_group_roster_session, close_nip29_joined_groups_session,
+    open_nip29_group_discovery_session_with_reader, open_nip29_group_events_session_with_reader,
+    open_nip29_group_roster_session_with_reader, open_nip29_joined_groups_session_with_reader,
+    GroupId, Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
+    Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
+    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession,
+};
+use nmp_reactions::{
+    close_nip25_group_reactions_session, open_nip25_group_reactions_session_with_reader,
+    Nip25GroupReactionsHandle, Nip25GroupReactionsSession,
+};
 use tokio::sync::watch;
 
 type ActiveAccountSlot = Arc<Mutex<Option<String>>>;
@@ -157,6 +166,7 @@ pub struct ChannelListItem {
     pub name: String,
     pub depth: usize,
     pub unread: u32,
+    pub typing_count: u32,
     pub member_count: u32,
     pub admin_count: u32,
     pub is_branch: bool,
@@ -281,6 +291,7 @@ impl Default for IdentityState {
 /// NMP emits an update frame, the TUI re-reads its Rust-owned projection readers
 /// once and replaces the latest UI projection. There is no timer-driven refresh.
 struct ProjectionUpdateBridge {
+    app: Arc<NmpApp>,
     shared: Arc<SharedProjections>,
     projection_tx: watch::Sender<ProjectionView>,
 }
@@ -288,6 +299,8 @@ struct ProjectionUpdateBridge {
 /// Send+Sync read-side state shared between App and the NMP update listener.
 pub struct SharedProjections {
     pub group_tree: Arc<GroupTreeProjection>,
+    pub group_preview: Arc<GroupPreviewSessions>,
+    pub group_presence: Arc<GroupPresenceSessions>,
     pub discovered: Mutex<Option<Arc<DiscoveredGroupsProjection>>>,
     /// Active-account joined/admin state (v0.8.2 replacement for the removed
     /// `GroupMembersProjection`). Wired lazily once the active pubkey resolves
@@ -310,6 +323,25 @@ pub struct SharedProjections {
     pub last_update_at: Mutex<Option<std::time::Instant>>,
 }
 impl SharedProjections {
+    fn sync_group_sources(&self, app: &NmpApp) {
+        let discovered = self
+            .discovered
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|projection| projection.snapshot()))
+            .unwrap_or_default();
+        self.group_preview
+            .sync(app, &discovered, Arc::clone(&self.group_tree));
+        let active_pubkey = self
+            .active_account
+            .lock()
+            .ok()
+            .and_then(|s| s.lock().ok().and_then(|v| v.clone()))
+            .unwrap_or_default();
+        self.group_presence
+            .sync(app, &discovered, active_pubkey.as_str());
+    }
+
     pub fn project(&self) -> ProjectionView {
         let discovered = self
             .discovered
@@ -318,13 +350,15 @@ impl SharedProjections {
             .and_then(|slot| slot.as_ref().map(|projection| projection.snapshot()))
             .unwrap_or_default();
         let tree_state = self.group_tree.snapshot();
+        let presence_state = self.group_presence.snapshot_state();
         // Resolve my_pubkey first so it can be passed to tier computation.
         let me = self
             .active_account
             .lock()
             .ok()
             .and_then(|s| s.lock().ok().and_then(|v| v.clone()));
-        let channel_tree = derive_channel_tree(&discovered, &tree_state, me.as_deref());
+        let channel_tree =
+            derive_channel_tree(&discovered, &tree_state, &presence_state, me.as_deref());
         let selected_messages = self
             .selected_chat
             .lock()
@@ -443,7 +477,6 @@ pub struct App {
     /// Event refs currently claimed from visible chat messages. The Rust-owned
     /// group-chat projection supplies primary IDs; the TUI only refcounts them.
     claimed_event_refs: HashSet<String>,
-    group_tree_feed_handle: Option<FeedHandle>,
     latest: ProjectionView,
     screen: Screen,
     focus: Focus,
@@ -477,6 +510,8 @@ impl App {
         let relay_url = nmp_app_29er::config::public_group_relay_url().to_string();
         let shared = Arc::new(SharedProjections {
             group_tree: Arc::new(GroupTreeProjection::new()),
+            group_preview: Arc::new(GroupPreviewSessions::new()),
+            group_presence: Arc::new(GroupPresenceSessions::new()),
             discovered: Mutex::new(None),
             joined: Mutex::new(None),
             joined_handle: Mutex::new(None),
@@ -502,7 +537,6 @@ impl App {
             discovery_handle: None,
             claimed_profile_authors: HashSet::new(),
             claimed_event_refs: HashSet::new(),
-            group_tree_feed_handle: None,
             screen: Screen::Login,
             focus: Focus::RoomList,
             focus_stack: Vec::new(),
@@ -611,7 +645,8 @@ impl App {
                 {
                     return;
                 }
-                let opened = joined_app.open_nip29_joined_groups_session_with_reader(
+                let opened = open_nip29_joined_groups_session_with_reader(
+                    &*joined_app,
                     Nip29JoinedGroupsSession::new(pk, joined_relay.clone()),
                 );
                 let (handle, reader) = match opened {
@@ -623,6 +658,7 @@ impl App {
                 }
                 *slot = reader;
             }
+            joined_shared.sync_group_sources(&joined_app);
             let _ = joined_projection_tx.send(joined_shared.project());
         });
 
@@ -632,6 +668,7 @@ impl App {
         // Ownership of the boxed sink moves into the runtime's update-listener
         // slot; `App` does not need to hold it.
         let update_bridge = Box::new(ProjectionUpdateBridge {
+            app: Arc::clone(&app),
             shared: Arc::clone(&self.shared),
             projection_tx: self.projection_tx.clone(),
         });
@@ -640,40 +677,14 @@ impl App {
         app.add_relay(relay.clone(), "both".to_string());
         nmp_uniffi_support::start_runtime(&app, 80, 4);
 
-        let (discovery_handle, discovered) = app.open_nip29_group_discovery_session_with_reader(
+        let (discovery_handle, discovered) = open_nip29_group_discovery_session_with_reader(
+            &*app,
             Nip29GroupDiscoverySession::new(relay.clone()),
         );
         if let Ok(mut slot) = self.shared.discovered.lock() {
             *slot = Some(discovered);
         }
-
-        let tree_feed_params = FeedParams {
-            primary_kinds: vec![KIND_CHAT_MESSAGE],
-            shape: FeedShape::Flat,
-            source: FeedScope::ActiveUserHostedGroups,
-            admission: FeedAdmission::All,
-            order: FeedOrder::NewestByFeedPosition,
-            window: FeedWindowPolicy::bounded(80),
-            key: ProjectionKey::app_owned("app.29er.tui.group_tree")
-                .expect("29er TUI group-tree projection key must stay app-owned"),
-            item_projection: FeedItemProjection::FeedRows,
-        };
-        let reset_tree: Arc<dyn Fn() + Send + Sync> = {
-            let group_tree = Arc::clone(&self.shared.group_tree);
-            Arc::new(move || group_tree.clear())
-        };
-        let tree_feed_handle = match app.open_observed_feed_source(
-            &tree_feed_params,
-            Arc::clone(&self.shared.group_tree) as Arc<dyn ObservedProjectionSink>,
-            80,
-            Some(reset_tree),
-        ) {
-            Ok(handle) => handle,
-            Err(error) => {
-                app.close_nip29_group_discovery_session(discovery_handle);
-                anyhow::bail!("failed to open group-tree feed source: {error:?}");
-            }
-        };
+        self.shared.sync_group_sources(&app);
 
         app.add_signer(
             nmp_core::SignerSource::LocalNsec(zeroize::Zeroizing::new(nsec.to_string())),
@@ -681,7 +692,6 @@ impl App {
         );
         self.app = Some(app);
         self.discovery_handle = Some(discovery_handle);
-        self.group_tree_feed_handle = Some(tree_feed_handle);
 
         let discover_body = serde_json::json!({ "relay_url": relay }).to_string();
         self.dispatch_json("nmp.nip29.discover", &discover_body);
@@ -870,16 +880,18 @@ impl App {
         // cache to maintain — just track the latest handle for teardown.
         if let Some(app) = &self.app {
             if let Some(handle) = self.group_events_handle.take() {
-                app.close_nip29_group_events_session(handle);
+                let _ = close_nip29_group_events_session(app.as_ref(), handle);
             }
             if let Some(handle) = self.group_reactions_handle.take() {
-                app.close_nip25_group_reactions_session(handle);
+                let _ = close_nip25_group_reactions_session(app.as_ref(), handle);
             }
-            let (handle, reader) =
-                app.open_nip29_group_events_session_with_reader(Nip29GroupEventsSession::new(
+            let (handle, reader) = open_nip29_group_events_session_with_reader(
+                app.as_ref(),
+                Nip29GroupEventsSession::new(
                     group.clone(),
                     vec![KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
-                ));
+                ),
+            );
             self.group_events_handle = Some(handle);
             let active_pubkey = self
                 .shared
@@ -889,7 +901,8 @@ impl App {
                 .and_then(|slot| slot.lock().ok().and_then(|value| value.clone()))
                 .unwrap_or_default();
             let (reactions_handle, reactions_reader) =
-                app.open_nip25_group_reactions_session_with_reader(
+                open_nip25_group_reactions_session_with_reader(
+                    app.as_ref(),
                     Nip25GroupReactionsSession::new(group.clone(), active_pubkey),
                 );
             self.group_reactions_handle = Some(reactions_handle);
@@ -900,9 +913,10 @@ impl App {
                 )));
             }
             if let Some(handle) = self.group_roster_handle.take() {
-                app.close_nip29_group_roster_session(handle);
+                let _ = close_nip29_group_roster_session(app.as_ref(), handle);
             }
-            let (handle, reader) = app.open_nip29_group_roster_session_with_reader(
+            let (handle, reader) = open_nip29_group_roster_session_with_reader(
+                app.as_ref(),
                 Nip29GroupRosterSession::new(group.clone()),
             );
             self.group_roster_handle = Some(handle);
@@ -913,7 +927,12 @@ impl App {
         if let Ok(mut g) = self.shared.selected_group.lock() {
             *g = Some(group.clone());
         }
-        self.shared.group_tree.mark_read(&group.local_id);
+        let messages = self.shared.group_tree.snapshot();
+        let latest = messages.last_message_for(&group.local_id);
+        let _ = self
+            .shared
+            .group_presence
+            .mark_read_to_latest(&group.local_id, latest);
         self.selected_channel = Some(group);
         self.message_scroll = 0;
         self.focus = Focus::Chat;
@@ -933,7 +952,21 @@ impl App {
         };
         let result = self.send_message_to_group(group, trimmed, mention_pubkeys);
         self.record_dispatch_error(result);
+        self.publish_typing(false);
         self.refresh_projection();
+    }
+
+    pub fn publish_typing(&mut self, is_typing: bool) {
+        let Some(group) = self.selected_channel.clone() else {
+            return;
+        };
+        let json = serde_json::json!({
+            "group": group,
+            "is_typing": is_typing,
+        })
+        .to_string();
+        let result = self.dispatch_json("app.29er.typing", &json);
+        self.record_dispatch_error(result);
     }
 
     fn send_message_to_group(
@@ -1349,24 +1382,25 @@ impl Drop for App {
             self.release_event_ref(&primary_id);
         }
         let Some(app) = self.app.take() else { return };
-        if let Some(handle) = self.group_tree_feed_handle.take() {
-            app.close_feed(&handle);
-        }
+        self.shared
+            .group_preview
+            .close_all(&app, &self.shared.group_tree);
+        self.shared.group_presence.close_all(&app);
         if let Some(handle) = self.discovery_handle.take() {
-            app.close_nip29_group_discovery_session(handle);
+            let _ = close_nip29_group_discovery_session(&*app, handle);
         }
         if let Some(handle) = self.group_events_handle.take() {
-            app.close_nip29_group_events_session(handle);
+            let _ = close_nip29_group_events_session(&*app, handle);
         }
         if let Some(handle) = self.group_reactions_handle.take() {
-            app.close_nip25_group_reactions_session(handle);
+            let _ = close_nip25_group_reactions_session(&*app, handle);
         }
         if let Some(handle) = self.group_roster_handle.take() {
-            app.close_nip29_group_roster_session(handle);
+            let _ = close_nip29_group_roster_session(&*app, handle);
         }
         if let Ok(mut slot) = self.shared.joined_handle.lock() {
             if let Some(handle) = slot.take() {
-                app.close_nip29_joined_groups_session(handle);
+                let _ = close_nip29_joined_groups_session(&*app, handle);
             }
         }
         // `shutdown()` also clears the update listener (dropping the
@@ -1478,6 +1512,7 @@ fn on_nmp_update(bridge: &ProjectionUpdateBridge, bytes: Vec<u8>) {
             }
         }
     }
+    bridge.shared.sync_group_sources(&bridge.app);
     let _ = bridge.projection_tx.send(bridge.shared.project());
 }
 
@@ -1521,11 +1556,13 @@ fn make_item(
     g: &DiscoveredGroup,
     depth: usize,
     tree: &GroupTreeMessageState,
+    presence: &GroupTreePresenceState,
     is_branch: bool,
     _my_pubkey: Option<&str>,
 ) -> ChannelListItem {
     let last = tree.last_message_for(&g.group_id);
-    let unread = tree.unread_for(&g.group_id);
+    let unread = presence.unread_for(&g.group_id);
+    let typing_count = presence.typing_for(&g.group_id);
     let tier = if unread > 0 {
         // NMP does not yet surface per-message `p` tags in GroupTreeProjection,
         // so we cannot reliably detect @mentions here (the preview contains the
@@ -1556,6 +1593,7 @@ fn make_item(
             .unwrap_or_else(|| g.group_id.clone()),
         depth,
         unread,
+        typing_count,
         member_count: g.member_count,
         admin_count: g.admin_count,
         is_branch,
@@ -1572,6 +1610,7 @@ fn make_item(
 pub fn derive_channel_tree(
     discovered: &DiscoveredGroupsSnapshot,
     tree_state: &GroupTreeMessageState,
+    presence_state: &GroupTreePresenceState,
     my_pubkey: Option<&str>,
 ) -> Vec<ChannelListItem> {
     use std::collections::{BTreeMap, BTreeSet};
@@ -1624,7 +1663,14 @@ pub fn derive_channel_tree(
         }
         if let Some(g) = by_id.get(id) {
             let branch = children_of.get(id).map(|c| !c.is_empty()).unwrap_or(false);
-            out.push(make_item(g, depth, tree_state, branch, my_pubkey));
+            out.push(make_item(
+                g,
+                depth,
+                tree_state,
+                presence_state,
+                branch,
+                my_pubkey,
+            ));
             if let Some(children) = children_of.get(id) {
                 let mut kids: Vec<&str> = children.iter().copied().collect();
                 kids.sort_by_key(|cid| name_for(discovered, cid).to_lowercase());
@@ -1642,6 +1688,7 @@ mod tests {
     use super::*;
     use nmp_app_29er::kinds::KIND_CHAT_MESSAGE;
     use nmp_core::substrate::KernelEvent;
+    use nmp_core::ObservedProjectionSink;
     use nmp_nip29::kinds::KIND_GROUP_METADATA;
 
     fn group(id: &str, parent: Option<&str>, children: &[&str]) -> DiscoveredGroup {
@@ -1699,6 +1746,14 @@ mod tests {
         (App::new(tx), rx)
     }
 
+    fn presence<const N: usize>(rows: [(&str, u32, u32); N]) -> GroupTreePresenceState {
+        let mut state = GroupTreePresenceState::default();
+        for (group_id, unread, typing) in rows {
+            state.set_counts(group_id, unread, typing);
+        }
+        state
+    }
+
     fn chat_msg(id: &str, pubkey: &str, created_at: u64, content: &str) -> GroupChatMessage {
         let tree = nmp_content::tokenize_with_kind(content, &[], nmp_content::RenderMode::Auto, 9)
             .to_wire();
@@ -1736,7 +1791,12 @@ mod tests {
 
     #[test]
     fn tree_is_depth_annotated_and_alpha_ordered() {
-        let items = derive_channel_tree(&snap(), &GroupTreeProjection::new().snapshot(), None);
+        let items = derive_channel_tree(
+            &snap(),
+            &GroupTreeProjection::new().snapshot(),
+            &GroupTreePresenceState::default(),
+            None,
+        );
         let ids: Vec<_> = items
             .iter()
             .map(|i| (i.local_id.as_str(), i.depth, i.is_branch))
@@ -1748,13 +1808,19 @@ mod tests {
     }
 
     #[test]
-    fn item_carries_unread_and_preview_from_group_tree() {
+    fn item_carries_nmp_presence_unread_and_preview_from_group_tree() {
         let proj = GroupTreeProjection::new();
         proj.on_kernel_event(&evt("a", "child", 10, "hello"));
         proj.on_kernel_event(&evt("b", "child", 20, "newest"));
-        let items = derive_channel_tree(&snap(), &proj.snapshot(), None);
+        let items = derive_channel_tree(
+            &snap(),
+            &proj.snapshot(),
+            &presence([("child", 2, 1)]),
+            None,
+        );
         let child = items.iter().find(|i| i.local_id == "child").unwrap();
         assert_eq!(child.unread, 2);
+        assert_eq!(child.typing_count, 1);
         assert_eq!(child.last_preview.as_deref(), Some("newest"));
         assert_eq!(child.member_count, 3);
     }
@@ -1767,7 +1833,12 @@ mod tests {
     fn test_derive_channel_tree_depth_ordering() {
         // Three-node tree: root -> child; plus an independent alpha root.
         // Expected order: alpha(d=0) < root(d=0) < child(d=1)
-        let items = derive_channel_tree(&snap(), &GroupTreeProjection::new().snapshot(), None);
+        let items = derive_channel_tree(
+            &snap(),
+            &GroupTreeProjection::new().snapshot(),
+            &GroupTreePresenceState::default(),
+            None,
+        );
         let result: Vec<_> = items
             .iter()
             .map(|i| (i.local_id.as_str(), i.depth, i.is_branch))
@@ -1778,8 +1849,8 @@ mod tests {
         );
     }
 
-    /// T2: derive_channel_tree surfaces unread count and last-preview text
-    /// from the GroupTreeProjection; preview is the verbatim event content.
+    /// T2: derive_channel_tree surfaces unread count from NMP presence and
+    /// last-preview text from GroupTreeProjection.
     #[test]
     fn test_derive_channel_tree_unread_preview() {
         let proj = GroupTreeProjection::new();
@@ -1791,7 +1862,12 @@ mod tests {
             "first message that is kind of long text here",
         ));
         proj.on_kernel_event(&evt("e2", "child", 200, "short"));
-        let items = derive_channel_tree(&snap(), &proj.snapshot(), None);
+        let items = derive_channel_tree(
+            &snap(),
+            &proj.snapshot(),
+            &presence([("child", 2, 0)]),
+            None,
+        );
         let child = items.iter().find(|i| i.local_id == "child").unwrap();
         // unread count covers both messages
         assert_eq!(child.unread, 2);
@@ -2046,6 +2122,7 @@ mod tests {
             name: id.to_string(),
             depth: 0,
             unread: 0,
+            typing_count: 0,
             member_count: 0,
             admin_count: 0,
             is_branch: false,
@@ -2169,7 +2246,9 @@ mod tests {
     #[test]
     fn nmp_update_push_publishes_projection_without_profile_sidecar() {
         let (app, mut rx) = make_app();
+        let runtime = Arc::new(new_app());
         let bridge = ProjectionUpdateBridge {
+            app: runtime,
             shared: Arc::clone(&app.shared),
             projection_tx: app.projection_tx.clone(),
         };
@@ -2184,6 +2263,7 @@ mod tests {
     #[test]
     fn nmp_update_push_refreshes_group_tree_without_polling() {
         let (app, mut rx) = make_app();
+        let runtime = Arc::new(new_app());
         let discovered = Arc::new(DiscoveredGroupsProjection::new("wss://h"));
         discovered.on_kernel_event(&metadata_evt("meta-child", "child", 100, "child"));
         app.shared.group_tree.on_kernel_event(&evt(
@@ -2197,6 +2277,7 @@ mod tests {
         }
 
         let bridge = ProjectionUpdateBridge {
+            app: runtime,
             shared: Arc::clone(&app.shared),
             projection_tx: app.projection_tx.clone(),
         };
@@ -2209,7 +2290,7 @@ mod tests {
             .iter()
             .find(|item| item.local_id == "child")
             .expect("pushed group-tree event should surface the group row");
-        assert_eq!(child.unread, 1);
+        assert_eq!(child.unread, 0);
         assert_eq!(
             child.last_preview.as_deref(),
             Some("pushed through group tree")

@@ -40,6 +40,7 @@ pub mod nmp_app_29er {
         pub const VT_UNREAD_COUNT: ::flatbuffers::VOffsetT = 32;
         pub const VT_IS_MEMBER: ::flatbuffers::VOffsetT = 34;
         pub const VT_IS_ADMIN: ::flatbuffers::VOffsetT = 36;
+        pub const VT_TYPING_COUNT: ::flatbuffers::VOffsetT = 38;
 
         #[inline]
         pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -57,6 +58,7 @@ pub mod nmp_app_29er {
         ) -> ::flatbuffers::WIPOffset<GroupTreeNode<'bldr>> {
             let mut builder = GroupTreeNodeBuilder::new(_fbb);
             builder.add_last_message_created_at(args.last_message_created_at);
+            builder.add_typing_count(args.typing_count);
             builder.add_unread_count(args.unread_count);
             if let Some(x) = args.last_message_preview {
                 builder.add_last_message_preview(x);
@@ -285,6 +287,17 @@ pub mod nmp_app_29er {
                     .unwrap()
             }
         }
+        #[inline]
+        pub fn typing_count(&self) -> u32 {
+            // Safety:
+            // Created from valid Table for this object
+            // which contains a valid value in this slot
+            unsafe {
+                self._tab
+                    .get::<u32>(GroupTreeNode::VT_TYPING_COUNT, Some(0))
+                    .unwrap()
+            }
+        }
     }
 
     impl ::flatbuffers::Verifiable for GroupTreeNode<'_> {
@@ -341,6 +354,7 @@ pub mod nmp_app_29er {
                 .visit_field::<u32>("unread_count", Self::VT_UNREAD_COUNT, false)?
                 .visit_field::<bool>("is_member", Self::VT_IS_MEMBER, false)?
                 .visit_field::<bool>("is_admin", Self::VT_IS_ADMIN, false)?
+                .visit_field::<u32>("typing_count", Self::VT_TYPING_COUNT, false)?
                 .finish();
             Ok(())
         }
@@ -367,6 +381,7 @@ pub mod nmp_app_29er {
         pub unread_count: u32,
         pub is_member: bool,
         pub is_admin: bool,
+        pub typing_count: u32,
     }
     impl<'a> Default for GroupTreeNodeArgs<'a> {
         #[inline]
@@ -389,6 +404,7 @@ pub mod nmp_app_29er {
                 unread_count: 0,
                 is_member: false,
                 is_admin: false,
+                typing_count: 0,
             }
         }
     }
@@ -512,6 +528,11 @@ pub mod nmp_app_29er {
                 .push_slot::<bool>(GroupTreeNode::VT_IS_ADMIN, is_admin, false);
         }
         #[inline]
+        pub fn add_typing_count(&mut self, typing_count: u32) {
+            self.fbb_
+                .push_slot::<u32>(GroupTreeNode::VT_TYPING_COUNT, typing_count, 0);
+        }
+        #[inline]
         pub fn new(
             _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
         ) -> GroupTreeNodeBuilder<'a, 'b, A> {
@@ -552,6 +573,7 @@ pub mod nmp_app_29er {
             ds.field("unread_count", &self.unread_count());
             ds.field("is_member", &self.is_member());
             ds.field("is_admin", &self.is_admin());
+            ds.field("typing_count", &self.typing_count());
             ds.finish()
         }
     }
