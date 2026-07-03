@@ -704,7 +704,12 @@ struct GroupEventsView: View {
             authorPubkey: message.pubkey,
             content: message.copyText.isEmpty ? message.rawContent : message.copyText,
             createdAtLabel: Self.clockTime(message.createdAt),
-            reactions: [],
+            reactions: message.reactions.map { reaction in
+                NostrGroupChatReactionWire(
+                    emoji: reaction.emoji,
+                    count: Int(clamping: reaction.count)
+                )
+            },
             isOutgoing: message.pubkey == model.activeAccountPubkey
         )
     }

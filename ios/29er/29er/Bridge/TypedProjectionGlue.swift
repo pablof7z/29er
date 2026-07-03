@@ -37,7 +37,14 @@ enum TypedProjectionGlue {
                     contentTree: contentTree(fromNFCTBytes: row.contentTreeBytes.map { $0 }),
                     mentionPubkeys: row.mentionPubkeys.map { $0 ?? "" },
                     eventRefUris: row.eventRefUris.map { $0 ?? "" },
-                    eventRefPrimaryIds: row.eventRefPrimaryIds.map { $0 ?? "" }
+                    eventRefPrimaryIds: row.eventRefPrimaryIds.map { $0 ?? "" },
+                    reactions: row.reactions.map { reaction in
+                        GroupChatReaction(
+                            emoji: reaction.emoji ?? "",
+                            count: reaction.count
+                        )
+                    },
+                    reactionReactorPubkeys: row.reactionReactorPubkeys.map { $0 ?? "" }
                 )
             },
             profileDemandPubkeys: reader.profileDemandPubkeys.map { $0 ?? "" },

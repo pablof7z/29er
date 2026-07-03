@@ -53,6 +53,8 @@ fn fake_msg(pk: &str, ts: u64, content: &str) -> GroupChatMessage {
         mention_pubkeys: Vec::new(),
         event_ref_uris: Vec::new(),
         event_ref_primary_ids: Vec::new(),
+        reactions: Vec::new(),
+        reaction_reactor_pubkeys: Vec::new(),
     }
 }
 

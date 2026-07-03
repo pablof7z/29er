@@ -1,8 +1,10 @@
 use super::*;
+use nmp_nip25::{ReactionAggregateSnapshot, ReactionEmojiCount, ReactionTargetAggregate};
 
 const AUTHOR: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const EVENT_ID: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const THIRD: &str = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
 
 fn event(id: &str, created_at: u64, kind: u32, content: &str) -> GroupEvent {
     GroupEvent {
@@ -16,6 +18,27 @@ fn event(id: &str, created_at: u64, kind: u32, content: &str) -> GroupEvent {
 
 fn snapshot(events: Vec<GroupEvent>) -> GroupEventsSnapshot {
     GroupEventsSnapshot { events }
+}
+
+fn reaction_snapshot() -> ReactionAggregateSnapshot {
+    ReactionAggregateSnapshot {
+        targets: vec![ReactionTargetAggregate {
+            target_event_id: "e1".to_string(),
+            total: 3,
+            by_emoji: vec![
+                ReactionEmojiCount {
+                    token: "🔥".to_string(),
+                    count: 2,
+                },
+                ReactionEmojiCount {
+                    token: "+".to_string(),
+                    count: 1,
+                },
+            ],
+            reactors: vec![OTHER.to_string(), THIRD.to_string()],
+            mine: Vec::new(),
+        }],
+    }
 }
 
 #[test]
@@ -102,6 +125,41 @@ fn projection_preserves_raw_newest_first_order_and_clear_updates() {
 }
 
 #[test]
+fn reaction_aggregate_is_joined_by_target_event_id() {
+    let chat = derive_group_chat_snapshot_with_reactions(
+        &snapshot(vec![
+            event("e1", 20, 9, "hello"),
+            event("unreacted", 10, 9, "plain"),
+        ]),
+        &reaction_snapshot(),
+    );
+
+    let reacted = &chat.messages[0];
+    assert_eq!(
+        reacted.reactions,
+        vec![
+            GroupChatReaction {
+                emoji: "🔥".to_string(),
+                count: 2,
+            },
+            GroupChatReaction {
+                emoji: "+".to_string(),
+                count: 1,
+            },
+        ]
+    );
+    assert_eq!(
+        reacted.reaction_reactor_pubkeys,
+        vec![OTHER.to_string(), THIRD.to_string()]
+    );
+    assert!(chat.messages[1].reactions.is_empty());
+    assert_eq!(
+        chat.profile_demand_pubkeys,
+        vec![AUTHOR.to_string(), OTHER.to_string(), THIRD.to_string()]
+    );
+}
+
+#[test]
 fn flatbuffer_encoding_uses_app_owned_schema_and_nfct_tree_bytes() {
     let bytes = encode_group_chat_snapshot(&snapshot(vec![event("e1", 20, 9, "hello")]));
     assert!(flatbuffers::buffer_has_identifier(&bytes, "N29C", false));
@@ -115,4 +173,24 @@ fn flatbuffer_encoding_uses_app_owned_schema_and_nfct_tree_bytes() {
         "NFCT",
         false
     ));
+}
+
+#[test]
+fn flatbuffer_encoding_carries_reaction_chips_and_reactor_set() {
+    let bytes = encode_group_chat_snapshot_with_reactions(
+        &snapshot(vec![event("e1", 20, 9, "hello")]),
+        &reaction_snapshot(),
+    );
+    let reader = flatbuffers::root::<fb::GroupChatSnapshot>(&bytes).expect("N29C buffer decodes");
+    assert_eq!(reader.schema_version(), GROUP_CHAT_SCHEMA_VERSION);
+    let message = reader.messages().expect("messages").get(0);
+    let reactions = message.reactions().expect("reactions");
+    assert_eq!(reactions.len(), 2);
+    assert_eq!(reactions.get(0).emoji(), "🔥");
+    assert_eq!(reactions.get(0).count(), 2);
+    let reactors = message
+        .reaction_reactor_pubkeys()
+        .expect("reaction reactor pubkeys");
+    assert_eq!(reactors.get(0), OTHER);
+    assert_eq!(reactors.get(1), THIRD);
 }

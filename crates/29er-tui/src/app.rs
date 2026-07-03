@@ -21,10 +21,10 @@ use nmp_core::typed_projections::{decode_publish_outbox, PUBLISH_OUTBOX_SCHEMA_I
 use nmp_core::ObservedProjectionSink;
 use nmp_native_runtime::{
     new_app, FeedAdmission, FeedHandle, FeedItemProjection, FeedOrder, FeedParams, FeedScope,
-    FeedShape, FeedWindowPolicy, Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession,
-    Nip29GroupEventsHandle, Nip29GroupEventsSession, Nip29GroupRosterHandle,
-    Nip29GroupRosterSession, Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
-    ProjectionKey,
+    FeedShape, FeedWindowPolicy, Nip25GroupReactionsHandle, Nip25GroupReactionsSession,
+    Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
+    Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
+    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp, ProjectionKey,
 };
 use nmp_nip29::projection::{
     DiscoveredGroup, DiscoveredGroupsProjection, DiscoveredGroupsSnapshot, GroupRosterMember,
@@ -404,6 +404,7 @@ pub struct App {
     /// new one (in [`Self::select_channel`]) replaces this at the kernel
     /// level, so there is no per-group cache to maintain here.
     group_events_handle: Option<Nip29GroupEventsHandle>,
+    group_reactions_handle: Option<Nip25GroupReactionsHandle>,
     group_roster_handle: Option<Nip29GroupRosterHandle>,
     discovery_handle: Option<Nip29GroupDiscoveryHandle>,
     /// Pubkeys of authors of currently-visible chat messages whose profile
@@ -465,6 +466,7 @@ impl App {
             shared,
             projection_tx,
             group_events_handle: None,
+            group_reactions_handle: None,
             group_roster_handle: None,
             latest: ProjectionView::default(),
             discovery_handle: None,
@@ -736,6 +738,7 @@ impl App {
             .flat_map(|message| {
                 std::iter::once(message.pubkey.clone())
                     .chain(message.mention_pubkeys.iter().cloned())
+                    .chain(message.reaction_reactor_pubkeys.iter().cloned())
             })
             .filter(|pubkey| !pubkey.is_empty())
             .collect();
@@ -836,14 +839,32 @@ impl App {
             if let Some(handle) = self.group_events_handle.take() {
                 app.close_nip29_group_events_session(handle);
             }
+            if let Some(handle) = self.group_reactions_handle.take() {
+                app.close_nip25_group_reactions_session(handle);
+            }
             let (handle, reader) =
                 app.open_nip29_group_events_session_with_reader(Nip29GroupEventsSession::new(
                     group.clone(),
                     vec![KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
                 ));
             self.group_events_handle = Some(handle);
+            let active_pubkey = self
+                .shared
+                .active_account
+                .lock()
+                .ok()
+                .and_then(|slot| slot.lock().ok().and_then(|value| value.clone()))
+                .unwrap_or_default();
+            let (reactions_handle, reactions_reader) =
+                app.open_nip25_group_reactions_session_with_reader(
+                    Nip25GroupReactionsSession::new(group.clone(), active_pubkey),
+                );
+            self.group_reactions_handle = Some(reactions_handle);
             if let Ok(mut slot) = self.shared.selected_chat.lock() {
-                *slot = Some(Arc::new(GroupChatProjection::new(reader)));
+                *slot = Some(Arc::new(GroupChatProjection::new_with_reactions(
+                    reader,
+                    reactions_reader,
+                )));
             }
             if let Some(handle) = self.group_roster_handle.take() {
                 app.close_nip29_group_roster_session(handle);
@@ -1181,6 +1202,9 @@ impl Drop for App {
         if let Some(handle) = self.group_events_handle.take() {
             app.close_nip29_group_events_session(handle);
         }
+        if let Some(handle) = self.group_reactions_handle.take() {
+            app.close_nip25_group_reactions_session(handle);
+        }
         if let Some(handle) = self.group_roster_handle.take() {
             app.close_nip29_group_roster_session(handle);
         }
@@ -1512,6 +1536,8 @@ mod tests {
             mention_pubkeys: Vec::new(),
             event_ref_uris: Vec::new(),
             event_ref_primary_ids: Vec::new(),
+            reactions: Vec::new(),
+            reaction_reactor_pubkeys: Vec::new(),
         }
     }
 
