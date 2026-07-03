@@ -1,5 +1,10 @@
 namespace nmp_app_29er;
 
+table GroupChatReaction {
+  emoji:string (required);
+  count:uint64;
+}
+
 table GroupChatMessage {
   id:string (required);
   pubkey:string (required);
@@ -11,10 +16,12 @@ table GroupChatMessage {
   mention_pubkeys:[string];
   event_ref_uris:[string];
   event_ref_primary_ids:[string];
+  reactions:[GroupChatReaction];
+  reaction_reactor_pubkeys:[string];
 }
 
 table GroupChatSnapshot {
-  schema_version:uint32 = 1;
+  schema_version:uint32 = 2;
   messages:[GroupChatMessage];
   profile_demand_pubkeys:[string];
   event_ref_uris:[string];

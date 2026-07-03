@@ -43,15 +43,16 @@ use nmp_core::ObservedProjectionSink;
 use nmp_core::TypedProjectionData;
 use nmp_native_runtime::{
     FeedAdmission, FeedHandle, FeedItemProjection, FeedOrder, FeedParams, FeedScope, FeedShape,
-    FeedWindowPolicy, Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession,
-    Nip29GroupEventsHandle, Nip29GroupEventsSession, Nip29GroupRosterHandle,
-    Nip29GroupRosterSession, Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp,
-    ProjectionKey,
+    FeedWindowPolicy, Nip25GroupReactionsHandle, Nip25GroupReactionsSession,
+    Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
+    Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
+    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession, NmpApp, ProjectionKey,
 };
+use nmp_nip25::ReactionAggregateProjection;
 use nmp_nip29::{GroupEventsProjection, GroupId, JoinedGroupsProjection};
 
 use crate::group_chat::{
-    encode_group_chat_snapshot, GROUP_CHAT_FILE_IDENTIFIER, GROUP_CHAT_SCHEMA_ID,
+    encode_group_chat_snapshot_with_reactions, GROUP_CHAT_FILE_IDENTIFIER, GROUP_CHAT_SCHEMA_ID,
     GROUP_CHAT_SCHEMA_VERSION,
 };
 use crate::group_tree::{
@@ -80,6 +81,7 @@ struct DiscoverySession {
 /// [`GroupSessions::open_chat`].
 struct ChatSession {
     handle: Nip29GroupEventsHandle,
+    reactions_handle: Nip25GroupReactionsHandle,
 }
 
 /// All NIP-29 group-read session state owned by one [`TwentyNinerApp`].
@@ -201,14 +203,28 @@ impl GroupSessions {
     /// replacing any previously open chat session.
     pub(crate) fn open_chat(&self, app: &NmpApp, group_id: GroupId) {
         self.close_chat(app);
+        let active_pubkey = app
+            .active_account_handle()
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+            .unwrap_or_default();
         let (handle, reader) =
             app.open_nip29_group_events_session_with_reader(Nip29GroupEventsSession::new(
-                group_id,
+                group_id.clone(),
                 vec![KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT],
             ));
-        register_group_chat_snapshot(app, reader);
+        let (reactions_handle, reactions_reader) = app
+            .open_nip25_group_reactions_session_with_reader(Nip25GroupReactionsSession::new(
+                group_id,
+                active_pubkey,
+            ));
+        register_group_chat_snapshot(app, reader, reactions_reader);
         if let Ok(mut slot) = self.chat.lock() {
-            *slot = Some(ChatSession { handle });
+            *slot = Some(ChatSession {
+                handle,
+                reactions_handle,
+            });
         }
     }
 
@@ -218,6 +234,7 @@ impl GroupSessions {
             if let Some(session) = slot.take() {
                 app.remove_snapshot_projection(GROUP_CHAT_SCHEMA_ID);
                 app.close_nip29_group_events_session(session.handle);
+                app.close_nip25_group_reactions_session(session.reactions_handle);
             }
         }
     }
@@ -377,18 +394,23 @@ fn build_discovery_session(
     })
 }
 
-fn register_group_chat_snapshot(app: &NmpApp, reader: Arc<GroupEventsProjection>) {
+fn register_group_chat_snapshot(
+    app: &NmpApp,
+    reader: Arc<GroupEventsProjection>,
+    reactions: Arc<ReactionAggregateProjection>,
+) {
     let registration_key = ProjectionKey::app_owned(GROUP_CHAT_SCHEMA_ID)
         .expect("29er group-chat projection key must stay app-owned")
         .dynamic_token();
     app.register_typed_snapshot_projection(registration_key, move || {
         let snapshot = reader.snapshot();
+        let reaction_snapshot = reactions.snapshot();
         Some(TypedProjectionData {
             key: GROUP_CHAT_SCHEMA_ID.to_string(),
             schema_id: GROUP_CHAT_SCHEMA_ID.to_string(),
             schema_version: GROUP_CHAT_SCHEMA_VERSION,
             file_identifier: String::from_utf8_lossy(GROUP_CHAT_FILE_IDENTIFIER).into_owned(),
-            payload: encode_group_chat_snapshot(&snapshot),
+            payload: encode_group_chat_snapshot_with_reactions(&snapshot, &reaction_snapshot),
             ..Default::default()
         })
     });

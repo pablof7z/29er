@@ -8,6 +8,50 @@ import Common
 
 import FlatBuffers
 
+public struct nmp_app_29er_GroupChatReaction: FlatBufferTable, FlatbuffersVectorInitializable, Verifiable {
+
+  static func validateVersion() { FlatBuffersVersion_25_12_19() }
+  public var __buffer: ByteBuffer! { return _accessor.bb }
+  private var _accessor: Table
+
+  public static var id: String { "N29C" }
+  public static func finish(_ fbb: inout FlatBufferBuilder, end: Offset, prefix: Bool = false) { fbb.finish(offset: end, fileId: nmp_app_29er_GroupChatReaction.id, addPrefix: prefix) }
+  private init(_ t: Table) { _accessor = t }
+  public init(_ bb: ByteBuffer, o: Int32) { _accessor = Table(bb: bb, position: o) }
+
+  private enum VTOFFSET: VOffset {
+    case emoji = 4
+    case count = 6
+    var v: Int32 { Int32(self.rawValue) }
+    var p: VOffset { self.rawValue }
+  }
+
+  public var emoji: String! { let o = _accessor.offset(VTOFFSET.emoji.v); return _accessor.string(at: o) }
+  public var emojiSegmentArray: [UInt8]! { return _accessor.getVector(at: VTOFFSET.emoji.v) }
+  public var count: UInt64 { let o = _accessor.offset(VTOFFSET.count.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt64.self, at: o) }
+  public static func startGroupChatReaction(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 2) }
+  public static func add(emoji: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: emoji, at: VTOFFSET.emoji.p) }
+  public static func add(count: UInt64, _ fbb: inout FlatBufferBuilder) { fbb.add(element: count, def: 0, at: VTOFFSET.count.p) }
+  public static func endGroupChatReaction(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); fbb.require(table: end, fields: [4]); return end }
+  public static func createGroupChatReaction(
+    _ fbb: inout FlatBufferBuilder,
+    emojiOffset emoji: Offset,
+    count: UInt64 = 0
+  ) -> Offset {
+    let __start = nmp_app_29er_GroupChatReaction.startGroupChatReaction(&fbb)
+    nmp_app_29er_GroupChatReaction.add(emoji: emoji, &fbb)
+    nmp_app_29er_GroupChatReaction.add(count: count, &fbb)
+    return nmp_app_29er_GroupChatReaction.endGroupChatReaction(&fbb, start: __start)
+  }
+
+  public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
+    var _v = try verifier.visitTable(at: position)
+    try _v.visit(field: VTOFFSET.emoji.p, fieldName: "emoji", required: true, type: ForwardOffset<String>.self)
+    try _v.visit(field: VTOFFSET.count.p, fieldName: "count", required: false, type: UInt64.self)
+    _v.finish()
+  }
+}
+
 public struct nmp_app_29er_GroupChatMessage: FlatBufferTable, FlatbuffersVectorInitializable, Verifiable {
 
   static func validateVersion() { FlatBuffersVersion_25_12_19() }
@@ -30,6 +74,8 @@ public struct nmp_app_29er_GroupChatMessage: FlatBufferTable, FlatbuffersVectorI
     case mentionPubkeys = 18
     case eventRefUris = 20
     case eventRefPrimaryIds = 22
+    case reactions = 24
+    case reactionReactorPubkeys = 26
     var v: Int32 { Int32(self.rawValue) }
     var p: VOffset { self.rawValue }
   }
@@ -49,7 +95,9 @@ public struct nmp_app_29er_GroupChatMessage: FlatBufferTable, FlatbuffersVectorI
   public var mentionPubkeys: FlatbufferVector<String?> { return _accessor.vector(at: VTOFFSET.mentionPubkeys.v, byteSize: 4) }
   public var eventRefUris: FlatbufferVector<String?> { return _accessor.vector(at: VTOFFSET.eventRefUris.v, byteSize: 4) }
   public var eventRefPrimaryIds: FlatbufferVector<String?> { return _accessor.vector(at: VTOFFSET.eventRefPrimaryIds.v, byteSize: 4) }
-  public static func startGroupChatMessage(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 10) }
+  public var reactions: FlatbufferVector<nmp_app_29er_GroupChatReaction> { return _accessor.vector(at: VTOFFSET.reactions.v, byteSize: 4) }
+  public var reactionReactorPubkeys: FlatbufferVector<String?> { return _accessor.vector(at: VTOFFSET.reactionReactorPubkeys.v, byteSize: 4) }
+  public static func startGroupChatMessage(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 12) }
   public static func add(id: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: id, at: VTOFFSET.id.p) }
   public static func add(pubkey: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: pubkey, at: VTOFFSET.pubkey.p) }
   public static func add(rawContent: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: rawContent, at: VTOFFSET.rawContent.p) }
@@ -60,6 +108,8 @@ public struct nmp_app_29er_GroupChatMessage: FlatBufferTable, FlatbuffersVectorI
   public static func addVectorOf(mentionPubkeys: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: mentionPubkeys, at: VTOFFSET.mentionPubkeys.p) }
   public static func addVectorOf(eventRefUris: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: eventRefUris, at: VTOFFSET.eventRefUris.p) }
   public static func addVectorOf(eventRefPrimaryIds: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: eventRefPrimaryIds, at: VTOFFSET.eventRefPrimaryIds.p) }
+  public static func addVectorOf(reactions: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: reactions, at: VTOFFSET.reactions.p) }
+  public static func addVectorOf(reactionReactorPubkeys: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: reactionReactorPubkeys, at: VTOFFSET.reactionReactorPubkeys.p) }
   public static func endGroupChatMessage(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); fbb.require(table: end, fields: [4, 6, 8, 10]); return end }
   public static func createGroupChatMessage(
     _ fbb: inout FlatBufferBuilder,
@@ -72,7 +122,9 @@ public struct nmp_app_29er_GroupChatMessage: FlatBufferTable, FlatbuffersVectorI
     contentTreeBytesVectorOffset contentTreeBytes: Offset = Offset(),
     mentionPubkeysVectorOffset mentionPubkeys: Offset = Offset(),
     eventRefUrisVectorOffset eventRefUris: Offset = Offset(),
-    eventRefPrimaryIdsVectorOffset eventRefPrimaryIds: Offset = Offset()
+    eventRefPrimaryIdsVectorOffset eventRefPrimaryIds: Offset = Offset(),
+    reactionsVectorOffset reactions: Offset = Offset(),
+    reactionReactorPubkeysVectorOffset reactionReactorPubkeys: Offset = Offset()
   ) -> Offset {
     let __start = nmp_app_29er_GroupChatMessage.startGroupChatMessage(&fbb)
     nmp_app_29er_GroupChatMessage.add(id: id, &fbb)
@@ -85,6 +137,8 @@ public struct nmp_app_29er_GroupChatMessage: FlatBufferTable, FlatbuffersVectorI
     nmp_app_29er_GroupChatMessage.addVectorOf(mentionPubkeys: mentionPubkeys, &fbb)
     nmp_app_29er_GroupChatMessage.addVectorOf(eventRefUris: eventRefUris, &fbb)
     nmp_app_29er_GroupChatMessage.addVectorOf(eventRefPrimaryIds: eventRefPrimaryIds, &fbb)
+    nmp_app_29er_GroupChatMessage.addVectorOf(reactions: reactions, &fbb)
+    nmp_app_29er_GroupChatMessage.addVectorOf(reactionReactorPubkeys: reactionReactorPubkeys, &fbb)
     return nmp_app_29er_GroupChatMessage.endGroupChatMessage(&fbb, start: __start)
   }
 
@@ -100,6 +154,8 @@ public struct nmp_app_29er_GroupChatMessage: FlatBufferTable, FlatbuffersVectorI
     try _v.visit(field: VTOFFSET.mentionPubkeys.p, fieldName: "mentionPubkeys", required: false, type: ForwardOffset<Vector<ForwardOffset<String>, String>>.self)
     try _v.visit(field: VTOFFSET.eventRefUris.p, fieldName: "eventRefUris", required: false, type: ForwardOffset<Vector<ForwardOffset<String>, String>>.self)
     try _v.visit(field: VTOFFSET.eventRefPrimaryIds.p, fieldName: "eventRefPrimaryIds", required: false, type: ForwardOffset<Vector<ForwardOffset<String>, String>>.self)
+    try _v.visit(field: VTOFFSET.reactions.p, fieldName: "reactions", required: false, type: ForwardOffset<Vector<ForwardOffset<nmp_app_29er_GroupChatReaction>, nmp_app_29er_GroupChatReaction>>.self)
+    try _v.visit(field: VTOFFSET.reactionReactorPubkeys.p, fieldName: "reactionReactorPubkeys", required: false, type: ForwardOffset<Vector<ForwardOffset<String>, String>>.self)
     _v.finish()
   }
 }
@@ -125,13 +181,13 @@ public struct nmp_app_29er_GroupChatSnapshot: FlatBufferTable, FlatbuffersVector
     var p: VOffset { self.rawValue }
   }
 
-  public var schemaVersion: UInt32 { let o = _accessor.offset(VTOFFSET.schemaVersion.v); return o == 0 ? 1 : _accessor.readBuffer(of: UInt32.self, at: o) }
+  public var schemaVersion: UInt32 { let o = _accessor.offset(VTOFFSET.schemaVersion.v); return o == 0 ? 2 : _accessor.readBuffer(of: UInt32.self, at: o) }
   public var messages: FlatbufferVector<nmp_app_29er_GroupChatMessage> { return _accessor.vector(at: VTOFFSET.messages.v, byteSize: 4) }
   public var profileDemandPubkeys: FlatbufferVector<String?> { return _accessor.vector(at: VTOFFSET.profileDemandPubkeys.v, byteSize: 4) }
   public var eventRefUris: FlatbufferVector<String?> { return _accessor.vector(at: VTOFFSET.eventRefUris.v, byteSize: 4) }
   public var eventRefPrimaryIds: FlatbufferVector<String?> { return _accessor.vector(at: VTOFFSET.eventRefPrimaryIds.v, byteSize: 4) }
   public static func startGroupChatSnapshot(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 5) }
-  public static func add(schemaVersion: UInt32, _ fbb: inout FlatBufferBuilder) { fbb.add(element: schemaVersion, def: 1, at: VTOFFSET.schemaVersion.p) }
+  public static func add(schemaVersion: UInt32, _ fbb: inout FlatBufferBuilder) { fbb.add(element: schemaVersion, def: 2, at: VTOFFSET.schemaVersion.p) }
   public static func addVectorOf(messages: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: messages, at: VTOFFSET.messages.p) }
   public static func addVectorOf(profileDemandPubkeys: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: profileDemandPubkeys, at: VTOFFSET.profileDemandPubkeys.p) }
   public static func addVectorOf(eventRefUris: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: eventRefUris, at: VTOFFSET.eventRefUris.p) }
@@ -139,7 +195,7 @@ public struct nmp_app_29er_GroupChatSnapshot: FlatBufferTable, FlatbuffersVector
   public static func endGroupChatSnapshot(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createGroupChatSnapshot(
     _ fbb: inout FlatBufferBuilder,
-    schemaVersion: UInt32 = 1,
+    schemaVersion: UInt32 = 2,
     messagesVectorOffset messages: Offset = Offset(),
     profileDemandPubkeysVectorOffset profileDemandPubkeys: Offset = Offset(),
     eventRefUrisVectorOffset eventRefUris: Offset = Offset(),

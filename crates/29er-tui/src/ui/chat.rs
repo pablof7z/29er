@@ -6,7 +6,8 @@ use std::collections::HashMap;
 use crate::actions::Action;
 use crate::app::{Focus, RelayState, TuiProfile, TuiSnapshot};
 use crate::components::nostr_chat::{
-    nostr_group_chat_wire::NostrGroupChatMessageWire, nostr_group_message_row::NostrGroupMessageRow,
+    nostr_group_chat_wire::{NostrGroupChatMessageWire, NostrGroupChatReactionWire},
+    nostr_group_message_row::NostrGroupMessageRow,
 };
 use crate::components::nostr_user::profile_wire::ProfileWire;
 use crate::ui;
@@ -143,7 +144,14 @@ impl ChatComponent {
             },
             created_at_label: ui::clock_time(message.created_at),
             reply_preview: None,
-            reactions: Vec::new(),
+            reactions: message
+                .reactions
+                .iter()
+                .map(|reaction| NostrGroupChatReactionWire {
+                    emoji: reaction.emoji.clone(),
+                    count: u32::try_from(reaction.count).unwrap_or(u32::MAX),
+                })
+                .collect(),
             is_outgoing: self.is_own(&message.pubkey),
         }
     }
@@ -422,6 +430,8 @@ mod tests {
             mention_pubkeys: Vec::new(),
             event_ref_uris: Vec::new(),
             event_ref_primary_ids: Vec::new(),
+            reactions: Vec::new(),
+            reaction_reactor_pubkeys: Vec::new(),
         }
     }
 
@@ -542,6 +552,19 @@ mod tests {
         let out = render(&mut c, 80, 16);
         assert!(out.contains("projected copy"), "{out}");
         assert!(!out.contains("raw body"), "{out}");
+    }
+
+    #[test]
+    fn registry_row_renders_projected_reaction_chips() {
+        let mut message = msg("pk1", 1, "reacted body");
+        message.reactions = vec![nmp_app_29er::group_chat::GroupChatReaction {
+            emoji: "+".to_string(),
+            count: 2,
+        }];
+        let mut c = ChatComponent::new();
+        c.update(&snap(vec![message], true, Some("wss://h".into())));
+        let out = render(&mut c, 80, 16);
+        assert!(out.contains("+ 2"), "{out}");
     }
 
     fn snap(

@@ -5,6 +5,143 @@ extern crate alloc;
 #[allow(unused_imports, dead_code)]
 pub mod nmp_app_29er {
 
+    pub enum GroupChatReactionOffset {}
+    #[derive(Copy, Clone, PartialEq)]
+
+    pub struct GroupChatReaction<'a> {
+        pub _tab: ::flatbuffers::Table<'a>,
+    }
+
+    impl<'a> ::flatbuffers::Follow<'a> for GroupChatReaction<'a> {
+        type Inner = GroupChatReaction<'a>;
+        #[inline]
+        unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+            Self {
+                _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+            }
+        }
+    }
+
+    impl<'a> GroupChatReaction<'a> {
+        pub const VT_EMOJI: ::flatbuffers::VOffsetT = 4;
+        pub const VT_COUNT: ::flatbuffers::VOffsetT = 6;
+
+        #[inline]
+        pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+            GroupChatReaction { _tab: table }
+        }
+        #[allow(unused_mut)]
+        pub fn create<
+            'bldr: 'args,
+            'args: 'mut_bldr,
+            'mut_bldr,
+            A: ::flatbuffers::Allocator + 'bldr,
+        >(
+            _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+            args: &'args GroupChatReactionArgs<'args>,
+        ) -> ::flatbuffers::WIPOffset<GroupChatReaction<'bldr>> {
+            let mut builder = GroupChatReactionBuilder::new(_fbb);
+            builder.add_count(args.count);
+            if let Some(x) = args.emoji {
+                builder.add_emoji(x);
+            }
+            builder.finish()
+        }
+
+        #[inline]
+        pub fn emoji(&self) -> &'a str {
+            // Safety:
+            // Created from valid Table for this object
+            // which contains a valid value in this slot
+            unsafe {
+                self._tab
+                    .get::<::flatbuffers::ForwardsUOffset<&str>>(GroupChatReaction::VT_EMOJI, None)
+                    .unwrap()
+            }
+        }
+        #[inline]
+        pub fn count(&self) -> u64 {
+            // Safety:
+            // Created from valid Table for this object
+            // which contains a valid value in this slot
+            unsafe {
+                self._tab
+                    .get::<u64>(GroupChatReaction::VT_COUNT, Some(0))
+                    .unwrap()
+            }
+        }
+    }
+
+    impl ::flatbuffers::Verifiable for GroupChatReaction<'_> {
+        #[inline]
+        fn run_verifier(
+            v: &mut ::flatbuffers::Verifier,
+            pos: usize,
+        ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+            v.visit_table(pos)?
+                .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("emoji", Self::VT_EMOJI, true)?
+                .visit_field::<u64>("count", Self::VT_COUNT, false)?
+                .finish();
+            Ok(())
+        }
+    }
+    pub struct GroupChatReactionArgs<'a> {
+        pub emoji: Option<::flatbuffers::WIPOffset<&'a str>>,
+        pub count: u64,
+    }
+    impl<'a> Default for GroupChatReactionArgs<'a> {
+        #[inline]
+        fn default() -> Self {
+            GroupChatReactionArgs {
+                emoji: None, // required field
+                count: 0,
+            }
+        }
+    }
+
+    pub struct GroupChatReactionBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+        fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+        start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+    }
+    impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> GroupChatReactionBuilder<'a, 'b, A> {
+        #[inline]
+        pub fn add_emoji(&mut self, emoji: ::flatbuffers::WIPOffset<&'b str>) {
+            self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+                GroupChatReaction::VT_EMOJI,
+                emoji,
+            );
+        }
+        #[inline]
+        pub fn add_count(&mut self, count: u64) {
+            self.fbb_
+                .push_slot::<u64>(GroupChatReaction::VT_COUNT, count, 0);
+        }
+        #[inline]
+        pub fn new(
+            _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+        ) -> GroupChatReactionBuilder<'a, 'b, A> {
+            let start = _fbb.start_table();
+            GroupChatReactionBuilder {
+                fbb_: _fbb,
+                start_: start,
+            }
+        }
+        #[inline]
+        pub fn finish(self) -> ::flatbuffers::WIPOffset<GroupChatReaction<'a>> {
+            let o = self.fbb_.end_table(self.start_);
+            self.fbb_.required(o, GroupChatReaction::VT_EMOJI, "emoji");
+            ::flatbuffers::WIPOffset::new(o.value())
+        }
+    }
+
+    impl ::core::fmt::Debug for GroupChatReaction<'_> {
+        fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+            let mut ds = f.debug_struct("GroupChatReaction");
+            ds.field("emoji", &self.emoji());
+            ds.field("count", &self.count());
+            ds.finish()
+        }
+    }
     pub enum GroupChatMessageOffset {}
     #[derive(Copy, Clone, PartialEq)]
 
@@ -33,6 +170,8 @@ pub mod nmp_app_29er {
         pub const VT_MENTION_PUBKEYS: ::flatbuffers::VOffsetT = 18;
         pub const VT_EVENT_REF_URIS: ::flatbuffers::VOffsetT = 20;
         pub const VT_EVENT_REF_PRIMARY_IDS: ::flatbuffers::VOffsetT = 22;
+        pub const VT_REACTIONS: ::flatbuffers::VOffsetT = 24;
+        pub const VT_REACTION_REACTOR_PUBKEYS: ::flatbuffers::VOffsetT = 26;
 
         #[inline]
         pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -50,6 +189,12 @@ pub mod nmp_app_29er {
         ) -> ::flatbuffers::WIPOffset<GroupChatMessage<'bldr>> {
             let mut builder = GroupChatMessageBuilder::new(_fbb);
             builder.add_created_at(args.created_at);
+            if let Some(x) = args.reaction_reactor_pubkeys {
+                builder.add_reaction_reactor_pubkeys(x);
+            }
+            if let Some(x) = args.reactions {
+                builder.add_reactions(x);
+            }
             if let Some(x) = args.event_ref_primary_ids {
                 builder.add_event_ref_primary_ids(x);
             }
@@ -202,6 +347,33 @@ pub mod nmp_app_29er {
                 >>(GroupChatMessage::VT_EVENT_REF_PRIMARY_IDS, None)
             }
         }
+        #[inline]
+        pub fn reactions(
+            &self,
+        ) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<GroupChatReaction<'a>>>>
+        {
+            // Safety:
+            // Created from valid Table for this object
+            // which contains a valid value in this slot
+            unsafe {
+                self._tab.get::<::flatbuffers::ForwardsUOffset<
+                    ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<GroupChatReaction>>,
+                >>(GroupChatMessage::VT_REACTIONS, None)
+            }
+        }
+        #[inline]
+        pub fn reaction_reactor_pubkeys(
+            &self,
+        ) -> Option<::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>> {
+            // Safety:
+            // Created from valid Table for this object
+            // which contains a valid value in this slot
+            unsafe {
+                self._tab.get::<::flatbuffers::ForwardsUOffset<
+                    ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>,
+                >>(GroupChatMessage::VT_REACTION_REACTOR_PUBKEYS, None)
+            }
+        }
     }
 
     impl ::flatbuffers::Verifiable for GroupChatMessage<'_> {
@@ -247,6 +419,16 @@ pub mod nmp_app_29er {
                     Self::VT_EVENT_REF_PRIMARY_IDS,
                     false,
                 )?
+                .visit_field::<::flatbuffers::ForwardsUOffset<
+                    ::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<GroupChatReaction>>,
+                >>("reactions", Self::VT_REACTIONS, false)?
+                .visit_field::<::flatbuffers::ForwardsUOffset<
+                    ::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<&'_ str>>,
+                >>(
+                    "reaction_reactor_pubkeys",
+                    Self::VT_REACTION_REACTOR_PUBKEYS,
+                    false,
+                )?
                 .finish();
             Ok(())
         }
@@ -274,6 +456,16 @@ pub mod nmp_app_29er {
                 ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>,
             >,
         >,
+        pub reactions: Option<
+            ::flatbuffers::WIPOffset<
+                ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<GroupChatReaction<'a>>>,
+            >,
+        >,
+        pub reaction_reactor_pubkeys: Option<
+            ::flatbuffers::WIPOffset<
+                ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<&'a str>>,
+            >,
+        >,
     }
     impl<'a> Default for GroupChatMessageArgs<'a> {
         #[inline]
@@ -289,6 +481,8 @@ pub mod nmp_app_29er {
                 mention_pubkeys: None,
                 event_ref_uris: None,
                 event_ref_primary_ids: None,
+                reactions: None,
+                reaction_reactor_pubkeys: None,
             }
         }
     }
@@ -381,6 +575,30 @@ pub mod nmp_app_29er {
             );
         }
         #[inline]
+        pub fn add_reactions(
+            &mut self,
+            reactions: ::flatbuffers::WIPOffset<
+                ::flatbuffers::Vector<'b, ::flatbuffers::ForwardsUOffset<GroupChatReaction<'b>>>,
+            >,
+        ) {
+            self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+                GroupChatMessage::VT_REACTIONS,
+                reactions,
+            );
+        }
+        #[inline]
+        pub fn add_reaction_reactor_pubkeys(
+            &mut self,
+            reaction_reactor_pubkeys: ::flatbuffers::WIPOffset<
+                ::flatbuffers::Vector<'b, ::flatbuffers::ForwardsUOffset<&'b str>>,
+            >,
+        ) {
+            self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+                GroupChatMessage::VT_REACTION_REACTOR_PUBKEYS,
+                reaction_reactor_pubkeys,
+            );
+        }
+        #[inline]
         pub fn new(
             _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
         ) -> GroupChatMessageBuilder<'a, 'b, A> {
@@ -416,6 +634,8 @@ pub mod nmp_app_29er {
             ds.field("mention_pubkeys", &self.mention_pubkeys());
             ds.field("event_ref_uris", &self.event_ref_uris());
             ds.field("event_ref_primary_ids", &self.event_ref_primary_ids());
+            ds.field("reactions", &self.reactions());
+            ds.field("reaction_reactor_pubkeys", &self.reaction_reactor_pubkeys());
             ds.finish()
         }
     }
@@ -481,7 +701,7 @@ pub mod nmp_app_29er {
             // which contains a valid value in this slot
             unsafe {
                 self._tab
-                    .get::<u32>(GroupChatSnapshot::VT_SCHEMA_VERSION, Some(1))
+                    .get::<u32>(GroupChatSnapshot::VT_SCHEMA_VERSION, Some(2))
                     .unwrap()
             }
         }
@@ -599,7 +819,7 @@ pub mod nmp_app_29er {
         #[inline]
         fn default() -> Self {
             GroupChatSnapshotArgs {
-                schema_version: 1,
+                schema_version: 2,
                 messages: None,
                 profile_demand_pubkeys: None,
                 event_ref_uris: None,
@@ -616,7 +836,7 @@ pub mod nmp_app_29er {
         #[inline]
         pub fn add_schema_version(&mut self, schema_version: u32) {
             self.fbb_
-                .push_slot::<u32>(GroupChatSnapshot::VT_SCHEMA_VERSION, schema_version, 1);
+                .push_slot::<u32>(GroupChatSnapshot::VT_SCHEMA_VERSION, schema_version, 2);
         }
         #[inline]
         pub fn add_messages(

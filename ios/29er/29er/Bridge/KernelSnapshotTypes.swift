@@ -21,6 +21,11 @@ struct GroupId: Hashable, Equatable {
 
 // ─── 29er group-chat read model ───────────────────────────────────────────
 
+struct GroupChatReaction: Equatable {
+    let emoji: String
+    let count: UInt64
+}
+
 /// One rendered group-chat message from the app-owned `app.29er.group_chat`
 /// projection. Rust owns filtering, ordering, content enrichment, and demand
 /// extraction; Swift only renders this shape.
@@ -35,6 +40,8 @@ struct GroupChatMessage: Identifiable, Equatable {
     let mentionPubkeys: [String]
     let eventRefUris: [String]
     let eventRefPrimaryIds: [String]
+    let reactions: [GroupChatReaction]
+    let reactionReactorPubkeys: [String]
 }
 
 /// The serialised read model a group chat consumes. `messages` is ordered
