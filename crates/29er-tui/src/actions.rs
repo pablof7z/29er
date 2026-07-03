@@ -27,6 +27,9 @@ pub enum Action {
         content: String,
         mentions: Vec<String>,
     },
+    Typing {
+        is_typing: bool,
+    },
     AttachMedia {
         file_path: String,
         content_type: Option<String>,

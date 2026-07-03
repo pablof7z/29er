@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Mutex;
 
+use nmp_chat::ChatPresenceSnapshot;
 use nmp_core::substrate::{BoundedMessageMap, KernelEvent, MAX_PROJECTION_MESSAGES};
 use nmp_core::ObservedProjectionSink;
 use nmp_nip29::kinds::h_tag_value;
@@ -27,11 +28,25 @@ pub struct GroupTreeMessageSummary {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct GroupTreeMessageState {
-    direct_unread_by_group: BTreeMap<String, u32>,
     last_message_by_group: BTreeMap<String, GroupTreeMessageSummary>,
 }
 
 impl GroupTreeMessageState {
+    /// Newest message summary for a group's `local_id`, if any.
+    #[must_use]
+    pub fn last_message_for(&self, group_id: &str) -> Option<&GroupTreeMessageSummary> {
+        self.last_message_by_group.get(group_id)
+    }
+}
+
+/// Per-group chat read-state projected by NMP `nmp-chat`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GroupTreePresenceState {
+    direct_unread_by_group: BTreeMap<String, u32>,
+    direct_typing_by_group: BTreeMap<String, u32>,
+}
+
+impl GroupTreePresenceState {
     /// Direct unread count for a group's `local_id` (0 when unknown).
     #[must_use]
     pub fn unread_for(&self, group_id: &str) -> u32 {
@@ -41,10 +56,42 @@ impl GroupTreeMessageState {
             .unwrap_or(0)
     }
 
-    /// Newest message summary for a group's `local_id`, if any.
+    /// Direct typing participant count for a group's `local_id` (0 when unknown).
     #[must_use]
-    pub fn last_message_for(&self, group_id: &str) -> Option<&GroupTreeMessageSummary> {
-        self.last_message_by_group.get(group_id)
+    pub fn typing_for(&self, group_id: &str) -> u32 {
+        self.direct_typing_by_group
+            .get(group_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub fn set_counts(
+        &mut self,
+        group_id: impl Into<String>,
+        unread_count: u32,
+        typing_count: u32,
+    ) {
+        let group_id = group_id.into();
+        if unread_count > 0 {
+            self.direct_unread_by_group
+                .insert(group_id.clone(), unread_count);
+        } else {
+            self.direct_unread_by_group.remove(&group_id);
+        }
+        if typing_count > 0 {
+            self.direct_typing_by_group
+                .insert(group_id.clone(), typing_count);
+        } else {
+            self.direct_typing_by_group.remove(&group_id);
+        }
+    }
+
+    pub fn apply_chat_presence_snapshot(&mut self, snapshot: ChatPresenceSnapshot) {
+        if snapshot.group_id.is_empty() {
+            return;
+        }
+        let typing_count = u32::try_from(snapshot.typing.len()).unwrap_or(u32::MAX);
+        self.set_counts(snapshot.group_id, snapshot.unread_count, typing_count);
     }
 }
 
@@ -128,14 +175,12 @@ impl StoredGroupTreeMessage {
 #[derive(Debug)]
 struct GroupMessageBucket {
     messages: BoundedMessageMap<String, StoredGroupTreeMessage>,
-    unread_count: u32,
 }
 
 impl Default for GroupMessageBucket {
     fn default() -> Self {
         Self {
             messages: BoundedMessageMap::new(MAX_PROJECTION_MESSAGES),
-            unread_count: 0,
         }
     }
 }
@@ -143,8 +188,8 @@ impl Default for GroupMessageBucket {
 /// Rust-owned read model for the group list's chat affordances.
 ///
 /// It observes host-relay kind:9 traffic and exposes, per group, the newest
-/// direct chat preview plus a direct unread count. The tree derivation folds
-/// unread recursively so parents display their own unread plus descendants.
+/// direct chat preview. Read-state and typing come from NMP's `nmp-chat`
+/// presence projection, not this app-owned preview projection.
 pub struct GroupTreeProjection {
     groups: Mutex<BTreeMap<String, GroupMessageBucket>>,
 }
@@ -157,17 +202,15 @@ impl GroupTreeProjection {
         }
     }
 
-    pub fn mark_read(&self, group_id: &str) {
-        let Ok(mut groups) = self.groups.lock() else {
-            return;
-        };
-        let bucket = groups.entry(group_id.to_string()).or_default();
-        bucket.unread_count = 0;
-    }
-
     pub fn clear(&self) {
         if let Ok(mut groups) = self.groups.lock() {
             groups.clear();
+        }
+    }
+
+    pub fn remove_group(&self, group_id: &str) {
+        if let Ok(mut groups) = self.groups.lock() {
+            groups.remove(group_id);
         }
     }
 
@@ -179,11 +222,6 @@ impl GroupTreeProjection {
 
         let mut state = GroupTreeMessageState::default();
         for (group_id, bucket) in groups.iter() {
-            if bucket.unread_count > 0 {
-                state
-                    .direct_unread_by_group
-                    .insert(group_id.clone(), bucket.unread_count);
-            }
             if let Some(last) = bucket.messages.values().cloned().max_by(|a, b| {
                 a.created_at
                     .cmp(&b.created_at)
@@ -216,13 +254,9 @@ impl ObservedProjectionSink for GroupTreeProjection {
             return;
         };
         let bucket = groups.entry(group_id.to_string()).or_default();
-        let was_new = bucket
+        let _ = bucket
             .messages
-            .insert(event.id.clone(), StoredGroupTreeMessage::from_event(event))
-            .is_none();
-        if was_new {
-            bucket.unread_count = bucket.unread_count.saturating_add(1);
-        }
+            .insert(event.id.clone(), StoredGroupTreeMessage::from_event(event));
     }
 }
 
@@ -241,6 +275,7 @@ struct GroupTreeNode {
     is_admin: bool,
     last_message: Option<GroupTreeMessageSummary>,
     unread_count: u32,
+    typing_count: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -253,9 +288,10 @@ struct GroupTreeSnapshot {
 pub fn encode_group_tree_snapshot(
     discovered: &DiscoveredGroupsSnapshot,
     messages: &GroupTreeMessageState,
+    presence: &GroupTreePresenceState,
     membership: &GroupMembershipMap,
 ) -> Vec<u8> {
-    let tree = derive_group_tree(discovered, messages, membership);
+    let tree = derive_group_tree(discovered, messages, presence, membership);
     let mut fbb = flatbuffers::FlatBufferBuilder::new();
     let root_offsets = encode_nodes(&mut fbb, &tree.roots);
     let node_offsets = encode_nodes(&mut fbb, &tree.nodes);
@@ -340,6 +376,7 @@ fn encode_node<'a>(
             last_message_preview,
             last_message_created_at,
             unread_count: node.unread_count,
+            typing_count: node.typing_count,
         },
     )
 }
@@ -347,6 +384,7 @@ fn encode_node<'a>(
 fn derive_group_tree(
     discovered: &DiscoveredGroupsSnapshot,
     messages: &GroupTreeMessageState,
+    presence: &GroupTreePresenceState,
     membership: &GroupMembershipMap,
 ) -> GroupTreeSnapshot {
     let groups_by_id: BTreeMap<_, _> = discovered
@@ -385,7 +423,14 @@ fn derive_group_tree(
         let parent_id = parent_by_child
             .get(group.group_id.as_str())
             .map(|value| (*value).to_string());
-        let node = build_node(group, parent_id, &children_by_parent, messages, membership);
+        let node = build_node(
+            group,
+            parent_id,
+            &children_by_parent,
+            messages,
+            presence,
+            membership,
+        );
         nodes_by_id.insert(node.group_id.clone(), node);
     }
 
@@ -400,6 +445,13 @@ fn derive_group_tree(
         let count = aggregate_unread_count(&id, &nodes_by_id, &mut aggregate_cache);
         if let Some(node) = nodes_by_id.get_mut(&id) {
             node.unread_count = count;
+        }
+    }
+    let mut typing_cache = BTreeMap::new();
+    for id in nodes_by_id.keys().cloned().collect::<Vec<_>>() {
+        let count = aggregate_typing_count(&id, &nodes_by_id, &mut typing_cache);
+        if let Some(node) = nodes_by_id.get_mut(&id) {
+            node.typing_count = count;
         }
     }
 
@@ -425,6 +477,7 @@ fn build_node(
     parent_id: Option<String>,
     children_by_parent: &BTreeMap<&str, BTreeSet<&str>>,
     messages: &GroupTreeMessageState,
+    presence: &GroupTreePresenceState,
     membership: &GroupMembershipMap,
 ) -> GroupTreeNode {
     let child_ids = children_by_parent
@@ -445,11 +498,8 @@ fn build_node(
         is_member: viewer.is_member,
         is_admin: viewer.is_admin,
         last_message: messages.last_message_by_group.get(&group.group_id).cloned(),
-        unread_count: messages
-            .direct_unread_by_group
-            .get(&group.group_id)
-            .copied()
-            .unwrap_or_default(),
+        unread_count: presence.unread_for(&group.group_id),
+        typing_count: presence.typing_for(&group.group_id),
     }
 }
 
@@ -469,6 +519,27 @@ fn aggregate_unread_count(
         .iter()
         .fold(node.unread_count, |acc, child_id| {
             acc.saturating_add(aggregate_unread_count(child_id, nodes_by_id, cache))
+        });
+    cache.insert(group_id.to_string(), count);
+    count
+}
+
+fn aggregate_typing_count(
+    group_id: &str,
+    nodes_by_id: &BTreeMap<String, GroupTreeNode>,
+    cache: &mut BTreeMap<String, u32>,
+) -> u32 {
+    if let Some(count) = cache.get(group_id) {
+        return *count;
+    }
+    let Some(node) = nodes_by_id.get(group_id) else {
+        return 0;
+    };
+    let count = node
+        .child_ids
+        .iter()
+        .fold(node.typing_count, |acc, child_id| {
+            acc.saturating_add(aggregate_typing_count(child_id, nodes_by_id, cache))
         });
     cache.insert(group_id.to_string(), count);
     count
@@ -521,6 +592,25 @@ mod tests {
         }
     }
 
+    fn presence_for<const N: usize>(rows: [(&str, u32, u32); N]) -> GroupTreePresenceState {
+        let mut state = GroupTreePresenceState::default();
+        for (group_id, unread_count, typing_count) in rows {
+            state.apply_chat_presence_snapshot(ChatPresenceSnapshot {
+                group_id: group_id.to_string(),
+                unread_count,
+                typing: (0..typing_count)
+                    .map(|idx| nmp_chat::ChatPresenceTyping {
+                        pubkey: format!("typing-{idx}"),
+                        updated_at_ms: 1_000,
+                        expires_at_ms: 9_000,
+                    })
+                    .collect(),
+                ..Default::default()
+            });
+        }
+        state
+    }
+
     #[test]
     fn tree_rows_include_direct_last_kind9_preview() {
         let projection = GroupTreeProjection::new();
@@ -530,6 +620,7 @@ mod tests {
         let tree = derive_group_tree(
             &discovered(),
             &projection.snapshot(),
+            &GroupTreePresenceState::default(),
             &GroupMembershipMap::new(),
         );
         let child = tree
@@ -556,13 +647,10 @@ mod tests {
 
     #[test]
     fn unread_count_aggregates_group_and_descendants() {
-        let projection = GroupTreeProjection::new();
-        projection.on_kernel_event(&event("root-msg", "root", 10, "root direct"));
-        projection.on_kernel_event(&event("child-msg", "child", 20, "child direct"));
-
         let tree = derive_group_tree(
             &discovered(),
-            &projection.snapshot(),
+            &GroupTreeMessageState::default(),
+            &presence_for([("root", 1, 0), ("child", 1, 0)]),
             &GroupMembershipMap::new(),
         );
         let root = tree
@@ -581,15 +669,11 @@ mod tests {
     }
 
     #[test]
-    fn marking_child_read_updates_parent_aggregate_unread() {
-        let projection = GroupTreeProjection::new();
-        projection.on_kernel_event(&event("root-msg", "root", 10, "root direct"));
-        projection.on_kernel_event(&event("child-msg", "child", 20, "child direct"));
-        projection.mark_read("child");
-
+    fn nmp_presence_read_marker_updates_parent_aggregate_unread() {
         let tree = derive_group_tree(
             &discovered(),
-            &projection.snapshot(),
+            &GroupTreeMessageState::default(),
+            &presence_for([("root", 1, 0), ("child", 0, 0)]),
             &GroupMembershipMap::new(),
         );
         let root = tree
@@ -608,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_events_do_not_increment_unread() {
+    fn local_preview_projection_does_not_increment_unread() {
         let projection = GroupTreeProjection::new();
         let event = event("same", "root", 10, "first");
         projection.on_kernel_event(&event);
@@ -617,6 +701,7 @@ mod tests {
         let tree = derive_group_tree(
             &discovered(),
             &projection.snapshot(),
+            &GroupTreePresenceState::default(),
             &GroupMembershipMap::new(),
         );
         let root = tree
@@ -625,7 +710,30 @@ mod tests {
             .find(|node| node.group_id == "root")
             .expect("root node");
 
-        assert_eq!(root.unread_count, 1);
+        assert_eq!(root.unread_count, 0);
+    }
+
+    #[test]
+    fn typing_count_aggregates_group_and_descendants() {
+        let tree = derive_group_tree(
+            &discovered(),
+            &GroupTreeMessageState::default(),
+            &presence_for([("root", 0, 1), ("child", 0, 2)]),
+            &GroupMembershipMap::new(),
+        );
+        let root = tree
+            .nodes
+            .iter()
+            .find(|node| node.group_id == "root")
+            .expect("root node");
+        let child = tree
+            .nodes
+            .iter()
+            .find(|node| node.group_id == "child")
+            .expect("child node");
+
+        assert_eq!(root.typing_count, 3);
+        assert_eq!(child.typing_count, 2);
     }
 
     fn joined(active_pubkey: &str) -> JoinedGroupsSnapshot {
@@ -657,6 +765,7 @@ mod tests {
         let tree = derive_group_tree(
             &discovered(),
             &GroupTreeMessageState::default(),
+            &GroupTreePresenceState::default(),
             &membership,
         );
 

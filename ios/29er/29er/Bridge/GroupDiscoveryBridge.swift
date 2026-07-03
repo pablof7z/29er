@@ -175,6 +175,14 @@ extension KernelHandle {
         )
     }
 
+    func postTyping(group: GroupId, isTyping: Bool) -> Bool {
+        let payload: [String: Any] = [
+            "group": group.jsonObject,
+            "is_typing": isTyping,
+        ]
+        return dispatchNip29("app.29er.typing", payload: payload, label: "postTyping")
+    }
+
     func reactToMessage(
         group: GroupId,
         eventId: String,
@@ -230,6 +238,11 @@ extension KernelModel {
             content: trimmed,
             mentionPubkeys: mentionPubkeys
         )
+    }
+
+    func sendTyping(groupId: String, isTyping: Bool) {
+        guard let group = nip29GroupId(for: groupId) else { return }
+        _ = kernel.postTyping(group: group, isTyping: isTyping)
     }
 
     func reactToGroupMessage(groupId: String, eventId: String, eventAuthorPubkey: String) {

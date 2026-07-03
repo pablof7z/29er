@@ -135,6 +135,15 @@ impl RoomListComponent {
             }
         }
 
+        if it.typing_count > 0 {
+            let label = if it.typing_count == 1 {
+                " typing".to_string()
+            } else {
+                format!(" {} typing", it.typing_count)
+            };
+            spans.push(Span::styled(label, Style::default().fg(ui::GREEN)));
+        }
+
         // Optional preview + timestamp, separated by em-dash
         let has_extra = it.last_preview.is_some() || it.last_timestamp.is_some();
         if has_extra {
@@ -307,6 +316,7 @@ mod tests {
             name: "A".into(),
             depth: 0,
             unread: 0,
+            typing_count: 0,
             member_count: 1,
             admin_count: 0,
             is_branch: false,
@@ -424,6 +434,7 @@ mod tests {
                 name: "Root".into(),
                 depth: 0,
                 unread: 0,
+                typing_count: 0,
                 member_count: 1,
                 admin_count: 0,
                 is_branch: true,
@@ -437,6 +448,7 @@ mod tests {
                 name: "Child".into(),
                 depth: 1,
                 unread: 0,
+                typing_count: 0,
                 member_count: 1,
                 admin_count: 0,
                 is_branch: false,
@@ -459,6 +471,7 @@ mod tests {
                 name: "Root".into(),
                 depth: 0,
                 unread: 0,
+                typing_count: 0,
                 member_count: 1,
                 admin_count: 0,
                 is_branch: true,
@@ -472,6 +485,7 @@ mod tests {
                 name: "Child".into(),
                 depth: 1,
                 unread: 0,
+                typing_count: 0,
                 member_count: 1,
                 admin_count: 0,
                 is_branch: false,

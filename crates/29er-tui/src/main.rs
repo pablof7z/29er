@@ -282,6 +282,7 @@ fn apply(action: Action, app: &mut App) {
         Action::ScrollDown => app.scroll_messages(-1),
         // chat / outbox
         Action::SendMessage { content, mentions } => app.send_message(content, mentions),
+        Action::Typing { is_typing } => app.publish_typing(is_typing),
         Action::AttachMedia {
             file_path,
             content_type,

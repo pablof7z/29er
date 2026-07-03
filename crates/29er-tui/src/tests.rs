@@ -65,6 +65,7 @@ fn fake_channel(id: &str) -> ChannelListItem {
         name: id.to_string(),
         depth: 0,
         unread: 0,
+        typing_count: 0,
         member_count: 5,
         admin_count: 1,
         is_branch: false,

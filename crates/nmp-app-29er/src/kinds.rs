@@ -10,3 +10,10 @@ pub const KIND_CHAT_MESSAGE: u32 = 9;
 /// NIP-29 thread/discussion root (deleted from `nmp_nip29::kinds` in the
 /// kind-blind-transport migration — same rationale as `KIND_CHAT_MESSAGE`).
 pub const KIND_DISCUSSION_OR_ARTIFACT: u32 = 11;
+/// 29er-owned ephemeral typing indicator kind.
+///
+/// `nmp-chat` owns the reusable `["typing", "started"|"stopped"]` tag
+/// contract and projection semantics. 29er owns this app-level kind number and
+/// publishes it through the generic NIP-29 group-event doorway, keeping
+/// `nmp-nip29` kind-blind.
+pub const KIND_TYPING_INDICATOR: u32 = 24_010;

@@ -22,6 +22,7 @@ struct GroupTreeNode: Identifiable, Equatable {
     let lastMessagePreview: String?
     let lastMessageCreatedAt: UInt64
     let unreadCount: UInt32
+    let typingCount: UInt32
 
     var id: String { groupId }
     var displayName: String { name?.isEmpty == false ? name! : groupId }

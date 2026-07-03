@@ -22,6 +22,7 @@ nmp-core = { workspace = true }
 nmp-native-runtime = { workspace = true }
 nmp-uniffi-support = { workspace = true }
 nmp-planner = { workspace = true }
+nmp-reactions = { workspace = true }
 serde_json = { workspace = true }
 zeroize = { workspace = true }
 ratatui = "0.30"

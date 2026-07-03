@@ -133,6 +133,9 @@ impl Composer {
             .find(|i| i.can_retry)
             .map(|i| i.correlation_id.clone())
     }
+    fn is_typing(&self) -> bool {
+        !self.textarea.lines().join("\n").trim().is_empty()
+    }
     fn outbox_lines(&self) -> Vec<Line<'static>> {
         self.outbox
             .iter()
@@ -258,7 +261,7 @@ impl Component for Composer {
                             self.accept_mention(&m);
                         }
                     }
-                    return None;
+                    return Some(Action::Typing { is_typing: true });
                 }
                 KeyCode::Esc => {
                     self.mention_open = false;
@@ -271,7 +274,9 @@ impl Component for Composer {
             KeyCode::Enter if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 self.textarea.insert_newline();
                 self.refresh_mention();
-                None
+                Some(Action::Typing {
+                    is_typing: self.is_typing(),
+                })
             }
             KeyCode::Enter => {
                 let text = self.textarea.lines().join("\n").trim().to_string();
@@ -289,12 +294,16 @@ impl Component for Composer {
             KeyCode::Char(c) => {
                 self.textarea.insert_char(c);
                 self.refresh_mention();
-                None
+                Some(Action::Typing {
+                    is_typing: self.is_typing(),
+                })
             }
             KeyCode::Backspace => {
                 self.textarea.delete_char();
                 self.refresh_mention();
-                None
+                Some(Action::Typing {
+                    is_typing: self.is_typing(),
+                })
             }
             KeyCode::Left => {
                 self.textarea.move_cursor(CursorMove::Back);

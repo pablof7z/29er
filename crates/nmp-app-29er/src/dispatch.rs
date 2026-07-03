@@ -15,13 +15,17 @@ use nmp_native_runtime::NmpApp;
 use nmp_nip29::group_id::GroupId;
 
 use crate::app::DispatchOutcome;
-use crate::kinds::KIND_CHAT_MESSAGE;
+use crate::kinds::{KIND_CHAT_MESSAGE, KIND_TYPING_INDICATOR};
 
 /// 29er's app-level chat-send doorway namespace. NOT a NIP-29 action
 /// namespace — it takes raw `{group, content, mention_pubkeys}`, is composed
 /// by [`encode_chat_send_payload`], and re-emitted under
 /// [`PUBLISH_GROUP_EVENT_NAMESPACE`].
 const CHAT_SEND_NAMESPACE: &str = "nmp.nip29.post_chat_message";
+/// 29er's app-owned typing doorway. It re-emits a caller-owned ephemeral kind
+/// through NIP-29's generic group-event publisher with the shared `nmp-chat`
+/// typing status tag.
+const TYPING_NAMESPACE: &str = "app.29er.typing";
 /// 29er's app-level child-channel doorway. The shell supplies only the parent
 /// group and display fields; this Rust app crate owns the child local-id policy
 /// and re-emits the typed NIP-29 create-group action.
@@ -46,6 +50,13 @@ pub fn dispatch_nip29_action(app: &NmpApp, namespace: &str, body_json: &str) -> 
             Some(p) => (PUBLISH_GROUP_EVENT_NAMESPACE.to_string(), p),
             None => {
                 return DispatchOutcome::error("could not compose chat message from body");
+            }
+        }
+    } else if namespace == TYPING_NAMESPACE {
+        match encode_typing_payload(body_json) {
+            Some(p) => (PUBLISH_GROUP_EVENT_NAMESPACE.to_string(), p),
+            None => {
+                return DispatchOutcome::error("could not compose typing event from body");
             }
         }
     } else if namespace == CREATE_CHILD_GROUP_NAMESPACE {
@@ -102,6 +113,13 @@ struct ChatSendBody {
 }
 
 #[derive(serde::Deserialize)]
+struct TypingBody {
+    group: GroupId,
+    #[serde(default)]
+    is_typing: bool,
+}
+
+#[derive(serde::Deserialize)]
 struct CreateChildGroupBody {
     parent: GroupId,
     #[serde(default)]
@@ -128,6 +146,17 @@ fn encode_chat_send_payload(json: &str) -> Option<Vec<u8>> {
         kind: KIND_CHAT_MESSAGE,
         content: composed.content,
         tags: composed.tags,
+    };
+    Some(input.encode())
+}
+
+fn encode_typing_payload(json: &str) -> Option<Vec<u8>> {
+    let body: TypingBody = serde_json::from_str(json).ok()?;
+    let input = nmp_nip29::action::PublishGroupEventInput {
+        group: body.group,
+        kind: KIND_TYPING_INDICATOR,
+        content: String::new(),
+        tags: vec![nmp_chat::chat_typing_status_tag(body.is_typing)],
     };
     Some(input.encode())
 }

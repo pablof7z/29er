@@ -309,6 +309,12 @@ struct GroupRowLabel: View {
     }
 
     private var previewText: String {
+        if node.typingCount == 1 {
+            return "typing..."
+        }
+        if node.typingCount > 1 {
+            return "\(node.typingCount) typing..."
+        }
         guard let preview = node.lastMessagePreview?.trimmingCharacters(in: .whitespacesAndNewlines),
               !preview.isEmpty
         else {
@@ -789,6 +795,10 @@ struct GroupEventsView: View {
             .accessibilityIdentifier(canCompose ? "group-chat-registry-composer" : "group-chat-readonly-composer")
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
+            .onChange(of: draft) { _, value in
+                let isTyping = canCompose && !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                model.sendTyping(groupId: groupId, isTyping: isTyping)
+            }
         }
         .background(Color(.systemBackground))
         .overlay(alignment: .top) { Divider() }
@@ -845,6 +855,7 @@ struct GroupEventsView: View {
 
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         selectedMentionPubkeys.removeAll()
+        model.sendTyping(groupId: groupId, isTyping: false)
     }
 
     private func roomChromeSubtitle(_ node: GroupTreeNode) -> String {

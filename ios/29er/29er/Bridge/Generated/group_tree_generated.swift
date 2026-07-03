@@ -37,6 +37,7 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     case unreadCount = 32
     case isMember = 34
     case isAdmin = 36
+    case typingCount = 38
     var v: Int32 { Int32(self.rawValue) }
     var p: VOffset { self.rawValue }
   }
@@ -65,7 +66,8 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
   public var unreadCount: UInt32 { let o = _accessor.offset(VTOFFSET.unreadCount.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt32.self, at: o) }
   public var isMember: Bool { let o = _accessor.offset(VTOFFSET.isMember.v); return o == 0 ? false : _accessor.readBuffer(of: Bool.self, at: o) }
   public var isAdmin: Bool { let o = _accessor.offset(VTOFFSET.isAdmin.v); return o == 0 ? false : _accessor.readBuffer(of: Bool.self, at: o) }
-  public static func startGroupTreeNode(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 17) }
+  public var typingCount: UInt32 { let o = _accessor.offset(VTOFFSET.typingCount.v); return o == 0 ? 0 : _accessor.readBuffer(of: UInt32.self, at: o) }
+  public static func startGroupTreeNode(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 18) }
   public static func add(groupId: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: groupId, at: VTOFFSET.groupId.p) }
   public static func add(hostRelayUrl: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: hostRelayUrl, at: VTOFFSET.hostRelayUrl.p) }
   public static func add(name: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: name, at: VTOFFSET.name.p) }
@@ -88,6 +90,7 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
    at: VTOFFSET.isMember.p) }
   public static func add(isAdmin: Bool, _ fbb: inout FlatBufferBuilder) { fbb.add(element: isAdmin, def: false,
    at: VTOFFSET.isAdmin.p) }
+  public static func add(typingCount: UInt32, _ fbb: inout FlatBufferBuilder) { fbb.add(element: typingCount, def: 0, at: VTOFFSET.typingCount.p) }
   public static func endGroupTreeNode(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); fbb.require(table: end, fields: [4, 6]); return end }
   public static func createGroupTreeNode(
     _ fbb: inout FlatBufferBuilder,
@@ -107,7 +110,8 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     lastMessageCreatedAt: UInt64 = 0,
     unreadCount: UInt32 = 0,
     isMember: Bool = false,
-    isAdmin: Bool = false
+    isAdmin: Bool = false,
+    typingCount: UInt32 = 0
   ) -> Offset {
     let __start = nmp_app_29er_GroupTreeNode.startGroupTreeNode(&fbb)
     nmp_app_29er_GroupTreeNode.add(groupId: groupId, &fbb)
@@ -127,6 +131,7 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     nmp_app_29er_GroupTreeNode.add(unreadCount: unreadCount, &fbb)
     nmp_app_29er_GroupTreeNode.add(isMember: isMember, &fbb)
     nmp_app_29er_GroupTreeNode.add(isAdmin: isAdmin, &fbb)
+    nmp_app_29er_GroupTreeNode.add(typingCount: typingCount, &fbb)
     return nmp_app_29er_GroupTreeNode.endGroupTreeNode(&fbb, start: __start)
   }
 
@@ -149,6 +154,7 @@ public struct nmp_app_29er_GroupTreeNode: FlatBufferTable, FlatbuffersVectorInit
     try _v.visit(field: VTOFFSET.unreadCount.p, fieldName: "unreadCount", required: false, type: UInt32.self)
     try _v.visit(field: VTOFFSET.isMember.p, fieldName: "isMember", required: false, type: Bool.self)
     try _v.visit(field: VTOFFSET.isAdmin.p, fieldName: "isAdmin", required: false, type: Bool.self)
+    try _v.visit(field: VTOFFSET.typingCount.p, fieldName: "typingCount", required: false, type: UInt32.self)
     _v.finish()
   }
 }

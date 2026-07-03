@@ -396,7 +396,8 @@ enum TypedProjectionGlue {
             lastMessagePubkey: row.lastMessagePubkey,
             lastMessagePreview: row.lastMessagePreview,
             lastMessageCreatedAt: row.lastMessageCreatedAt,
-            unreadCount: row.unreadCount
+            unreadCount: row.unreadCount,
+            typingCount: row.typingCount
         )
     }
 

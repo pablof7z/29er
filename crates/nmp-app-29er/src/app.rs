@@ -290,6 +290,10 @@ impl TwentyNinerApp {
         &self.inner
     }
 
+    pub(crate) fn app_arc(&self) -> Arc<NmpApp> {
+        Arc::clone(&self.inner)
+    }
+
     /// NIP-29 group-read session state. Crate-internal accessor used by
     /// [`crate::group_sessions`]'s `#[uniffi::export]` methods.
     pub(crate) fn sessions(&self) -> &crate::group_sessions::GroupSessions {

@@ -218,6 +218,7 @@ pub fn register_relay_selector_runtime(
         consumer_id: "29er.relay_selector.kind30002".to_string(),
         scope: 0, // ActiveAccount — subscription is re-routed on account switch
         relay_pin: None,
+        is_indexer_discovery: false,
         replay_shapes,
         replay_limit: 20,
     });
