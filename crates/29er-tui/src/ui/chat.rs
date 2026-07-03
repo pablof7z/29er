@@ -1,47 +1,28 @@
-//! Right pane message history — Slack-style grouped layout:
-//! consecutive messages from one author collapse under a single header
-//! (avatar dot + name + time), with a left gutter, day dividers between
-//! calendar days, a read-marker separator, auto-scroll, and a new-message
-//! indicator. Message bodies render through the NMP content renderer
-//! (`components::nostr_content::NostrContentView`) so mentions, links,
-//! hashtags, media, markdown, and embedded Nostr entities render properly —
-//! no shell-side content parsing. Uses tui-scrollview for scroll state.
-use std::collections::{BTreeMap, HashMap};
+//! Right pane message history. The pane owns TUI-only scroll state, day
+//! dividers, read-marker placement, and the new-message indicator; each
+//! projected chat message is rendered through the NMP registry chat row.
+use std::collections::HashMap;
 
 use crate::actions::Action;
 use crate::app::{Focus, RelayState, TuiProfile, TuiSnapshot};
-use crate::components::nostr_content::{
-    content_kind_registry::NostrKindRegistry,
-    content_render_data::{ContentProfileRenderData, ContentRenderData},
-    content_tree_from_nfct_bytes,
-    content_tree_wire::ContentTreeWire,
-    nostr_content_view::NostrContentView,
+use crate::components::nostr_chat::{
+    nostr_group_chat_wire::NostrGroupChatMessageWire, nostr_group_message_row::NostrGroupMessageRow,
 };
+use crate::components::nostr_user::profile_wire::ProfileWire;
 use crate::ui;
 use crate::Component;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 use nmp_app_29er::group_chat::GroupChatMessage;
-use nmp_content::embed_projection::EmbeddedEventEnvelope;
 use ratatui::layout::{Alignment, Rect, Size};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 use tui_scrollview::{ScrollView, ScrollViewState};
 
-/// Messages from the same author within this many seconds collapse into one
-/// Slack-style group (single header). A larger gap starts a fresh group.
-const GROUP_GAP_SECS: u64 = 7 * 60;
-/// Left indent (columns) for message bodies, aligning them under the author
-/// name and leaving room for the avatar gutter on the header line.
-const GUTTER: u16 = 2;
-
 pub struct ChatComponent {
     messages: Vec<GroupChatMessage>,
     profiles: HashMap<String, TuiProfile>,
-    event_envelopes: BTreeMap<String, EmbeddedEventEnvelope>,
-    kind_registry: NostrKindRegistry,
-    render_data: ContentRenderData,
     my_pubkey: Option<String>,
     title: String,
     has_room: bool,
@@ -77,14 +58,8 @@ impl Default for ChatComponent {
 enum Row<'a> {
     /// Centered day divider (`── Today ──`).
     Day(String),
-    /// Group header: avatar dot + author name + time.
-    Header {
-        name: String,
-        color: Color,
-        time: String,
-    },
-    /// A message body, rendered via the NMP content renderer.
-    Body(&'a GroupChatMessage),
+    /// A Rust-projected message rendered through the registry chat row.
+    Message(&'a GroupChatMessage),
     /// The "you've read to here" separator.
     ReadMarker,
     /// A single blank spacer row between groups / dividers.
@@ -96,9 +71,6 @@ impl ChatComponent {
         Self {
             messages: Vec::new(),
             profiles: HashMap::new(),
-            event_envelopes: BTreeMap::new(),
-            kind_registry: NostrKindRegistry::make_default(),
-            render_data: ContentRenderData::default(),
             my_pubkey: None,
             title: " chat ".to_string(),
             has_room: false,
@@ -141,16 +113,6 @@ impl ChatComponent {
         self.messages = s.selected_messages.clone();
 
         self.profiles = s.profiles.clone();
-        self.event_envelopes = s.event_envelopes.clone();
-        self.render_data =
-            ContentRenderData::from_profiles(self.profiles.values().map(|profile| {
-                ContentProfileRenderData {
-                    pubkey: profile.pubkey.clone(),
-                    display_name: profile.display_name.clone(),
-                    npub: profile.npub.clone(),
-                    picture_url: profile.picture_url.clone(),
-                }
-            }));
         self.my_pubkey = s.my_pubkey.clone();
         self.last_read_message_id = s.last_read_message_id.clone();
         self.focused = matches!(s.focus, Focus::Chat | Focus::Composer);
@@ -170,48 +132,56 @@ impl ChatComponent {
             .unwrap_or(false)
     }
 
-    fn author_name(&self, pubkey: &str) -> String {
-        if self.is_own(pubkey) {
-            return "you".to_string();
-        }
-        self.profiles
-            .get(pubkey)
-            .and_then(|profile| profile.display_name.as_deref())
-            .filter(|name| !name.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| ui::short_pubkey(pubkey))
-    }
-
-    /// Estimate visual rows for raw fallback text (when tokenization failed).
-    fn raw_line_count(content: &str, width: u16) -> u16 {
-        if width == 0 {
-            return 1;
-        }
-        let chars = content.chars().count() as u16;
-        chars.div_ceil(width).max(1)
-    }
-
-    /// Rendered height of a message body at `body_width` — via the content
-    /// renderer when a tree is available, else the raw-text estimate.
-    fn body_height(&self, m: &GroupChatMessage, body_width: u16) -> u16 {
-        match message_tree(m) {
-            Some(tree) => NostrContentView::new(&tree)
-                .render_data(Some(&self.render_data))
-                .kind_registry(Some(&self.kind_registry))
-                .embedded_events(Some(&self.event_envelopes))
-                .preferred_height(body_width as usize),
-            None => Self::raw_line_count(&m.raw_content, body_width),
+    fn message_wire(&self, message: &GroupChatMessage) -> NostrGroupChatMessageWire {
+        NostrGroupChatMessageWire {
+            id: message.id.clone(),
+            author_pubkey: message.pubkey.clone(),
+            content: if message.copy_text.is_empty() {
+                message.raw_content.clone()
+            } else {
+                message.copy_text.clone()
+            },
+            created_at_label: ui::clock_time(message.created_at),
+            reply_preview: None,
+            reactions: Vec::new(),
+            is_outgoing: self.is_own(&message.pubkey),
         }
     }
 
-    /// Build the ordered row layout (oldest → newest) with Slack-style grouping
-    /// and day dividers. Borrows messages immutably; trees are looked up by id
-    /// at render time.
+    fn profile_wire(&self, pubkey: &str) -> ProfileWire {
+        match self.profiles.get(pubkey) {
+            Some(profile) => {
+                let npub = profile
+                    .npub
+                    .clone()
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or_else(|| pubkey.to_string());
+                ProfileWire {
+                    pubkey: pubkey.to_string(),
+                    display_name: profile.display_name.clone(),
+                    about: None,
+                    picture_url: profile.picture_url.clone(),
+                    nip05: None,
+                    npub_short: ui::short_pubkey(&npub),
+                    npub,
+                }
+            }
+            None => ProfileWire {
+                pubkey: pubkey.to_string(),
+                display_name: None,
+                about: None,
+                picture_url: None,
+                nip05: None,
+                npub: pubkey.to_string(),
+                npub_short: ui::short_pubkey(pubkey),
+            },
+        }
+    }
+
+    /// Build the ordered row layout (oldest → newest) with day dividers.
     fn build_rows<'a>(&self, msgs: &[&'a GroupChatMessage]) -> Vec<Row<'a>> {
         let mut rows: Vec<Row> = Vec::new();
-        let mut prev_author: Option<&str> = None;
         let mut prev_day: Option<i64> = None;
-        let mut prev_ts: u64 = 0;
 
         for m in msgs {
             let day = ui::day_index(m.created_at);
@@ -221,43 +191,31 @@ impl ChatComponent {
                     rows.push(Row::Gap);
                 }
                 rows.push(Row::Day(ui::day_label(m.created_at)));
-                prev_author = None; // always re-show the header after a divider
+            } else if !rows.is_empty() {
+                rows.push(Row::Gap);
             }
 
-            let same_author = prev_author == Some(m.pubkey.as_str());
-            let close_in_time = m.created_at.saturating_sub(prev_ts) <= GROUP_GAP_SECS;
-            if !(same_author && close_in_time) {
-                if !new_day && !rows.is_empty() {
-                    rows.push(Row::Gap);
-                }
-                rows.push(Row::Header {
-                    name: self.author_name(&m.pubkey),
-                    color: if self.is_own(&m.pubkey) {
-                        ui::GREEN
-                    } else {
-                        ui::author_color(&m.pubkey)
-                    },
-                    time: ui::clock_time(m.created_at),
-                });
-            }
-
-            rows.push(Row::Body(m));
+            rows.push(Row::Message(m));
 
             if self.last_read_message_id.as_deref() == Some(m.id.as_str()) {
                 rows.push(Row::ReadMarker);
             }
 
-            prev_author = Some(m.pubkey.as_str());
             prev_day = Some(day);
-            prev_ts = m.created_at;
         }
         rows
     }
 
     fn row_height(&self, row: &Row, content_width: u16) -> u16 {
         match row {
-            Row::Day(_) | Row::Header { .. } | Row::ReadMarker | Row::Gap => 1,
-            Row::Body(m) => self.body_height(m, content_width.saturating_sub(GUTTER).max(1)),
+            Row::Day(_) | Row::ReadMarker | Row::Gap => 1,
+            Row::Message(message) => {
+                let wire = self.message_wire(message);
+                let profile = self.profile_wire(&message.pubkey);
+                NostrGroupMessageRow::new(&wire)
+                    .author_profile(Some(&profile))
+                    .preferred_height(content_width)
+            }
         }
     }
 
@@ -271,18 +229,6 @@ impl ChatComponent {
                 .alignment(Alignment::Center);
                 sv.render_widget(Paragraph::new(line), Rect::new(0, y, content_width, 1));
             }
-            Row::Header { name, color, time } => {
-                let header = Line::from(vec![
-                    Span::styled("\u{25cf} ", Style::default().fg(*color)),
-                    Span::styled(
-                        name.clone(),
-                        Style::default().fg(*color).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled(time.clone(), Style::default().fg(ui::OVERLAY0)),
-                ]);
-                sv.render_widget(Paragraph::new(header), Rect::new(0, y, content_width, 1));
-            }
             Row::ReadMarker => {
                 let sep = Paragraph::new(Line::from(Span::styled(
                     "\u{2500}\u{2500} You've read to here \u{2500}\u{2500}",
@@ -292,38 +238,21 @@ impl ChatComponent {
                 sv.render_widget(sep, Rect::new(0, y, content_width, 1));
             }
             Row::Gap => {}
-            Row::Body(m) => {
-                let body_w = content_width.saturating_sub(GUTTER).max(1);
-                let h = self.body_height(m, body_w);
-                let rect = Rect::new(GUTTER, y, body_w, h);
-                match message_tree(m) {
-                    Some(tree) => {
-                        sv.render_widget(
-                            NostrContentView::new(&tree)
-                                .render_data(Some(&self.render_data))
-                                .kind_registry(Some(&self.kind_registry))
-                                .embedded_events(Some(&self.event_envelopes)),
-                            rect,
-                        );
-                    }
-                    None => {
-                        // Projection decode fell through — render the raw content so
-                        // no message is ever dropped.
-                        sv.render_widget(
-                            Paragraph::new(m.raw_content.clone())
-                                .style(Style::default().fg(ui::TEXT))
-                                .wrap(Wrap { trim: false }),
-                            rect,
-                        );
-                    }
-                }
+            Row::Message(message) => {
+                let wire = self.message_wire(message);
+                let profile = self.profile_wire(&message.pubkey);
+                let h = NostrGroupMessageRow::new(&wire)
+                    .author_profile(Some(&profile))
+                    .preferred_height(content_width);
+                sv.render_widget(
+                    NostrGroupMessageRow::new(&wire)
+                        .author_profile(Some(&profile))
+                        .max_width(content_width),
+                    Rect::new(0, y, content_width, h),
+                );
             }
         }
     }
-}
-
-fn message_tree(message: &GroupChatMessage) -> Option<ContentTreeWire> {
-    content_tree_from_nfct_bytes(&message.content_tree_bytes)
 }
 
 impl Component for ChatComponent {
@@ -496,35 +425,6 @@ mod tests {
         }
     }
 
-    fn event_ref_msg(pk: &str, ts: u64, primary_id: &str, uri: &str) -> GroupChatMessage {
-        let tree = nmp_content::ContentTreeWire {
-            nodes: vec![nmp_content::WireNode::EventRef {
-                uri: nmp_content::WireNostrUri {
-                    uri: uri.to_string(),
-                    kind: nmp_content::WireNostrUriKind::Event,
-                    primary_id: primary_id.to_string(),
-                    relays: Vec::new(),
-                    author: None,
-                    event_kind: Some(1),
-                },
-            }],
-            roots: vec![0],
-            mode: nmp_content::RenderMode::Auto,
-        };
-        GroupChatMessage {
-            id: format!("{pk}{ts}"),
-            pubkey: pk.to_string(),
-            raw_content: uri.to_string(),
-            copy_text: uri.to_string(),
-            created_at: ts,
-            kind: 9,
-            content_tree_bytes: nmp_content::wire::encode_content_tree(&tree),
-            mention_pubkeys: Vec::new(),
-            event_ref_uris: vec![uri.to_string()],
-            event_ref_primary_ids: vec![primary_id.to_string()],
-        }
-    }
-
     fn render(c: &mut ChatComponent, w: u16, h: u16) -> String {
         let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
         t.draw(|f| c.draw(f, f.area())).unwrap();
@@ -567,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn consecutive_same_author_messages_share_one_header() {
+    fn consecutive_same_author_messages_render_registry_rows() {
         let mut c = ChatComponent::new();
         c.update(&snap(
             vec![
@@ -579,17 +479,11 @@ mod tests {
             Some("wss://h".into()),
         ));
         let out = render(&mut c, 50, 20);
-        // One avatar dot (one header) for the whole run, all three bodies shown.
-        assert_eq!(
-            out.matches('\u{25cf}').count(),
-            1,
-            "expected a single grouped header"
-        );
         assert!(out.contains("first") && out.contains("second") && out.contains("third"));
     }
 
     #[test]
-    fn author_change_starts_new_group() {
+    fn author_change_renders_profile_fallbacks() {
         let mut c = ChatComponent::new();
         c.update(&snap(
             vec![msg("aaaa", 100, "hi"), msg("bbbb", 130, "yo")],
@@ -597,7 +491,10 @@ mod tests {
             Some("wss://h".into()),
         ));
         let out = render(&mut c, 50, 20);
-        assert_eq!(out.matches('\u{25cf}').count(), 2, "expected two headers");
+        assert!(out.contains("aaaa"), "{out}");
+        assert!(out.contains("bbbb"), "{out}");
+        assert!(out.contains("hi"), "{out}");
+        assert!(out.contains("yo"), "{out}");
     }
 
     #[test]
@@ -637,42 +534,14 @@ mod tests {
     }
 
     #[test]
-    fn resolved_event_ref_renders_embedded_note_body() {
-        use nmp_content::embed_projection::{
-            EmbedKindProjection, EmbeddedEventEnvelope, RenderContextWire, ShortNoteProjection,
-        };
-
-        let primary_id = "c".repeat(64);
-        let uri = "nostr:note1fixture";
-        let note_tree =
-            nmp_content::tokenize_with_kind("embedded body", &[], nmp_content::RenderMode::Auto, 1)
-                .to_wire();
-        let envelope = EmbeddedEventEnvelope {
-            uri: uri.to_string(),
-            primary_id: primary_id.clone(),
-            render_context: RenderContextWire::from(&nmp_content::RenderContext::new()),
-            projection: EmbedKindProjection::ShortNote(ShortNoteProjection {
-                id: primary_id.clone(),
-                author_pubkey: "a".repeat(64),
-                created_at: 0,
-                content_tree: note_tree,
-                media_urls: Vec::new(),
-            }),
-            collapsed: false,
-            collapse_reason: None,
-        };
-        let mut snapshot = snap(
-            vec![event_ref_msg("pk1", 1, &primary_id, uri)],
-            true,
-            Some("wss://h".into()),
-        );
-        snapshot.event_envelopes.insert(primary_id, envelope);
-
+    fn registry_row_uses_projected_copy_text() {
+        let mut message = msg("pk1", 1, "raw body");
+        message.copy_text = "projected copy".to_string();
         let mut c = ChatComponent::new();
-        c.update(&snapshot);
+        c.update(&snap(vec![message], true, Some("wss://h".into())));
         let out = render(&mut c, 80, 16);
-        assert!(out.contains("embedded body"), "{out}");
-        assert!(!out.contains("quote cccccccc"), "{out}");
+        assert!(out.contains("projected copy"), "{out}");
+        assert!(!out.contains("raw body"), "{out}");
     }
 
     fn snap(
