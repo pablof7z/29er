@@ -300,6 +300,12 @@ fn apply(action: Action, app: &mut App) {
             role,
         } => app.put_user(group, target_pubkey, role),
         Action::CreateChild { parent, name } => app.create_child(parent, name),
+        Action::EditMetadata {
+            group,
+            name,
+            about,
+            picture,
+        } => app.edit_metadata(group, name, about, picture),
         Action::MoveChannel { group, parent } => app.move_channel(group, parent),
         // forms — open_form handles palette collapse + focus stack internally.
         Action::OpenForm(f) => app.open_form(f),

@@ -140,6 +140,26 @@ extension KernelHandle {
         return dispatchNip29("nmp.nip29.set_parent", payload: payload, label: "setParent")
     }
 
+    func editGroupMetadata(
+        group: GroupId,
+        name: String? = nil,
+        about: String? = nil,
+        picture: String? = nil
+    ) -> Bool {
+        var payload: [String: Any] = ["group": group.jsonObject]
+        if let name, !name.isEmpty {
+            payload["name"] = name
+        }
+        if let about, !about.isEmpty {
+            payload["about"] = about
+        }
+        if let picture, !picture.isEmpty {
+            payload["picture"] = picture
+        }
+        guard payload.count > 1 else { return false }
+        return dispatchNip29("nmp.nip29.edit_metadata", payload: payload, label: "editGroupMetadata")
+    }
+
     func postChatMessage(group: GroupId, content: String, mentionPubkeys: [String] = []) -> Bool {
         var payload: [String: Any] = [
             "group": group.jsonObject,
@@ -277,6 +297,21 @@ extension KernelModel {
     func setParent(groupId: String, parent: String?) -> Bool {
         guard let group = nip29GroupId(for: groupId) else { return false }
         return kernel.setParent(group: group, parent: parent)
+    }
+
+    func editGroupMetadata(
+        groupId: String,
+        name: String? = nil,
+        about: String? = nil,
+        picture: String? = nil
+    ) -> Bool {
+        guard let group = nip29GroupId(for: groupId) else { return false }
+        return kernel.editGroupMetadata(
+            group: group,
+            name: name,
+            about: about,
+            picture: picture
+        )
     }
 
     func nip29GroupId(for groupId: String) -> GroupId? {
