@@ -3,7 +3,7 @@
 //! The single Rust entry point that turns a fresh, unstarted NMP app host into
 //! a fully-composed 29er app: the substrate floor (routing, NIP-65 mailbox
 //! cache, coverage gate, blocked-relay handling — everything `nmp-substrate`
-//! owns) and the NIP-29 protocol installer.
+//! owns), the Blossom upload action, and the NIP-29 protocol installer.
 //!
 //! It is shared by BOTH 29er shells:
 //! * [`crate::TwentyNinerApp`] (the UniFFI facade) calls it on its own,
@@ -25,7 +25,7 @@
 //! pin in this workspace's `Cargo.toml`). That bundle also contradicted 29er's
 //! own stated S01 scope — this crate's module docs have always said 29er
 //! "carries no DM / Marmot / Wallet / Embed projections in S01" —
-//! so composing only the substrate floor + NIP-29 here is both the only
+//! so composing only the substrate floor + explicit app-selected protocols here is both the only
 //! available option and the architecturally correct one: 29er now declares
 //! exactly what it uses instead of inheriting an all-in bundle it never
 //! wanted. A future PR can add explicit, named feature installs (e.g.
@@ -48,9 +48,19 @@ use nmp_core::substrate::AppHost;
 ///    trimming, NIP-77 interceptors, and native NIP-11 relay metadata. Every
 ///    NMP app/runtime root needs this; it carries no product-specific
 ///    features (no DMs, no follows, no zaps — see the module doc above).
-/// 2. The NIP-29 protocol installer (actions, input scopes, and search scopes).
+/// 2. The Blossom BUD-02 upload action (`nmp.blossom.upload`) so attachments
+///    can enter as typed async actions and report completion through
+///    `action_results`.
+/// 3. The NIP-29 protocol installer (actions, input scopes, and search scopes).
 pub fn compose_29er_runtime(app: &mut impl AppHost) {
     let _substrate_handles = nmp_substrate::install(app, nmp_substrate::SubstrateConfig::default());
+
+    let blossom_registered = nmp_blossom::register(app, nmp_blossom::Config::default());
+    debug_assert!(
+        blossom_registered.is_ok(),
+        "nmp-blossom register reported a namespace collision: {blossom_registered:?}"
+    );
+    let _ = blossom_registered;
 
     // 29er-specific: install the NIP-29 protocol surface. Lives in this crate
     // (not NMP) because NIP-29 is not part of the canonical substrate floor

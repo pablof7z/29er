@@ -148,6 +148,11 @@ impl Membership {
                 vec![String::new(), String::new(), String::new()]
             }
             Some(FormKind::PutUser(_)) => vec![String::new(), String::new()],
+            Some(FormKind::AttachMedia(_)) => vec![
+                String::new(),
+                String::new(),
+                nmp_app_29er::config::default_blossom_upload_servers().join(", "),
+            ],
             Some(FormKind::ShowMembers(_)) => Vec::new(),
             Some(_) => vec![String::new()],
             None => Vec::new(),
@@ -178,6 +183,14 @@ impl Membership {
             Some(FormKind::MoveChannel(_)) => {
                 ("Move channel", vec!["new parent id (empty = root)"])
             }
+            Some(FormKind::AttachMedia(_)) => (
+                "Attach media",
+                vec![
+                    "local file path",
+                    "content type (optional)",
+                    "Blossom server URLs",
+                ],
+            ),
             Some(FormKind::ShowMembers(_)) => ("Members", vec![]),
             None => ("", vec![]),
         }
@@ -252,6 +265,29 @@ impl Membership {
                 group: g.clone(),
                 parent: if f0.is_empty() { None } else { Some(f0) },
             }),
+            Some(FormKind::AttachMedia(_)) => {
+                if f0.is_empty() {
+                    return None;
+                }
+                let content_type = self
+                    .fields
+                    .get(1)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+                let servers = self
+                    .fields
+                    .get(2)
+                    .map(|s| parse_server_list(s))
+                    .unwrap_or_default();
+                if servers.is_empty() {
+                    return None;
+                }
+                Some(Action::AttachMedia {
+                    file_path: f0,
+                    content_type,
+                    servers,
+                })
+            }
             Some(FormKind::ShowMembers(_)) => None,
             _ => None,
         }
@@ -313,6 +349,15 @@ impl Membership {
         };
         f.render_widget(List::new(items).block(block), modal);
     }
+}
+
+fn parse_server_list(input: &str) -> Vec<String> {
+    input
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .map(str::trim)
+        .filter(|server| !server.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 impl Component for Membership {
@@ -471,6 +516,35 @@ mod tests {
                 assert_eq!(name.as_deref(), Some("Renamed Room"));
                 assert_eq!(about.as_deref(), Some("Updated description"));
                 assert_eq!(picture.as_deref(), Some("https://example.com/room.png"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn attach_media_form_emits_path_mime_and_servers() {
+        let mut m = Membership::new();
+        m.form = Some(FormKind::AttachMedia(g()));
+        m.fields = vec![
+            "/tmp/photo.png".into(),
+            "image/png".into(),
+            "https://a.example, https://b.example".into(),
+        ];
+        match m.submit() {
+            Some(Action::AttachMedia {
+                file_path,
+                content_type,
+                servers,
+            }) => {
+                assert_eq!(file_path, "/tmp/photo.png");
+                assert_eq!(content_type.as_deref(), Some("image/png"));
+                assert_eq!(
+                    servers,
+                    vec![
+                        "https://a.example".to_string(),
+                        "https://b.example".to_string()
+                    ]
+                );
             }
             other => panic!("{other:?}"),
         }

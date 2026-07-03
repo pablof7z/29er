@@ -17,7 +17,10 @@ use nmp_app_29er::{compose_29er_runtime, dispatch_nip29_action, DispatchOutcome}
 use nmp_content::embed_projection::EmbeddedEventEnvelope;
 use nmp_content::wire::{decode_ref_event_envelopes, EMBED_SIDECAR_PROJECTION_KEY};
 use nmp_core::refs::{RefProfileStore, REFS_PROFILE_KEY};
-use nmp_core::typed_projections::{decode_publish_outbox, PUBLISH_OUTBOX_SCHEMA_ID};
+use nmp_core::typed_projections::{
+    decode_action_results, decode_publish_outbox, ACTION_RESULTS_SCHEMA_ID,
+    PUBLISH_OUTBOX_SCHEMA_ID,
+};
 use nmp_core::ObservedProjectionSink;
 use nmp_native_runtime::{
     new_app, FeedAdmission, FeedHandle, FeedItemProjection, FeedOrder, FeedParams, FeedScope,
@@ -129,6 +132,7 @@ pub enum FormKind {
     EditMetadata(GroupId),
     PutUser(GroupId),
     MoveChannel(GroupId),
+    AttachMedia(GroupId),
     ShowMembers(GroupId),
 }
 
@@ -191,6 +195,20 @@ pub struct NmpPublishOutboxItem {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NmpActionResultItem {
+    pub correlation_id: String,
+    pub status: String,
+    pub result: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct PendingMediaUpload {
+    group: GroupId,
+    file_path: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TuiProfile {
     pub pubkey: String,
     pub display_name: Option<String>,
@@ -244,6 +262,7 @@ pub struct ProjectionView {
     pub profiles: HashMap<String, TuiProfile>,
     pub event_envelopes: BTreeMap<String, EmbeddedEventEnvelope>,
     pub nmp_publish_outbox: Vec<NmpPublishOutboxItem>,
+    pub nmp_action_results: Vec<NmpActionResultItem>,
     pub is_admin: bool,
     pub my_pubkey: Option<String>,
     pub identity_state: IdentityState,
@@ -286,6 +305,7 @@ pub struct SharedProjections {
     pub profile_refs: Mutex<RefProfileStore>,
     pub event_envelopes: Mutex<BTreeMap<String, EmbeddedEventEnvelope>>,
     pub nmp_publish_outbox: Mutex<Vec<NmpPublishOutboxItem>>,
+    pub nmp_action_results: Mutex<Vec<NmpActionResultItem>>,
     /// Set on each pushed snapshot that returns non-empty data; drives relay-state indicator.
     pub last_update_at: Mutex<Option<std::time::Instant>>,
 }
@@ -376,6 +396,11 @@ impl SharedProjections {
             .lock()
             .map(|entries| entries.clone())
             .unwrap_or_default();
+        let nmp_action_results = self
+            .nmp_action_results
+            .lock()
+            .map(|entries| entries.clone())
+            .unwrap_or_default();
         let last_data_at = self.last_update_at.lock().ok().and_then(|ts| *ts);
         ProjectionView {
             channel_tree,
@@ -384,6 +409,7 @@ impl SharedProjections {
             profiles,
             event_envelopes,
             nmp_publish_outbox,
+            nmp_action_results,
             is_admin,
             my_pubkey: me,
             identity_state,
@@ -442,6 +468,8 @@ pub struct App {
     connecting_since: Option<std::time::Instant>,
     connected_at: Option<std::time::Instant>,
     relay_error: Option<String>,
+    pending_media_uploads: HashMap<String, PendingMediaUpload>,
+    processed_media_upload_results: HashSet<String>,
 }
 
 impl App {
@@ -459,6 +487,7 @@ impl App {
             profile_refs: Mutex::new(RefProfileStore::new()),
             event_envelopes: Mutex::new(BTreeMap::new()),
             nmp_publish_outbox: Mutex::new(Vec::new()),
+            nmp_action_results: Mutex::new(Vec::new()),
             last_update_at: Mutex::new(None),
         });
         Self {
@@ -492,6 +521,8 @@ impl App {
             connecting_since: None,
             connected_at: None,
             relay_error: None,
+            pending_media_uploads: HashMap::new(),
+            processed_media_upload_results: HashSet::new(),
         }
     }
 
@@ -682,6 +713,7 @@ impl App {
         } else if self.selected_index >= self.latest.channel_tree.len() {
             self.selected_index = self.latest.channel_tree.len() - 1;
         }
+        self.process_media_upload_results();
     }
 
     pub fn snapshot(&self) -> TuiSnapshot {
@@ -899,14 +931,74 @@ impl App {
             self.errors.push("No channel selected".to_string());
             return;
         };
+        let result = self.send_message_to_group(group, trimmed, mention_pubkeys);
+        self.record_dispatch_error(result);
+        self.refresh_projection();
+    }
+
+    fn send_message_to_group(
+        &mut self,
+        group: GroupId,
+        content: String,
+        mention_pubkeys: Vec<String>,
+    ) -> Option<DispatchOutcome> {
         let json = serde_json::json!({
             "group": group,
-            "content": trimmed,
+            "content": content,
             "mention_pubkeys": mention_pubkeys,
         })
         .to_string();
-        let result = self.dispatch_json("nmp.nip29.post_chat_message", &json);
-        self.record_dispatch_error(result);
+        self.dispatch_json("nmp.nip29.post_chat_message", &json)
+    }
+
+    pub fn attach_media(
+        &mut self,
+        file_path: String,
+        content_type: Option<String>,
+        servers: Vec<String>,
+    ) {
+        let file_path = file_path.trim().to_string();
+        if file_path.is_empty() {
+            self.errors
+                .push("Media attachment requires a local file path".to_string());
+            return;
+        }
+        let servers: Vec<String> = servers
+            .into_iter()
+            .map(|server| server.trim().to_string())
+            .filter(|server| !server.is_empty())
+            .collect();
+        if servers.is_empty() {
+            self.errors
+                .push("Media attachment requires at least one Blossom server".to_string());
+            return;
+        }
+        let Some(group) = self.selected_channel.clone() else {
+            self.errors.push("No channel selected".to_string());
+            return;
+        };
+        let body = serde_json::json!({
+            "file_path": file_path,
+            "content_type": content_type.as_deref().filter(|value| !value.trim().is_empty()),
+            "servers": servers,
+        })
+        .to_string();
+        let result = self.dispatch_json("nmp.blossom.upload", &body);
+        match result {
+            Some(outcome) => {
+                if let Some(error) = outcome.error {
+                    self.errors.push(error);
+                    return;
+                }
+                if let Some(correlation_id) = outcome.correlation_id {
+                    self.pending_media_uploads
+                        .insert(correlation_id, PendingMediaUpload { group, file_path });
+                    self.set_status_message("Uploading media...".to_string());
+                }
+            }
+            None => self.errors.push("dispatch failed".to_string()),
+        }
+        self.close_form();
         self.refresh_projection();
     }
 
@@ -1019,6 +1111,51 @@ impl App {
     fn dispatch_json(&mut self, namespace: &str, body: &str) -> Option<DispatchOutcome> {
         let app = self.app.as_ref()?;
         Some(dispatch_nip29_action(app, namespace, body))
+    }
+
+    fn process_media_upload_results(&mut self) {
+        let rows = self.latest.nmp_action_results.clone();
+        let mut posts = Vec::new();
+        for row in rows {
+            if !self.pending_media_uploads.contains_key(&row.correlation_id) {
+                continue;
+            }
+            if !matches!(row.status.as_str(), "published" | "failed") {
+                continue;
+            }
+            if !self
+                .processed_media_upload_results
+                .insert(row.correlation_id.clone())
+            {
+                continue;
+            }
+            let Some(pending) = self.pending_media_uploads.remove(&row.correlation_id) else {
+                continue;
+            };
+            if row.status == "failed" {
+                let error = row
+                    .error
+                    .unwrap_or_else(|| format!("Media upload failed for {}", pending.file_path));
+                self.errors.push(error);
+                continue;
+            }
+            let Some(result_json) = row.result else {
+                self.errors.push(format!(
+                    "Media upload completed without a result for {}",
+                    pending.file_path
+                ));
+                continue;
+            };
+            match nmp_app_29er::media_upload::blossom_upload_url_from_result(&result_json) {
+                Ok(url) => posts.push((pending.group, url)),
+                Err(error) => self.errors.push(error),
+            }
+        }
+        for (group, url) in posts {
+            let result = self.send_message_to_group(group, url, Vec::new());
+            self.record_dispatch_error(result);
+            self.set_status_message("Attached media sent".to_string());
+        }
     }
 
     /// Alt+A: cycle to the next channel that has a Mention-tier unread notification.
@@ -1316,6 +1453,27 @@ fn on_nmp_update(bridge: &ProjectionUpdateBridge, bytes: Vec<u8>) {
                             }
                         })
                         .collect();
+                }
+            }
+            if let Some(entry) = typed
+                .iter()
+                .find(|entry| entry.key == ACTION_RESULTS_SCHEMA_ID)
+            {
+                if let (Ok(model), Ok(mut store)) = (
+                    decode_action_results(&entry.payload),
+                    bridge.shared.nmp_action_results.lock(),
+                ) {
+                    store.extend(model.results.into_iter().map(|row| NmpActionResultItem {
+                        correlation_id: row.correlation_id,
+                        status: row.status,
+                        result: row.result,
+                        error: row.error,
+                    }));
+                    const MAX_ACTION_RESULTS: usize = 256;
+                    let overflow = store.len().saturating_sub(MAX_ACTION_RESULTS);
+                    if overflow > 0 {
+                        store.drain(0..overflow);
+                    }
                 }
             }
         }

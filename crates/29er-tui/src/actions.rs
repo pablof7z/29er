@@ -27,6 +27,11 @@ pub enum Action {
         content: String,
         mentions: Vec<String>,
     },
+    AttachMedia {
+        file_path: String,
+        content_type: Option<String>,
+        servers: Vec<String>,
+    },
     RetryOutbox(String),
     // palette
     OpenPalette,

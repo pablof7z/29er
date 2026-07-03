@@ -36,6 +36,7 @@ nmp-core = { workspace = true }
 nmp-native-runtime = { workspace = true }
 nmp-uniffi-support = { workspace = true }
 nmp-substrate = { workspace = true }
+nmp-blossom = { workspace = true }
 nmp-nip25 = { workspace = true }
 nmp-nip29 = { workspace = true }
 nmp-planner = { workspace = true }

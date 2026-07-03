@@ -27,6 +27,13 @@ pub const RELAY_BOOTSTRAP: &[TwentyNinerRelayBootstrapEntry] = &[TwentyNinerRela
     role: "both",
 }];
 
+/// 29er's operator-selected default Blossom upload server.
+///
+/// Native shells read this from Rust and may let users override it per upload.
+/// The value is not a framework default: it is 29er product policy, just like
+/// `NIP29_RELAY_URL`.
+pub const BLOSSOM_UPLOAD_SERVERS: &[&str] = &["https://blossom.primal.net"];
+
 /// The canonical 29er relay bootstrap set. Startup seeding iterates this; the
 /// kernel dedups against session-restored rows, so re-seeding an existing
 /// install is a no-op.
@@ -42,6 +49,11 @@ pub fn default_relay_bootstrap() -> &'static [TwentyNinerRelayBootstrapEntry] {
 #[must_use]
 pub fn public_group_relay_url() -> &'static str {
     NIP29_RELAY_URL
+}
+
+#[must_use]
+pub fn default_blossom_upload_servers() -> &'static [&'static str] {
+    BLOSSOM_UPLOAD_SERVERS
 }
 
 #[cfg(test)]
@@ -65,5 +77,15 @@ mod tests {
         assert!(default_relay_bootstrap()
             .iter()
             .any(|e| e.url == public_group_relay_url()));
+    }
+
+    #[test]
+    fn blossom_upload_servers_are_http_urls() {
+        for server in default_blossom_upload_servers() {
+            assert!(
+                server.starts_with("https://") || server.starts_with("http://"),
+                "Blossom upload server must be HTTP(S): {server}"
+            );
+        }
     }
 }
