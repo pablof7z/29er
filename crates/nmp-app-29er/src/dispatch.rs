@@ -1,10 +1,11 @@
-//! NIP-29 typed dispatch-payload encoding.
+//! 29er typed dispatch-payload encoding.
 //!
-//! [`dispatch_nip29_action`] is a plain Rust function so the native Rust TUI
-//! (`29er-tui`) — which dispatches every NIP-29 action (join/leave/
-//! create-group/chat-send/etc.) through this exact encoding — can call it
-//! directly without going through UniFFI. [`crate::group_sessions`] wraps it
-//! as the Swift-callable `dispatchNip29Action` facade verb.
+//! [`dispatch_nip29_action`] is still named after its original NIP-29 surface,
+//! but it now covers every typed action 29er composes through the shared byte
+//! doorway: NIP-29 group verbs, `nmp.publish`, and Blossom uploads. The native
+//! Rust TUI calls this directly without going through UniFFI;
+//! [`crate::group_sessions`] wraps it as the Swift-callable
+//! `dispatchNip29Action` facade verb.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -31,7 +32,7 @@ const PUBLISH_GROUP_EVENT_NAMESPACE: &str = "nmp.nip29.publish_group_event";
 /// The real NIP-29 create action namespace used by the app-owned child doorway.
 const CREATE_GROUP_NAMESPACE: &str = "nmp.nip29.create_group";
 
-/// Build the typed payload + open `DispatchEnvelope` for a NIP-29 action and
+/// Build the typed payload + open `DispatchEnvelope` for a 29er action and
 /// dispatch it through the byte lane, returning the typed [`DispatchOutcome`].
 ///
 /// Used by the native Rust TUI. The `nmp.nip29.post_chat_message` doorway
@@ -167,6 +168,7 @@ fn encode_payload_for_namespace(namespace: &str, json: &str) -> Option<Vec<u8>> 
     }
     match namespace {
         "nmp.publish" => encode::<nmp_core::publish::PublishAction>(json),
+        "nmp.blossom.upload" => encode::<nmp_blossom::UploadInput>(json),
         "nmp.nip29.discover" => encode::<nmp_nip29::action::DiscoverGroupsInput>(json),
         "nmp.nip29.join" => encode::<nmp_nip29::action::JoinGroupInput>(json),
         "nmp.nip29.leave" => encode::<nmp_nip29::action::LeaveGroupInput>(json),
@@ -327,5 +329,21 @@ mod tests {
     fn action_encoder_fails_closed_for_unknown_or_malformed_payloads() {
         assert!(encode_payload_for_namespace("nmp.nip29.remove_everyone", "{}").is_none());
         assert!(encode_payload_for_namespace("nmp.nip29.leave", r#"{"group":42}"#).is_none());
+    }
+
+    #[test]
+    fn blossom_upload_namespace_encodes_typed_payload() {
+        let bytes = encode_payload_for_namespace(
+            "nmp.blossom.upload",
+            r#"{"file_path":"/tmp/photo.png","content_type":"image/png","servers":["https://blossom.primal.net"]}"#,
+        )
+        .expect("blossom upload payload encodes");
+        let input = <nmp_blossom::UploadInput as ActionPayload>::decode(&bytes).expect("decodes");
+        assert_eq!(input.file_path, "/tmp/photo.png");
+        assert_eq!(input.content_type.as_deref(), Some("image/png"));
+        assert_eq!(
+            input.servers,
+            vec!["https://blossom.primal.net".to_string()]
+        );
     }
 }

@@ -282,6 +282,11 @@ fn apply(action: Action, app: &mut App) {
         Action::ScrollDown => app.scroll_messages(-1),
         // chat / outbox
         Action::SendMessage { content, mentions } => app.send_message(content, mentions),
+        Action::AttachMedia {
+            file_path,
+            content_type,
+            servers,
+        } => app.attach_media(file_path, content_type, servers),
         Action::RetryOutbox(id) => app.retry_outbox(id),
         // palette
         Action::OpenPalette => app.set_palette(true),

@@ -40,6 +40,7 @@ pub mod group_chat;
 mod group_sessions;
 pub mod group_tree;
 pub mod kinds;
+pub mod media_upload;
 pub mod reactions;
 pub mod refs;
 pub mod relay_seeding;

@@ -94,6 +94,12 @@ impl Palette {
                 action: Action::SetFocus(Focus::Composer),
             });
             entries.push(Entry {
+                label: "Attach media".into(),
+                subtitle: "action".into(),
+                badge: None,
+                action: Action::OpenForm(FormKind::AttachMedia(g.clone())),
+            });
+            entries.push(Entry {
                 label: "Show members".into(),
                 subtitle: "action".into(),
                 badge: None,
