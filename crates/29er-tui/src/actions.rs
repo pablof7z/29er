@@ -56,6 +56,12 @@ pub enum Action {
         parent: GroupId,
         name: String,
     },
+    EditMetadata {
+        group: GroupId,
+        name: Option<String>,
+        about: Option<String>,
+        picture: Option<String>,
+    },
     MoveChannel {
         group: GroupId,
         parent: Option<String>,

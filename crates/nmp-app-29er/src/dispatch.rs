@@ -171,6 +171,7 @@ fn encode_payload_for_namespace(namespace: &str, json: &str) -> Option<Vec<u8>> 
         "nmp.nip29.join" => encode::<nmp_nip29::action::JoinGroupInput>(json),
         "nmp.nip29.leave" => encode::<nmp_nip29::action::LeaveGroupInput>(json),
         "nmp.nip29.create_group" => encode::<nmp_nip29::action::CreateGroupInput>(json),
+        "nmp.nip29.edit_metadata" => encode::<nmp_nip29::action::EditMetadataInput>(json),
         "nmp.nip29.put_user" => encode::<nmp_nip29::action::PutUserInput>(json),
         "nmp.nip29.create_invite" => encode::<nmp_nip29::action::CreateInviteInput>(json),
         "nmp.nip29.set_parent" => encode::<nmp_nip29::action::SetParentInput>(json),
@@ -212,6 +213,21 @@ mod tests {
         assert_eq!(create.name, "Child Room");
         assert_eq!(create.parent.as_deref(), Some("root"));
         assert_eq!(create.about.as_deref(), Some("Admin work"));
+
+        let edit_metadata = encode_payload_for_namespace(
+            "nmp.nip29.edit_metadata",
+            r#"{"group":{"host_relay_url":"wss://groups.example.com","local_id":"room"},"name":"Renamed Room","about":"Updated room","picture":"https://example.com/room.png"}"#,
+        )
+        .expect("edit-metadata payload encodes");
+        let edit_metadata =
+            <nmp_nip29::action::EditMetadataInput as ActionPayload>::decode(&edit_metadata)
+                .expect("decodes");
+        assert_eq!(edit_metadata.group.local_id, "room");
+        assert_eq!(edit_metadata.name.as_deref(), Some("Renamed Room"));
+        assert_eq!(
+            edit_metadata.picture.as_deref(),
+            Some("https://example.com/room.png")
+        );
 
         let put_user = encode_payload_for_namespace(
             "nmp.nip29.put_user",

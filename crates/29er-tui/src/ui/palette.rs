@@ -127,6 +127,12 @@ impl Palette {
                     action: Action::OpenForm(FormKind::CreateChild(g.clone())),
                 });
                 entries.push(Entry {
+                    label: "Edit room metadata".into(),
+                    subtitle: "admin".into(),
+                    badge: Some("[Admin]".into()),
+                    action: Action::OpenForm(FormKind::EditMetadata(g.clone())),
+                });
+                entries.push(Entry {
                     label: "Move channel".into(),
                     subtitle: "admin".into(),
                     badge: Some("[Admin]".into()),
@@ -512,6 +518,10 @@ mod tests {
         assert!(
             p.entries.iter().any(|e| e.subtitle == "admin"),
             "admin should see admin-only entries"
+        );
+        assert!(
+            p.entries.iter().any(|e| e.label == "Edit room metadata"),
+            "admin should see room metadata editor"
         );
     }
 

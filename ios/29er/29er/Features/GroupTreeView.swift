@@ -545,6 +545,14 @@ struct GroupEventsView: View {
                             reason: reason
                         )
                     },
+                    onEditMetadata: { name, about, picture in
+                        model.editGroupMetadata(
+                            groupId: groupId,
+                            name: name,
+                            about: about,
+                            picture: picture
+                        )
+                    },
                     onCreateChild: { localId, name, about, visibility, access in
                         model.createGroup(
                             localId: localId,
@@ -892,6 +900,7 @@ private struct GroupParentCandidate: Identifiable, Hashable {
 private enum AdminTaskMode: String, CaseIterable, Identifiable {
     case invites
     case people
+    case metadata
     case room
     case hierarchy
 
@@ -903,6 +912,8 @@ private enum AdminTaskMode: String, CaseIterable, Identifiable {
             return "Invites"
         case .people:
             return "People"
+        case .metadata:
+            return "Edit"
         case .room:
             return "Room"
         case .hierarchy:
@@ -1031,6 +1042,7 @@ private struct AdminActionsSheet: View {
     let title: String
     let onCreateInvite: ([String]) -> Bool
     let onPutUser: (String, String?, String?) -> Bool
+    let onEditMetadata: (String?, String?, String?) -> Bool
     let onCreateChild: (String, String, String?, String, String) -> Bool
     let parentCandidates: [GroupParentCandidate]
     let currentParentId: String?
@@ -1043,6 +1055,9 @@ private struct AdminActionsSheet: View {
     @State private var targetPubkey = ""
     @State private var role = ""
     @State private var reason = ""
+    @State private var metadataName = ""
+    @State private var metadataAbout = ""
+    @State private var metadataPicture = ""
     @State private var childLocalId = ""
     @State private var childName = ""
     @State private var childAbout = ""
@@ -1071,6 +1086,18 @@ private struct AdminActionsSheet: View {
 
     private var trimmedReason: String {
         reason.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedMetadataName: String {
+        metadataName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedMetadataAbout: String {
+        metadataAbout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var trimmedMetadataPicture: String {
+        metadataPicture.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var trimmedChildLocalId: String {
@@ -1103,6 +1130,8 @@ private struct AdminActionsSheet: View {
                     inviteSection
                 case .people:
                     peopleSection
+                case .metadata:
+                    metadataSection
                 case .room:
                     roomSection
                 case .hierarchy:
@@ -1181,6 +1210,29 @@ private struct AdminActionsSheet: View {
             }
             .accessibilityIdentifier("admin-add-user-button")
             .disabled(trimmedTargetPubkey.isEmpty)
+        }
+    }
+
+    private var metadataSection: some View {
+        Section("Room Metadata") {
+            TextField("Name", text: $metadataName)
+                .accessibilityIdentifier("admin-metadata-name-field")
+            TextField("Description", text: $metadataAbout, axis: .vertical)
+                .lineLimit(2...4)
+                .accessibilityIdentifier("admin-metadata-about-field")
+            TextField("Picture URL", text: $metadataPicture)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .accessibilityIdentifier("admin-metadata-picture-field")
+
+            Button {
+                submitEditMetadata()
+            } label: {
+                Label("Update Room", systemImage: "pencil")
+            }
+            .accessibilityIdentifier("admin-edit-metadata-button")
+            .disabled(!canSubmitEditMetadata)
         }
     }
 
@@ -1284,6 +1336,28 @@ private struct AdminActionsSheet: View {
             error = nil
         } else {
             error = "Could not add user."
+        }
+    }
+
+    private var canSubmitEditMetadata: Bool {
+        !trimmedMetadataName.isEmpty
+            || !trimmedMetadataAbout.isEmpty
+            || !trimmedMetadataPicture.isEmpty
+    }
+
+    private func submitEditMetadata() {
+        let accepted = onEditMetadata(
+            trimmedMetadataName.isEmpty ? nil : trimmedMetadataName,
+            trimmedMetadataAbout.isEmpty ? nil : trimmedMetadataAbout,
+            trimmedMetadataPicture.isEmpty ? nil : trimmedMetadataPicture
+        )
+        if accepted {
+            metadataName = ""
+            metadataAbout = ""
+            metadataPicture = ""
+            error = nil
+        } else {
+            error = "Could not update room metadata."
         }
     }
 

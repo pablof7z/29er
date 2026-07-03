@@ -126,6 +126,7 @@ pub enum FormKind {
     JoinWithCode(GroupId),
     CreateInvite(GroupId),
     CreateChild(GroupId),
+    EditMetadata(GroupId),
     PutUser(GroupId),
     MoveChannel(GroupId),
     ShowMembers(GroupId),
@@ -958,6 +959,24 @@ impl App {
         self.set_status_message("Creating channel\u{2026}".to_string());
         let result = self.dispatch_json("app.29er.create_child_group", &body);
         self.record_dispatch_error(result);
+        self.close_form();
+    }
+    pub fn edit_metadata(
+        &mut self,
+        group: GroupId,
+        name: Option<String>,
+        about: Option<String>,
+        picture: Option<String>,
+    ) {
+        let body = serde_json::json!({
+            "group": group,
+            "name": name,
+            "about": about,
+            "picture": picture,
+        })
+        .to_string();
+        self.set_status_message("Updating room metadata...".to_string());
+        self.dispatch_json("nmp.nip29.edit_metadata", &body);
         self.close_form();
     }
     pub fn move_channel(&mut self, group: GroupId, parent: Option<String>) {

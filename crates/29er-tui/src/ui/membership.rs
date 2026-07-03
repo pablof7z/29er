@@ -144,6 +144,9 @@ impl Membership {
 
     fn empty_fields(&self) -> Vec<String> {
         match &self.form {
+            Some(FormKind::EditMetadata(_)) => {
+                vec![String::new(), String::new(), String::new()]
+            }
             Some(FormKind::PutUser(_)) => vec![String::new(), String::new()],
             Some(FormKind::ShowMembers(_)) => Vec::new(),
             Some(_) => vec![String::new()],
@@ -160,6 +163,14 @@ impl Membership {
             Some(FormKind::JoinWithCode(_)) => ("Join channel", vec!["invite code (optional)"]),
             Some(FormKind::CreateInvite(_)) => ("Create invite", vec!["codes (comma-separated)"]),
             Some(FormKind::CreateChild(_)) => ("Create child channel", vec!["channel name"]),
+            Some(FormKind::EditMetadata(_)) => (
+                "Edit room metadata",
+                vec![
+                    "name (optional)",
+                    "description (optional)",
+                    "picture URL (optional)",
+                ],
+            ),
             Some(FormKind::PutUser(_)) => (
                 "Add role / put user",
                 vec!["target pubkey (hex)", "role (optional)"],
@@ -176,6 +187,12 @@ impl Membership {
     fn submit(&self) -> Option<Action> {
         let f0 = self.fields.first().cloned().unwrap_or_default();
         let f0 = f0.trim().to_string();
+        let optional_field = |index: usize| {
+            self.fields
+                .get(index)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        };
         match &self.form {
             Some(FormKind::JoinWithCode(g)) => Some(Action::Join {
                 group: g.clone(),
@@ -201,6 +218,20 @@ impl Membership {
                         name: f0,
                     })
                 }
+            }
+            Some(FormKind::EditMetadata(g)) if self.is_admin => {
+                let name = optional_field(0);
+                let about = optional_field(1);
+                let picture = optional_field(2);
+                if name.is_none() && about.is_none() && picture.is_none() {
+                    return None;
+                }
+                Some(Action::EditMetadata {
+                    group: g.clone(),
+                    name,
+                    about,
+                    picture,
+                })
             }
             Some(FormKind::PutUser(g)) if self.is_admin => {
                 if f0.is_empty() {
@@ -298,6 +329,7 @@ impl Component for Membership {
             self.form,
             Some(FormKind::CreateInvite(_))
                 | Some(FormKind::CreateChild(_))
+                | Some(FormKind::EditMetadata(_))
                 | Some(FormKind::PutUser(_))
                 | Some(FormKind::MoveChannel(_))
         ) && !self.is_admin;
@@ -416,6 +448,43 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn edit_metadata_maps_room_fields() {
+        let mut m = Membership::new();
+        m.form = Some(FormKind::EditMetadata(g()));
+        m.is_admin = true;
+        m.fields = vec![
+            "Renamed Room".into(),
+            "Updated description".into(),
+            "https://example.com/room.png".into(),
+        ];
+        match m.submit() {
+            Some(Action::EditMetadata {
+                group,
+                name,
+                about,
+                picture,
+            }) => {
+                assert_eq!(group.local_id, "room");
+                assert_eq!(name.as_deref(), Some("Renamed Room"));
+                assert_eq!(about.as_deref(), Some("Updated description"));
+                assert_eq!(picture.as_deref(), Some("https://example.com/room.png"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_metadata_requires_admin_and_a_field() {
+        let mut m = Membership::new();
+        m.form = Some(FormKind::EditMetadata(g()));
+        m.fields = vec!["Renamed Room".into(), String::new(), String::new()];
+        assert!(m.submit().is_none(), "non-admin must not submit");
+        m.is_admin = true;
+        m.fields = vec![String::new(), String::new(), String::new()];
+        assert!(m.submit().is_none(), "empty edit must not submit");
     }
 
     #[test]
