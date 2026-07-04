@@ -213,9 +213,7 @@ public struct NostrContentView: View {
             // render with native scrub / fullscreen controls. Audio stays on
             // the compact link-style row (no waveform UI in v1).
             if let first = urls.first.flatMap(URL.init(string:)) {
-                VideoPlayer(player: AVPlayer(url: first))
-                    .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                NostrInlineVideoPlayer(url: first)
             }
         case .audio:
             if let first = urls.first.flatMap(URL.init(string:)) {
