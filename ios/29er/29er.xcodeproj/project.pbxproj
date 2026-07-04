@@ -12,6 +12,7 @@
 		05A14F2CB381A6DA573ED7D4 /* FlatBuffers in Frameworks */ = {isa = PBXBuildFile; productRef = 27A45A537F41B6F2283F41E1 /* FlatBuffers */; };
 		05E8D8F1D563BA711D7FE19D /* NostrSelectableText.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9910EE242FC8FCBA7A6B141 /* NostrSelectableText.swift */; };
 		098E279693FC97F35F5508D2 /* embed_sidecar_generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61BA77CDD05D70B26A171A97 /* embed_sidecar_generated.swift */; };
+		0E757F1DA1DF14CCFF552EDE /* NostrInlineVideoPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DE41656FE97E4E6A80019BC /* NostrInlineVideoPlayer.swift */; };
 		105B3B5416BFBE5FCCBFB4AE /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 549834D395C23FDB99E7FA40 /* App.swift */; };
 		11750078DA48DA4AB41A259E /* NmpUpdate.generated.swift in Sources */ = {isa = PBXBuildFile; fileRef = E517E4888FC04BDFBA36B1C3 /* NmpUpdate.generated.swift */; };
 		11A2CB559AE3AC661B512225 /* nmp_app_29er.swift in Sources */ = {isa = PBXBuildFile; fileRef = 037C233A6B41A1ED0FED71EC /* nmp_app_29er.swift */; };
@@ -120,6 +121,7 @@
 		91C35535B6E84575DDC847F5 /* KeychainCapability.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCapability.swift; sourceTree = "<group>"; };
 		94102F2AD9AD41B19F45B907 /* NostrContentHighlights.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrContentHighlights.swift; sourceTree = "<group>"; };
 		99696704A85A57CC885F55AF /* GroupTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupTree.swift; sourceTree = "<group>"; };
+		9DE41656FE97E4E6A80019BC /* NostrInlineVideoPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrInlineVideoPlayer.swift; sourceTree = "<group>"; };
 		A44EFA1C646FBE80DAC3D74A /* KernelModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KernelModel.swift; sourceTree = "<group>"; };
 		A47FA6CC37882EF037741747 /* ContentTreeWire.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentTreeWire.swift; sourceTree = "<group>"; };
 		A9C46FFC5BF16CD38D16023C /* NostrKindRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NostrKindRegistry.swift; sourceTree = "<group>"; };
@@ -240,6 +242,7 @@
 				94102F2AD9AD41B19F45B907 /* NostrContentHighlights.swift */,
 				AE56B2937701572F1DABD95A /* NostrContentRenderer.swift */,
 				2C1F72E8E99DBA3BF3531063 /* NostrContentView.swift */,
+				9DE41656FE97E4E6A80019BC /* NostrInlineVideoPlayer.swift */,
 				A9C46FFC5BF16CD38D16023C /* NostrKindRegistry.swift */,
 				723BE8D4456A8E7BBFBBCFEE /* NostrMediaGrid.swift */,
 				F9910EE242FC8FCBA7A6B141 /* NostrSelectableText.swift */,
@@ -456,6 +459,7 @@
 				DFD6F5460D19611991E59FD1 /* NostrGroupComposer.swift in Sources */,
 				1B39054F8FBACD9B1D8026CF /* NostrGroupMessageRow.swift in Sources */,
 				532B97F22383752D3E858C33 /* NostrGroupRosterList.swift in Sources */,
+				0E757F1DA1DF14CCFF552EDE /* NostrInlineVideoPlayer.swift in Sources */,
 				936081CABDD787DFE6833EF1 /* NostrKindRegistry.swift in Sources */,
 				8D911B20CD87DCDE55DB8807 /* NostrMediaGrid.swift in Sources */,
 				BCFD2451417BCEC5EF55345E /* NostrProfileHost.swift in Sources */,
