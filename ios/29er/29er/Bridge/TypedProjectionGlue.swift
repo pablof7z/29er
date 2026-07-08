@@ -335,7 +335,7 @@ enum TypedProjectionGlue {
     /// Map the typed `nmp.nip29.discovered_groups` sidecar (`NDGS` /
     /// `nmp_nip29_DiscoveredGroupsSnapshot`) to the `DiscoveredGroupsSnapshot`
     /// the JSON `projections["nmp.nip29.discovered_groups"]` path yields. Flat
-    /// field-for-field copy: a top-level `hostRelayUrl` plus one ordered
+    /// field-for-field copy: a top-level `hostRelayUrls` plus one ordered
     /// `[DiscoveredGroup]` vector (alphabetical by `groupId`; Rust owns the
     /// order). `name`/`picture`/`about`/`parent` are tag-derived
     /// `Option<String>` on the wire — bare FlatBuffers strings where absent
@@ -347,7 +347,7 @@ enum TypedProjectionGlue {
         _ reader: nmp_nip29_DiscoveredGroupsSnapshot
     ) -> DiscoveredGroupsSnapshot {
         DiscoveredGroupsSnapshot(
-            hostRelayUrl: reader.hostRelayUrl ?? "",
+            hostRelayUrls: reader.hostRelayUrls.map { $0 ?? "" },
             groups: reader.groups.map { row in
                 DiscoveredGroup(
                     groupId: row.groupId ?? "",

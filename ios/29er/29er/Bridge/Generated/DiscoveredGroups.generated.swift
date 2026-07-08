@@ -31,7 +31,6 @@ public struct nmp_nip29_DiscoveredGroup: FlatBufferTable, FlatbuffersVectorIniti
     case open_ = 20
     case parent = 22
     case children = 24
-    case roles = 26
     var v: Int32 { Int32(self.rawValue) }
     var p: VOffset { self.rawValue }
   }
@@ -53,8 +52,7 @@ public struct nmp_nip29_DiscoveredGroup: FlatBufferTable, FlatbuffersVectorIniti
   public var parent: String? { let o = _accessor.offset(VTOFFSET.parent.v); return o == 0 ? nil : _accessor.string(at: o) }
   public var parentSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.parent.v) }
   public var children: FlatbufferVector<String?> { return _accessor.vector(at: VTOFFSET.children.v, byteSize: 4) }
-  public var roles: FlatbufferVector<nmp_nip29_Role> { return _accessor.vector(at: VTOFFSET.roles.v, byteSize: 4) }
-  public static func startDiscoveredGroup(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 12) }
+  public static func startDiscoveredGroup(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 11) }
   public static func add(groupId: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: groupId, at: VTOFFSET.groupId.p) }
   public static func add(hostRelayUrl: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: hostRelayUrl, at: VTOFFSET.hostRelayUrl.p) }
   public static func add(name: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: name, at: VTOFFSET.name.p) }
@@ -68,7 +66,6 @@ public struct nmp_nip29_DiscoveredGroup: FlatBufferTable, FlatbuffersVectorIniti
    at: VTOFFSET.open_.p) }
   public static func add(parent: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: parent, at: VTOFFSET.parent.p) }
   public static func addVectorOf(children: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: children, at: VTOFFSET.children.p) }
-  public static func addVectorOf(roles: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: roles, at: VTOFFSET.roles.p) }
   public static func endDiscoveredGroup(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createDiscoveredGroup(
     _ fbb: inout FlatBufferBuilder,
@@ -82,8 +79,7 @@ public struct nmp_nip29_DiscoveredGroup: FlatBufferTable, FlatbuffersVectorIniti
     public_: Bool = false,
     open_: Bool = false,
     parentOffset parent: Offset = Offset(),
-    childrenVectorOffset children: Offset = Offset(),
-    rolesVectorOffset roles: Offset = Offset()
+    childrenVectorOffset children: Offset = Offset()
   ) -> Offset {
     let __start = nmp_nip29_DiscoveredGroup.startDiscoveredGroup(&fbb)
     nmp_nip29_DiscoveredGroup.add(groupId: groupId, &fbb)
@@ -97,7 +93,6 @@ public struct nmp_nip29_DiscoveredGroup: FlatBufferTable, FlatbuffersVectorIniti
     nmp_nip29_DiscoveredGroup.add(open_: open_, &fbb)
     nmp_nip29_DiscoveredGroup.add(parent: parent, &fbb)
     nmp_nip29_DiscoveredGroup.addVectorOf(children: children, &fbb)
-    nmp_nip29_DiscoveredGroup.addVectorOf(roles: roles, &fbb)
     return nmp_nip29_DiscoveredGroup.endDiscoveredGroup(&fbb, start: __start)
   }
 
@@ -114,52 +109,6 @@ public struct nmp_nip29_DiscoveredGroup: FlatBufferTable, FlatbuffersVectorIniti
     try _v.visit(field: VTOFFSET.open_.p, fieldName: "open_", required: false, type: Bool.self)
     try _v.visit(field: VTOFFSET.parent.p, fieldName: "parent", required: false, type: ForwardOffset<String>.self)
     try _v.visit(field: VTOFFSET.children.p, fieldName: "children", required: false, type: ForwardOffset<Vector<ForwardOffset<String>, String>>.self)
-    try _v.visit(field: VTOFFSET.roles.p, fieldName: "roles", required: false, type: ForwardOffset<Vector<ForwardOffset<nmp_nip29_Role>, nmp_nip29_Role>>.self)
-    _v.finish()
-  }
-}
-
-public struct nmp_nip29_Role: FlatBufferTable, FlatbuffersVectorInitializable, Verifiable {
-
-  static func validateVersion() { FlatBuffersVersion_25_12_19() }
-  public var __buffer: ByteBuffer! { return _accessor.bb }
-  private var _accessor: Table
-
-  public static var id: String { "NDGS" } 
-  public static func finish(_ fbb: inout FlatBufferBuilder, end: Offset, prefix: Bool = false) { fbb.finish(offset: end, fileId: nmp_nip29_Role.id, addPrefix: prefix) }
-  private init(_ t: Table) { _accessor = t }
-  public init(_ bb: ByteBuffer, o: Int32) { _accessor = Table(bb: bb, position: o) }
-
-  private enum VTOFFSET: VOffset {
-    case name = 4
-    case description = 6
-    var v: Int32 { Int32(self.rawValue) }
-    var p: VOffset { self.rawValue }
-  }
-
-  public var name: String? { let o = _accessor.offset(VTOFFSET.name.v); return o == 0 ? nil : _accessor.string(at: o) }
-  public var nameSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.name.v) }
-  public var description: String? { let o = _accessor.offset(VTOFFSET.description.v); return o == 0 ? nil : _accessor.string(at: o) }
-  public var descriptionSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.description.v) }
-  public static func startRole(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 2) }
-  public static func add(name: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: name, at: VTOFFSET.name.p) }
-  public static func add(description: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: description, at: VTOFFSET.description.p) }
-  public static func endRole(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
-  public static func createRole(
-    _ fbb: inout FlatBufferBuilder,
-    nameOffset name: Offset = Offset(),
-    descriptionOffset description: Offset = Offset()
-  ) -> Offset {
-    let __start = nmp_nip29_Role.startRole(&fbb)
-    nmp_nip29_Role.add(name: name, &fbb)
-    nmp_nip29_Role.add(description: description, &fbb)
-    return nmp_nip29_Role.endRole(&fbb, start: __start)
-  }
-
-  public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
-    var _v = try verifier.visitTable(at: position)
-    try _v.visit(field: VTOFFSET.name.p, fieldName: "name", required: false, type: ForwardOffset<String>.self)
-    try _v.visit(field: VTOFFSET.description.p, fieldName: "description", required: false, type: ForwardOffset<String>.self)
     _v.finish()
   }
 }
@@ -177,30 +126,29 @@ public struct nmp_nip29_DiscoveredGroupsSnapshot: FlatBufferTable, FlatbuffersVe
 
   private enum VTOFFSET: VOffset {
     case schemaVersion = 4
-    case hostRelayUrl = 6
+    case hostRelayUrls = 6
     case groups = 8
     var v: Int32 { Int32(self.rawValue) }
     var p: VOffset { self.rawValue }
   }
 
-  public var schemaVersion: UInt32 { let o = _accessor.offset(VTOFFSET.schemaVersion.v); return o == 0 ? 2 : _accessor.readBuffer(of: UInt32.self, at: o) }
-  public var hostRelayUrl: String? { let o = _accessor.offset(VTOFFSET.hostRelayUrl.v); return o == 0 ? nil : _accessor.string(at: o) }
-  public var hostRelayUrlSegmentArray: [UInt8]? { return _accessor.getVector(at: VTOFFSET.hostRelayUrl.v) }
+  public var schemaVersion: UInt32 { let o = _accessor.offset(VTOFFSET.schemaVersion.v); return o == 0 ? 3 : _accessor.readBuffer(of: UInt32.self, at: o) }
+  public var hostRelayUrls: FlatbufferVector<String?> { return _accessor.vector(at: VTOFFSET.hostRelayUrls.v, byteSize: 4) }
   public var groups: FlatbufferVector<nmp_nip29_DiscoveredGroup> { return _accessor.vector(at: VTOFFSET.groups.v, byteSize: 4) }
   public static func startDiscoveredGroupsSnapshot(_ fbb: inout FlatBufferBuilder) -> UOffset { fbb.startTable(with: 3) }
-  public static func add(schemaVersion: UInt32, _ fbb: inout FlatBufferBuilder) { fbb.add(element: schemaVersion, def: 2, at: VTOFFSET.schemaVersion.p) }
-  public static func add(hostRelayUrl: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: hostRelayUrl, at: VTOFFSET.hostRelayUrl.p) }
+  public static func add(schemaVersion: UInt32, _ fbb: inout FlatBufferBuilder) { fbb.add(element: schemaVersion, def: 3, at: VTOFFSET.schemaVersion.p) }
+  public static func addVectorOf(hostRelayUrls: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: hostRelayUrls, at: VTOFFSET.hostRelayUrls.p) }
   public static func addVectorOf(groups: Offset, _ fbb: inout FlatBufferBuilder) { fbb.add(offset: groups, at: VTOFFSET.groups.p) }
   public static func endDiscoveredGroupsSnapshot(_ fbb: inout FlatBufferBuilder, start: UOffset) -> Offset { let end = Offset(offset: fbb.endTable(at: start)); return end }
   public static func createDiscoveredGroupsSnapshot(
     _ fbb: inout FlatBufferBuilder,
-    schemaVersion: UInt32 = 2,
-    hostRelayUrlOffset hostRelayUrl: Offset = Offset(),
+    schemaVersion: UInt32 = 3,
+    hostRelayUrlsVectorOffset hostRelayUrls: Offset = Offset(),
     groupsVectorOffset groups: Offset = Offset()
   ) -> Offset {
     let __start = nmp_nip29_DiscoveredGroupsSnapshot.startDiscoveredGroupsSnapshot(&fbb)
     nmp_nip29_DiscoveredGroupsSnapshot.add(schemaVersion: schemaVersion, &fbb)
-    nmp_nip29_DiscoveredGroupsSnapshot.add(hostRelayUrl: hostRelayUrl, &fbb)
+    nmp_nip29_DiscoveredGroupsSnapshot.addVectorOf(hostRelayUrls: hostRelayUrls, &fbb)
     nmp_nip29_DiscoveredGroupsSnapshot.addVectorOf(groups: groups, &fbb)
     return nmp_nip29_DiscoveredGroupsSnapshot.endDiscoveredGroupsSnapshot(&fbb, start: __start)
   }
@@ -208,7 +156,7 @@ public struct nmp_nip29_DiscoveredGroupsSnapshot: FlatBufferTable, FlatbuffersVe
   public static func verify<T>(_ verifier: inout Verifier, at position: Int, of type: T.Type) throws where T: Verifiable {
     var _v = try verifier.visitTable(at: position)
     try _v.visit(field: VTOFFSET.schemaVersion.p, fieldName: "schemaVersion", required: false, type: UInt32.self)
-    try _v.visit(field: VTOFFSET.hostRelayUrl.p, fieldName: "hostRelayUrl", required: false, type: ForwardOffset<String>.self)
+    try _v.visit(field: VTOFFSET.hostRelayUrls.p, fieldName: "hostRelayUrls", required: false, type: ForwardOffset<Vector<ForwardOffset<String>, String>>.self)
     try _v.visit(field: VTOFFSET.groups.p, fieldName: "groups", required: false, type: ForwardOffset<Vector<ForwardOffset<nmp_nip29_DiscoveredGroup>, nmp_nip29_DiscoveredGroup>>.self)
     _v.finish()
   }

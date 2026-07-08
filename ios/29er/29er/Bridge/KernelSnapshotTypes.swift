@@ -193,10 +193,12 @@ extension DiscoveredGroup {
 /// alphabetically by `groupId` by the Rust projection — Swift does not
 /// re-sort.
 struct DiscoveredGroupsSnapshot: Decodable, Equatable {
-    /// The host relay this snapshot describes — every row's `hostRelayUrl`
-    /// equals this value (the projection is single-relay scoped).
-    let hostRelayUrl: String
+    /// The relay set this snapshot describes — every row's `hostRelayUrl`
+    /// names a member of it (the projection tracks a SET of relays since
+    /// NIP-29 multi-relay group discovery, #93). A tracked relay with zero
+    /// groups so far is still listed here.
+    let hostRelayUrls: [String]
     let groups: [DiscoveredGroup]
 
-    static let empty = DiscoveredGroupsSnapshot(hostRelayUrl: "", groups: [])
+    static let empty = DiscoveredGroupsSnapshot(hostRelayUrls: [], groups: [])
 }
