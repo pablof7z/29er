@@ -81,7 +81,7 @@ fn main() {
     println!("shakeout: (open_nip29_group_discovery_session_with_reader registers the typed projection AND opens the tailing interest internally)");
     let (_discovery_handle, _reader) = open_nip29_group_discovery_session_with_reader(
         &app,
-        Nip29GroupDiscoverySession::new(relay.clone()),
+        Nip29GroupDiscoverySession::new(vec![relay.clone()]),
     );
 
     println!("shakeout: waiting {WAIT_SECS}s for relay to stream metadata...");
@@ -107,8 +107,8 @@ fn main() {
         match nmp_nip29::decode_discovered_groups_snapshot(&entry.payload) {
             Ok(snapshot) => {
                 println!(
-                    "shakeout: host_relay_url={} groups={}",
-                    snapshot.host_relay_url,
+                    "shakeout: host_relay_urls={} groups={}",
+                    snapshot.host_relay_urls.join(","),
                     snapshot.groups.len()
                 );
                 for g in &snapshot.groups {

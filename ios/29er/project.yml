@@ -105,7 +105,7 @@ targets:
         # 2. UIUtilities is a new private framework auto-linked in Xcode 26; a
         #    stub TBD lives in the same /tmp/LocalFrameworks directory.
         # Both stubs must exist before building; see
-        # vendor/nmp/ios/Chirp/project.yml for the upstream reference.
+        # upstream NMP ios/Chirp/project.yml for the reference settings.
         ENABLE_DEBUG_DYLIB: NO
         "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]": "/tmp/LocalFrameworks $(inherited)"
   29erUITests:

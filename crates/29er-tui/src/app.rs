@@ -679,7 +679,7 @@ impl App {
 
         let (discovery_handle, discovered) = open_nip29_group_discovery_session_with_reader(
             &*app,
-            Nip29GroupDiscoverySession::new(relay.clone()),
+            Nip29GroupDiscoverySession::new(vec![relay.clone()]),
         );
         if let Ok(mut slot) = self.shared.discovered.lock() {
             *slot = Some(discovered);
@@ -1708,7 +1708,7 @@ mod tests {
     }
     fn snap() -> DiscoveredGroupsSnapshot {
         DiscoveredGroupsSnapshot {
-            host_relay_url: "wss://h".to_string(),
+            host_relay_urls: vec!["wss://h".to_string()],
             groups: vec![
                 group("root", None, &["child"]),
                 group("child", Some("root"), &[]),
@@ -1738,7 +1738,7 @@ mod tests {
                 vec!["name".to_string(), name.to_string()],
             ],
             content: String::new(),
-            relay_provenance: Vec::new(),
+            relay_provenance: vec!["wss://h".to_string()],
         }
     }
     fn make_app() -> (App, watch::Receiver<ProjectionView>) {
@@ -2264,7 +2264,7 @@ mod tests {
     fn nmp_update_push_refreshes_group_tree_without_polling() {
         let (app, mut rx) = make_app();
         let runtime = Arc::new(new_app());
-        let discovered = Arc::new(DiscoveredGroupsProjection::new("wss://h"));
+        let discovered = Arc::new(DiscoveredGroupsProjection::new(["wss://h"]));
         discovered.on_kernel_event(&metadata_evt("meta-child", "child", 100, "child"));
         app.shared.group_tree.on_kernel_event(&evt(
             "message-child",

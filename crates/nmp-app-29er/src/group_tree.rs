@@ -466,7 +466,11 @@ fn derive_group_tree(
         .collect();
 
     GroupTreeSnapshot {
-        host_relay_url: discovered.host_relay_url.clone(),
+        host_relay_url: discovered
+            .host_relay_urls
+            .first()
+            .cloned()
+            .unwrap_or_default(),
         roots,
         nodes,
     }
@@ -551,7 +555,7 @@ mod tests {
 
     fn discovered() -> DiscoveredGroupsSnapshot {
         DiscoveredGroupsSnapshot {
-            host_relay_url: "wss://groups.example.com".to_string(),
+            host_relay_urls: vec!["wss://groups.example.com".to_string()],
             groups: vec![
                 group("root", None, ["child"]),
                 group("child", Some("root"), []),

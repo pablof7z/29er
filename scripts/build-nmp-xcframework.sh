@@ -9,8 +9,8 @@
 # `scripts/check-uniffi-bindings-drift.sh` — they are NOT produced by this
 # script and do not need an iOS cross-compile to regenerate.
 #
-# Mirrors `vendor/nmp/justfile`'s `rust-ios-sim` / `rust-ios-device` recipes
-# but produces an xcframework instead of loose archives in `target/`.
+# Mirrors the upstream NMP justfile's `rust-ios-sim` / `rust-ios-device`
+# recipes but produces an xcframework instead of loose archives in `target/`.
 #
 # Run from the repo root:
 #   scripts/build-nmp-xcframework.sh            # debug, sim only (fast)
@@ -56,7 +56,7 @@ done
 
 # Release builds for the device target require IPHONEOS_DEPLOYMENT_TARGET to
 # avoid the ___chkstk_darwin linker error introduced by Xcode 26 (matches
-# `vendor/nmp/justfile` `rust-ios-device`).
+# upstream NMP justfile `rust-ios-device`).
 if [[ "$PROFILE" == "release" && "$BUILD_DEVICE" == "1" ]]; then
     export IPHONEOS_DEPLOYMENT_TARGET=17.0
 fi

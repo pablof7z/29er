@@ -207,21 +207,13 @@ pub fn register_relay_selector_runtime(
     // Register as an ObservedProjectionSink (scope=0 = ActiveAccount — NMP re-routes
     // the subscription on account switch, replacing the old RelaySelectorRuntimeController
     // tick-based subscription management).
-    let filter_json = format!(r#"{{"kinds":[{KIND_NIP51_RELAY_SET}]}}"#);
-    let replay_shapes: Vec<nmp_planner::InterestShape> =
-        nmp_planner::InterestShape::from_filter_json(&filter_json)
-            .into_iter()
-            .collect();
-    let _ = app.open_observed_projection(ObservedProjection {
-        observer: Arc::clone(&projection) as Arc<dyn ObservedProjectionSink>,
-        filter_json,
-        consumer_id: "29er.relay_selector.kind30002".to_string(),
-        scope: 0, // ActiveAccount — subscription is re-routed on account switch
-        relay_pin: None,
-        is_indexer_discovery: false,
-        replay_shapes,
-        replay_limit: 20,
-    });
+    let _ = app.open_observed_projection(ObservedProjection::from_kinds(
+        Arc::clone(&projection) as Arc<dyn ObservedProjectionSink>,
+        "29er.relay_selector.kind30002",
+        0, // ActiveAccount — subscription is re-routed on account switch
+        [KIND_NIP51_RELAY_SET],
+        20,
+    ));
 
     let projection_for_snapshot = Arc::clone(&projection);
     let registration_key = nmp_native_runtime::ProjectionKey::app_owned(RELAY_SELECTOR_KEY)
