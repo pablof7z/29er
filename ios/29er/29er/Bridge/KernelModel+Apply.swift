@@ -42,6 +42,7 @@ extension KernelModel {
         }
         typedRelaySelector = result.typedRelaySelector
         typedRelayDiagnostics = result.typedRelayDiagnostics
+        kmApplyLog.info("tick rev=\(result.rev, privacy: .public) relays=\(result.typedRelayDiagnostics?.relays.map { "\($0.relayUrl.relayHostLabel)=\($0.connection)" } ?? [], privacy: .public)")
 
         // S02 — derive `identityState` from the `active_account` typed
         // projection. The first tick with `rev > 0` collapses `unknown` to
@@ -64,9 +65,10 @@ extension KernelModel {
 
             // Auto-open group discovery on the first signedIn tick — covers
             // both fresh sign-in AND session restore via keychain. Fires once:
-            // `wasSignedIn` gates the transition tick, and `hostRelayUrl` being
-            // non-empty after the first call prevents re-entry. GroupTreeView's
-            // .task guard also deduplicates when the view appears later.
+            // `wasSignedIn` gates the transition tick, and the store's
+            // `hostRelayUrl` being non-empty after the first call prevents
+            // re-entry. GroupTreeView's .task guard also deduplicates when
+            // the view appears later.
             //
             // The host relay comes from the Rust-owned relay selector projection
             // (D7) — never a Swift literal. If the selector has not landed yet,

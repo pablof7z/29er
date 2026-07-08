@@ -350,6 +350,9 @@ final class DiscoveredGroupsStore: ObservableObject {
         let trimmed = relayUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        let prevHost = hostRelayUrl
+        let prevSession = openSessionRelay
+        gdLog.info("searchGroups relay=\(trimmed, privacy: .public) prevHost=\(prevHost, privacy: .public) openSession=\(prevSession ?? "nil", privacy: .public)")
         if trimmed != hostRelayUrl {
             if openSessionRelay != nil {
                 kernel.closeGroupDiscovery()
@@ -359,7 +362,9 @@ final class DiscoveredGroupsStore: ObservableObject {
         }
         hostRelayUrl = trimmed
 
-        if openSessionRelay != trimmed, kernel.openGroupDiscovery(hostRelayUrl: trimmed) {
+        let opened = kernel.openGroupDiscovery(hostRelayUrl: trimmed)
+        gdLog.info("searchGroups openGroupDiscovery(\(trimmed, privacy: .public)) -> \(opened, privacy: .public)")
+        if openSessionRelay != trimmed, opened {
             openSessionRelay = trimmed
         }
         isSearching = true
@@ -395,8 +400,21 @@ final class DiscoveredGroupsStore: ObservableObject {
     }
 
     func apply(snapshot: DiscoveredGroupsSnapshot?) {
-        guard let snapshot else { return }
-        guard snapshot.hostRelayUrl == hostRelayUrl else { return }
+        guard let snapshot else {
+            gdLog.info("apply snapshot=nil")
+            return
+        }
+        let snapRelays = snapshot.hostRelayUrls
+        let snapCount = snapshot.groups.count
+        let storeHost = hostRelayUrl
+        gdLog.info("apply snapshot hostRelayUrls=\(snapRelays, privacy: .public) groups=\(snapCount, privacy: .public) storeHost=\(storeHost, privacy: .public)")
+        let sessionMatches = storeHost.isEmpty
+            || snapRelays.isEmpty
+            || snapRelays.contains(storeHost)
+        guard sessionMatches else {
+            gdLog.info("apply rejected: session mismatch")
+            return
+        }
         if snapshot.groups != groups {
             groups = snapshot.groups
         }

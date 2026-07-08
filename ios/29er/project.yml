@@ -108,6 +108,40 @@ targets:
         # upstream NMP ios/Chirp/project.yml for the reference settings.
         ENABLE_DEBUG_DYLIB: NO
         "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]": "/tmp/LocalFrameworks $(inherited)"
+  probe:
+    type: application
+    platform: iOS
+    sources:
+      - path: probe
+      - path: 29er/Bridge/Generated
+      - path: 29er/Bridge/KernelUpdateFrameDecoder.swift
+      - path: 29er/Capabilities
+    dependencies:
+      - package: FlatBuffers
+    info:
+      path: probe/Info.plist
+      properties:
+        CFBundleDisplayName: probe
+        UIApplicationExitsOnSuspend: true
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.f7z.app29erProbe
+        PRODUCT_MODULE_NAME: App29erProbe
+        PRODUCT_NAME: probe
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_OBJC_BRIDGING_HEADER: 29er/Bridge/Generated/nmp_app_29erFFI.h
+        "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]":
+          - $(SRCROOT)/../../target/aarch64-apple-ios-sim/debug
+          - $(SRCROOT)/../../target/aarch64-apple-ios-sim/release
+          - $(SRCROOT)/Vendor/NmpApp29er.xcframework/ios-arm64-simulator
+        OTHER_LDFLAGS: "$(inherited) -lnmp_app_29er"
+        ARCHS[sdk=iphonesimulator*]: arm64
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        ENABLE_DEBUG_DYLIB: NO
+        "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]": "/tmp/LocalFrameworks $(inherited)"
+        IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+        SWIFT_VERSION: "6.0"
   29erUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -132,3 +166,7 @@ schemes:
     test:
       targets:
         - 29erUITests
+  probe:
+    build:
+      targets:
+        probe: all

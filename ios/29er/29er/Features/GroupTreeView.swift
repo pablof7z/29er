@@ -31,8 +31,6 @@ struct GroupTreeView: View {
                 ErrorStateView(
                     message: "The background service stopped. Relaunch the app to recover."
                 )
-            } else if model.discoveredGroups.isSearching && tree.roots.isEmpty {
-                LoadingView(label: "Loading rooms…")
             } else if tree.roots.isEmpty {
                 EmptyStateView(
                     title: "No Rooms",
