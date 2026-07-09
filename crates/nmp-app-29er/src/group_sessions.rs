@@ -47,10 +47,10 @@ use nmp_nip29::{
     close_nip29_group_roster_session, close_nip29_joined_groups_session,
     open_nip29_group_discovery_session_with_reader, open_nip29_group_events_session_with_reader,
     open_nip29_group_roster_session, open_nip29_joined_groups_session_with_reader,
-    GroupEventsProjection, GroupId, JoinedGroupsProjection, Nip29GroupDiscoveryHandle,
-    Nip29GroupDiscoverySession, Nip29GroupEventsHandle, Nip29GroupEventsSession,
-    Nip29GroupRosterHandle, Nip29GroupRosterSession, Nip29JoinedGroupsHandle,
-    Nip29JoinedGroupsSession,
+    DiscoveredGroupsProjection, GroupEventsProjection, GroupId, JoinedGroupsProjection,
+    Nip29GroupDiscoveryHandle, Nip29GroupDiscoverySession, Nip29GroupEventsHandle,
+    Nip29GroupEventsSession, Nip29GroupRosterHandle, Nip29GroupRosterSession,
+    Nip29JoinedGroupsHandle, Nip29JoinedGroupsSession,
 };
 use nmp_reactions::{
     close_nip25_group_reactions_session, open_nip25_group_reactions_session_with_reader,
@@ -78,6 +78,12 @@ struct DiscoverySession {
     tree_projection: Arc<GroupTreeProjection>,
     preview: Arc<GroupPreviewSessions>,
     presence: Arc<GroupPresenceSessions>,
+    /// The live discovery reader — the "discovered-groups reactive source"
+    /// [`GroupSessions::open_discovery`] and the identity-change observer
+    /// (`GroupSessions::new`) reconcile `preview`/`presence` against. Never
+    /// read from inside the snapshot-tick closure's own registration (see
+    /// that closure's doc note) — only from those two off-tick call sites.
+    discovered: Arc<DiscoveredGroupsProjection>,
 }
 
 /// The live `"app.29er.group_chat"` composition opened by
@@ -94,7 +100,12 @@ struct ChatSession {
 /// kernel-level singleton semantics each `Nip29*Session` door already
 /// implements.
 pub(crate) struct GroupSessions {
-    discovery: Mutex<Option<DiscoverySession>>,
+    /// `Arc`-wrapped so the identity-change observer closure (registered once
+    /// in [`Self::new`], before any discovery session exists) can look up
+    /// whichever discovery session is live at the time identity changes and
+    /// reconcile its `preview`/`presence` collections — the off-tick lane
+    /// [`Self::open_discovery`] also uses. See `DiscoverySession::discovered`.
+    discovery: Arc<Mutex<Option<DiscoverySession>>>,
     chat: Mutex<Option<ChatSession>>,
     roster: Mutex<Option<Nip29GroupRosterHandle>>,
     /// The relay the joined-groups session should be scoped to. `Some` only
@@ -115,6 +126,7 @@ impl GroupSessions {
     /// registering its own identity-change observer "before sign-in so we
     /// never miss the first frame".
     pub(crate) fn new(app: &Arc<NmpApp>) -> Self {
+        let discovery: Arc<Mutex<Option<DiscoverySession>>> = Arc::new(Mutex::new(None));
         let joined_relay: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let joined: Arc<Mutex<Option<Nip29JoinedGroupsHandle>>> = Arc::new(Mutex::new(None));
         let joined_reader: Arc<Mutex<Option<Arc<JoinedGroupsProjection>>>> =
@@ -124,19 +136,38 @@ impl GroupSessions {
         let observer_relay = Arc::clone(&joined_relay);
         let observer_joined = Arc::clone(&joined);
         let observer_reader = Arc::clone(&joined_reader);
+        let observer_discovery = Arc::clone(&discovery);
         app.register_identity_change_observer(move |pubkey| {
             let relay = observer_relay.lock().ok().and_then(|slot| slot.clone());
             sync_joined_session(
                 &observer_app,
-                pubkey,
+                pubkey.clone(),
                 relay,
                 &observer_joined,
                 &observer_reader,
             );
+            // This callback runs on the update-listener thread, never the
+            // actor thread (`IdentityChangeRegistrar`'s own contract) — the
+            // sanctioned off-tick lane to reconcile `preview`/`presence`
+            // against the live discovery session's current discovered-groups
+            // snapshot. `active_pubkey` lives inside collection B's
+            // per-key descriptor (`group_presence::PresenceDescriptor`), so
+            // this re-sync is exactly what turns an identity change into a
+            // `Replace` of the affected presence rows instead of the old
+            // force-close+reopen of every row.
+            if let Ok(discovery_guard) = observer_discovery.lock() {
+                if let Some(session) = discovery_guard.as_ref() {
+                    let snapshot = session.discovered.snapshot();
+                    session.preview.sync(&snapshot);
+                    session
+                        .presence
+                        .sync(&snapshot, pubkey.as_deref().unwrap_or_default());
+                }
+            }
         });
 
         Self {
-            discovery: Mutex::new(None),
+            discovery,
             chat: Mutex::new(None),
             roster: Mutex::new(None),
             joined_relay,
@@ -160,6 +191,23 @@ impl GroupSessions {
         if let Ok(mut relay_slot) = self.joined_relay.lock() {
             *relay_slot = Some(host_relay_url);
         }
+        let active_pubkey = app
+            .active_account_handle()
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone());
+        // Reconcile `preview`/`presence` ONCE, here on the open-call lane —
+        // never from inside the snapshot-tick closure registered below (the
+        // 29er#60 deadlock class; see `build_discovery_session`'s doc note).
+        // Ongoing reactivity to a later identity switch is the
+        // identity-change observer's job (`Self::new`); ongoing reactivity to
+        // newly-discovered groups streamed in after this open is a follow-up
+        // (flagged in the migration PR, not solved by #3115 itself).
+        let initial_snapshot = session.discovered.snapshot();
+        session.preview.sync(&initial_snapshot);
+        session
+            .presence
+            .sync(&initial_snapshot, active_pubkey.as_deref().unwrap_or_default());
         if let Ok(mut slot) = self.discovery.lock() {
             *slot = Some(session);
         }
@@ -168,11 +216,6 @@ impl GroupSessions {
         // in which case the identity-change observer already fired against a
         // `None` relay and skipped. Re-run the same sync now that the relay
         // is known.
-        let active_pubkey = app
-            .active_account_handle()
-            .lock()
-            .ok()
-            .and_then(|slot| slot.clone());
         let relay = self.joined_relay.lock().ok().and_then(|slot| slot.clone());
         sync_joined_session(
             &app,
@@ -193,8 +236,8 @@ impl GroupSessions {
         sync_joined_session(app, None, None, &self.joined, &self.joined_reader);
         if let Ok(mut slot) = self.discovery.lock() {
             if let Some(session) = slot.take() {
-                session.presence.close_all(app);
-                session.preview.close_all(app, &session.tree_projection);
+                session.presence.close_all();
+                session.preview.close_all(&session.tree_projection);
                 app.remove_snapshot_projection(GROUP_TREE_SCHEMA_ID);
                 let _ = close_nip29_group_discovery_session(app, session.handle);
             }
@@ -335,6 +378,17 @@ fn sync_joined_session(
 /// Open NMP's canonical discovery door and layer the 29er-owned kind:9
 /// group-tree composite on top. Returns `None` (D6 fail-closed) when the
 /// kernel refuses the observed feed-source session.
+///
+/// Only CONSTRUCTS the `preview`/`presence` collections here — never
+/// reconciles them. [`GroupSessions::open_discovery`] runs the one-time
+/// initial reconcile after this returns; the registered snapshot-tick
+/// closure below only READS their current outputs on every tick, exactly
+/// like `tree_messages`/`joined_reader`. Calling `KeyedReadCollection::
+/// reconcile`/`close` (which `preview.sync`/`presence.sync`/`close_all` do)
+/// from inside this closure is the 29er#60 deadlock class — the whole point
+/// of the #3115 migration is that this closure structurally cannot do that
+/// anymore (there is no `app`/collection handle captured for it to call
+/// `.sync()` on).
 fn build_discovery_session(
     app: Arc<NmpApp>,
     relay_url: String,
@@ -346,14 +400,15 @@ fn build_discovery_session(
     );
 
     let tree_messages = Arc::new(GroupTreeProjection::new());
-    let preview = Arc::new(GroupPreviewSessions::new());
-    let presence = Arc::new(GroupPresenceSessions::new());
+    let preview = Arc::new(GroupPreviewSessions::new(
+        Arc::clone(&app),
+        Arc::clone(&tree_messages),
+    ));
+    let presence = Arc::new(GroupPresenceSessions::new(Arc::clone(&app)));
 
     let tree_discovered = Arc::clone(&discovered);
     let tree_messages_for_sidecar = Arc::clone(&tree_messages);
-    let preview_for_sidecar = Arc::clone(&preview);
     let presence_for_sidecar = Arc::clone(&presence);
-    let app_for_presence = Arc::clone(&app);
     let active_account = app.active_account_handle();
     let joined_reader_for_sidecar = Arc::clone(joined_reader);
     let registration_key = ProjectionKey::app_owned(GROUP_TREE_SCHEMA_ID)
@@ -361,21 +416,17 @@ fn build_discovery_session(
         .dynamic_token();
     app.register_typed_snapshot_projection(registration_key, move || {
         let snapshot = tree_discovered.snapshot();
-        preview_for_sidecar.sync(
-            &app_for_presence,
-            &snapshot,
-            Arc::clone(&tree_messages_for_sidecar),
-        );
         let messages = tree_messages_for_sidecar.snapshot();
         // Re-read the live active pubkey + joined reader every tick so
         // membership is recomputed on an account switch and never leaks a
-        // previous account's truth.
+        // previous account's truth. Reading `presence_for_sidecar`'s current
+        // per-key outputs (`snapshot_state`) is a read, not a reconcile — it
+        // does not open/close anything.
         let active_pubkey = active_account
             .lock()
             .ok()
             .and_then(|slot| slot.clone())
             .unwrap_or_default();
-        presence_for_sidecar.sync(&app_for_presence, &snapshot, &active_pubkey);
         let presence_state = presence_for_sidecar.snapshot_state();
         let joined_snapshot = joined_reader_for_sidecar
             .lock()
@@ -399,6 +450,7 @@ fn build_discovery_session(
         tree_projection: tree_messages,
         preview,
         presence,
+        discovered,
     })
 }
 
