@@ -36,6 +36,26 @@
 //! folded into `"app.29er.group_tree"` — stays correct across a later sign-in
 //! or account switch, not just whatever account happened to be active when
 //! discovery was opened.
+//!
+//! ## `preview`/`presence` reconcile is driven by an update-frame observer
+//!
+//! [`GroupSessions::open_discovery`] registers ONE
+//! `NmpApp::register_update_frame_observer` callback (#3127) alongside the
+//! discovery session: it fires on the update-listener thread on EVERY
+//! emitted update frame (never the actor thread), re-derives the current
+//! desired group-set from the live `discovered` reader, and reconciles both
+//! `preview`/`presence` `KeyedReadCollection`s against it. This ONE trigger
+//! subsumes what used to be two separate call sites (an open-time one-shot
+//! sync, and a second sync from the identity-change observer): a frame is
+//! emitted after every kernel state change, including discovery replay
+//! landing and an identity/active-account switch (the doc comment on
+//! `IdentityChangeRegistrar` guarantees the active-keys slot is written
+//! BEFORE the frame that follows it is built), so reading the live
+//! `active_pubkey` inside the SAME callback picks up an account switch with
+//! no separate observer needed. `KeyedReadCollection::reconcile` is a no-op
+//! diff when nothing changed, so firing on every frame (not just
+//! discovery-relevant ones) is cheap and correct (#3115's own contract).
+//! [`GroupSessions::close_discovery`] unregisters the observer.
 
 use std::sync::{Arc, Mutex};
 
@@ -79,11 +99,15 @@ struct DiscoverySession {
     preview: Arc<GroupPreviewSessions>,
     presence: Arc<GroupPresenceSessions>,
     /// The live discovery reader — the "discovered-groups reactive source"
-    /// [`GroupSessions::open_discovery`] and the identity-change observer
-    /// (`GroupSessions::new`) reconcile `preview`/`presence` against. Never
-    /// read from inside the snapshot-tick closure's own registration (see
-    /// that closure's doc note) — only from those two off-tick call sites.
+    /// the update-frame observer (registered in
+    /// [`GroupSessions::open_discovery`]) reconciles `preview`/`presence`
+    /// against on every emitted frame. Never read from inside the
+    /// snapshot-tick closure's own registration (see that closure's doc
+    /// note) — only from the observer's off-actor-thread callback.
     discovered: Arc<DiscoveredGroupsProjection>,
+    /// Handle for [`NmpApp::unregister_update_frame_observer`], revoked in
+    /// [`GroupSessions::close_discovery`].
+    update_frame_observer_id: nmp_native_runtime::UpdateFrameObserverId,
 }
 
 /// The live `"app.29er.group_chat"` composition opened by
@@ -136,34 +160,16 @@ impl GroupSessions {
         let observer_relay = Arc::clone(&joined_relay);
         let observer_joined = Arc::clone(&joined);
         let observer_reader = Arc::clone(&joined_reader);
-        let observer_discovery = Arc::clone(&discovery);
         app.register_identity_change_observer(move |pubkey| {
             let relay = observer_relay.lock().ok().and_then(|slot| slot.clone());
-            sync_joined_session(
-                &observer_app,
-                pubkey.clone(),
-                relay,
-                &observer_joined,
-                &observer_reader,
-            );
-            // This callback runs on the update-listener thread, never the
-            // actor thread (`IdentityChangeRegistrar`'s own contract) — the
-            // sanctioned off-tick lane to reconcile `preview`/`presence`
-            // against the live discovery session's current discovered-groups
-            // snapshot. `active_pubkey` lives inside collection B's
-            // per-key descriptor (`group_presence::PresenceDescriptor`), so
-            // this re-sync is exactly what turns an identity change into a
-            // `Replace` of the affected presence rows instead of the old
-            // force-close+reopen of every row.
-            if let Ok(discovery_guard) = observer_discovery.lock() {
-                if let Some(session) = discovery_guard.as_ref() {
-                    let snapshot = session.discovered.snapshot();
-                    session.preview.sync(&snapshot);
-                    session
-                        .presence
-                        .sync(&snapshot, pubkey.as_deref().unwrap_or_default());
-                }
-            }
+            sync_joined_session(&observer_app, pubkey, relay, &observer_joined, &observer_reader);
+            // `preview`/`presence` are NOT re-synced here: the update-frame
+            // observer registered in `Self::open_discovery` already re-reads
+            // the live active_pubkey and reconciles both on every emitted
+            // frame — including the frame that follows this very identity
+            // change (`IdentityChangeRegistrar`'s own contract: the
+            // active-keys slot is written BEFORE that frame is built). A
+            // second trigger here would be redundant, not incorrect.
         });
 
         Self {
@@ -181,7 +187,7 @@ impl GroupSessions {
     /// `open_group_discovery` and `refresh_group_discovery` do so). `false`
     /// when the discovery composition could not be opened (D6).
     pub(crate) fn open_discovery(&self, app: Arc<NmpApp>, host_relay_url: String) -> bool {
-        let Some(session) = build_discovery_session(
+        let Some(mut session) = build_discovery_session(
             Arc::clone(&app),
             host_relay_url.clone(),
             &self.joined_reader,
@@ -191,31 +197,39 @@ impl GroupSessions {
         if let Ok(mut relay_slot) = self.joined_relay.lock() {
             *relay_slot = Some(host_relay_url);
         }
-        let active_pubkey = app
-            .active_account_handle()
-            .lock()
-            .ok()
-            .and_then(|slot| slot.clone());
-        // Reconcile `preview`/`presence` ONCE, here on the open-call lane —
-        // never from inside the snapshot-tick closure registered below (the
-        // 29er#60 deadlock class; see `build_discovery_session`'s doc note).
-        // Ongoing reactivity to a later identity switch is the
-        // identity-change observer's job (`Self::new`); ongoing reactivity to
-        // newly-discovered groups streamed in after this open is a follow-up
-        // (flagged in the migration PR, not solved by #3115 itself).
-        let initial_snapshot = session.discovered.snapshot();
-        session.preview.sync(&initial_snapshot);
-        session
-            .presence
-            .sync(&initial_snapshot, active_pubkey.as_deref().unwrap_or_default());
+
+        // THE sole reactive driver for `preview`/`presence` (module docs):
+        // fires on every emitted update frame, on the update-listener
+        // thread — never the actor thread (the 29er#60 deadlock class this
+        // whole migration removes by construction; see
+        // `build_discovery_session`'s doc note on the tick closure).
+        // Re-derives the desired group set from the live discovery reader
+        // and the live active_pubkey on every call, so ONE trigger covers
+        // both discovery replay landing and a later identity switch.
+        let observer_app = Arc::clone(&app);
+        let observer_discovery = Arc::clone(&self.discovery);
+        session.update_frame_observer_id = app.register_update_frame_observer(move || {
+            if let Ok(guard) = observer_discovery.lock() {
+                if let Some(session) = guard.as_ref() {
+                    reconcile_group_tree_sessions(&observer_app, session);
+                }
+            }
+        });
+
         if let Ok(mut slot) = self.discovery.lock() {
             *slot = Some(session);
         }
+
         // Retroactively sync the joined-groups session: an account may
         // already be active (sign-in happened before this discovery open),
         // in which case the identity-change observer already fired against a
         // `None` relay and skipped. Re-run the same sync now that the relay
         // is known.
+        let active_pubkey = app
+            .active_account_handle()
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone());
         let relay = self.joined_relay.lock().ok().and_then(|slot| slot.clone());
         sync_joined_session(
             &app,
@@ -236,6 +250,7 @@ impl GroupSessions {
         sync_joined_session(app, None, None, &self.joined, &self.joined_reader);
         if let Ok(mut slot) = self.discovery.lock() {
             if let Some(session) = slot.take() {
+                app.unregister_update_frame_observer(session.update_frame_observer_id);
                 session.presence.close_all();
                 session.preview.close_all(&session.tree_projection);
                 app.remove_snapshot_projection(GROUP_TREE_SCHEMA_ID);
@@ -375,15 +390,38 @@ fn sync_joined_session(
     }
 }
 
+/// Reconciles `session.preview`/`session.presence` against `session
+/// .discovered`'s CURRENT snapshot and the CURRENT live `active_pubkey`.
+///
+/// This is the ONE reconcile driver (module docs): the update-frame observer
+/// registered in [`GroupSessions::open_discovery`] calls this on every
+/// emitted frame, on the update-listener thread — never the actor thread, so
+/// it never re-enters the 29er#60 deadlock class. `KeyedReadCollection::
+/// reconcile` (which `preview.sync`/`presence.sync` call) is a no-op diff
+/// when nothing changed, so calling this unconditionally on every frame
+/// (not just discovery-relevant ones) is cheap and correct.
+fn reconcile_group_tree_sessions(app: &NmpApp, session: &DiscoverySession) {
+    let snapshot = session.discovered.snapshot();
+    let active_pubkey = app
+        .active_account_handle()
+        .lock()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .unwrap_or_default();
+    session.preview.sync(&snapshot);
+    session.presence.sync(&snapshot, &active_pubkey);
+}
+
 /// Open NMP's canonical discovery door and layer the 29er-owned kind:9
 /// group-tree composite on top. Returns `None` (D6 fail-closed) when the
 /// kernel refuses the observed feed-source session.
 ///
 /// Only CONSTRUCTS the `preview`/`presence` collections here — never
-/// reconciles them. [`GroupSessions::open_discovery`] runs the one-time
-/// initial reconcile after this returns; the registered snapshot-tick
-/// closure below only READS their current outputs on every tick, exactly
-/// like `tree_messages`/`joined_reader`. Calling `KeyedReadCollection::
+/// reconciles them ([`GroupSessions::open_discovery`] registers the
+/// update-frame observer that does, via [`reconcile_group_tree_sessions`],
+/// after this returns). The registered snapshot-tick closure below only
+/// READS their current outputs on every tick, exactly like
+/// `tree_messages`/`joined_reader`. Calling `KeyedReadCollection::
 /// reconcile`/`close` (which `preview.sync`/`presence.sync`/`close_all` do)
 /// from inside this closure is the 29er#60 deadlock class — the whole point
 /// of the #3115 migration is that this closure structurally cannot do that
@@ -451,6 +489,12 @@ fn build_discovery_session(
         preview,
         presence,
         discovered,
+        // Placeholder — `GroupSessions::open_discovery` overwrites this with
+        // the real id right after this function returns (registering the
+        // observer needs `&self.discovery`, which this free function does
+        // not have access to). `0` is never a real id
+        // (`next_update_frame_observer_id` starts at 1).
+        update_frame_observer_id: 0,
     })
 }
 
@@ -592,9 +636,78 @@ impl TwentyNinerApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nmp_core::ObservedProjectionSink;
 
     fn group_id_json() -> String {
         r#"{"host_relay_url":"wss://groups.example.com","local_id":"room"}"#.to_string()
+    }
+
+    /// A kind:39000 group-metadata event `DiscoveredGroupsProjection::
+    /// on_kernel_event` accepts: a `["d", local_id]` tag, attributed via
+    /// `relay_provenance` to a relay the discovery session tracks.
+    fn metadata_event(local_id: &str, relay: &str) -> nmp_core::substrate::KernelEvent {
+        nmp_core::substrate::KernelEvent {
+            id: format!("meta-{local_id}"),
+            author: "author-pubkey".to_string(),
+            kind: nmp_nip29::kinds::KIND_GROUP_METADATA,
+            created_at: 100,
+            tags: vec![vec!["d".to_string(), local_id.to_string()]],
+            content: String::new(),
+            relay_provenance: vec![relay.to_string()],
+        }
+    }
+
+    // Regression for the exact gap flagged in #63: a group discovered LIVE
+    // (after `open_group_discovery`, with no identity change involved) must
+    // still get a preview/presence row — not just groups known at open time.
+    // The update-frame observer (`reconcile_group_tree_sessions`, registered
+    // in `GroupSessions::open_discovery`) is what NMP's own
+    // `register_update_frame_observer` test suite proves fires on every
+    // emitted frame; this test proves OUR registered callback body correctly
+    // reconciles the live `discovered` snapshot when invoked, which is
+    // exactly what that callback does on each firing.
+    #[test]
+    fn newly_discovered_group_reconciles_via_the_update_frame_driver_without_identity_change() {
+        let app = TwentyNinerApp::new();
+        assert!(app.open_group_discovery("wss://groups.example.com".to_string()));
+
+        // No signer/identity ever added in this test — proves the pickup is
+        // independent of any identity-change trigger.
+        {
+            let guard = app.sessions().discovery.lock().unwrap();
+            let session = guard.as_ref().expect("discovery session is open");
+            assert_eq!(session.preview.live_count_for_test(), 0);
+            assert_eq!(session.presence.live_count_for_test(), 0);
+
+            // Simulate a group discovered live, streamed in after open —
+            // directly on the shared reader, exactly as the actor would
+            // fold a real relay-signed kind:39000 event in.
+            session
+                .discovered
+                .on_kernel_event(&metadata_event("new-room", "wss://groups.example.com"));
+        }
+
+        // What the update-frame observer's callback runs on every emitted
+        // frame (module docs) — re-derive from the CURRENT discovered
+        // snapshot, no open-time/identity-change trigger involved.
+        {
+            let guard = app.sessions().discovery.lock().unwrap();
+            let session = guard.as_ref().expect("discovery session is open");
+            reconcile_group_tree_sessions(app.app(), session);
+        }
+
+        let guard = app.sessions().discovery.lock().unwrap();
+        let session = guard.as_ref().expect("discovery session is open");
+        assert_eq!(
+            session.preview.live_count_for_test(),
+            1,
+            "the live-discovered group must mount a preview source"
+        );
+        // `presence.sync` closes fail-safe on an empty active_pubkey (no
+        // signer was added), matching production behavior — the preview
+        // side (which has no such account gate) is the meaningful
+        // assertion here.
+        assert_eq!(session.presence.live_count_for_test(), 0);
     }
 
     #[test]

@@ -133,6 +133,12 @@ impl GroupPresenceSessions {
     pub fn close_all(&self) {
         self.collection.close();
     }
+
+    /// Count of currently-live presence sessions (leak-audit / test-support).
+    #[cfg(test)]
+    pub(crate) fn live_count_for_test(&self) -> usize {
+        self.collection.live_count()
+    }
 }
 
 fn member_key(group: &GroupId) -> MemberKey {
