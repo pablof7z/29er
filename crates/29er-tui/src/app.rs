@@ -291,7 +291,6 @@ impl Default for IdentityState {
 /// NMP emits an update frame, the TUI re-reads its Rust-owned projection readers
 /// once and replaces the latest UI projection. There is no timer-driven refresh.
 struct ProjectionUpdateBridge {
-    app: Arc<NmpApp>,
     shared: Arc<SharedProjections>,
     projection_tx: watch::Sender<ProjectionView>,
 }
@@ -299,8 +298,13 @@ struct ProjectionUpdateBridge {
 /// Send+Sync read-side state shared between App and the NMP update listener.
 pub struct SharedProjections {
     pub group_tree: Arc<GroupTreeProjection>,
-    pub group_preview: Arc<GroupPreviewSessions>,
-    pub group_presence: Arc<GroupPresenceSessions>,
+    /// `None` until [`App::init_nmp`] resolves a live `Arc<NmpApp>` — both
+    /// collections now bake their `NmpApp` handle in at construction (#3115
+    /// `KeyedReadCollection`), so they cannot be built at [`App::new`] time,
+    /// before login. Mirrors `discovered`/`joined` below, which are already
+    /// `Mutex<Option<..>>` for the same reason.
+    pub group_preview: Mutex<Option<Arc<GroupPreviewSessions>>>,
+    pub group_presence: Mutex<Option<Arc<GroupPresenceSessions>>>,
     pub discovered: Mutex<Option<Arc<DiscoveredGroupsProjection>>>,
     /// Active-account joined/admin state (v0.8.2 replacement for the removed
     /// `GroupMembersProjection`). Wired lazily once the active pubkey resolves
@@ -323,23 +327,34 @@ pub struct SharedProjections {
     pub last_update_at: Mutex<Option<std::time::Instant>>,
 }
 impl SharedProjections {
-    fn sync_group_sources(&self, app: &NmpApp) {
+    /// Reconciles both `KeyedReadCollection`s against the current discovered
+    /// set. Callers MUST only invoke this off the actor thread — the
+    /// identity-change observer and [`on_nmp_update`] (both run on NMP's
+    /// update-listener thread) are the two sanctioned call sites; never a
+    /// snapshot-tick/render closure (the 29er#60 deadlock class).
+    fn sync_group_sources(&self) {
         let discovered = self
             .discovered
             .lock()
             .ok()
             .and_then(|slot| slot.as_ref().map(|projection| projection.snapshot()))
             .unwrap_or_default();
-        self.group_preview
-            .sync(app, &discovered, Arc::clone(&self.group_tree));
+        if let Ok(slot) = self.group_preview.lock() {
+            if let Some(preview) = slot.as_ref() {
+                preview.sync(&discovered);
+            }
+        }
         let active_pubkey = self
             .active_account
             .lock()
             .ok()
             .and_then(|s| s.lock().ok().and_then(|v| v.clone()))
             .unwrap_or_default();
-        self.group_presence
-            .sync(app, &discovered, active_pubkey.as_str());
+        if let Ok(slot) = self.group_presence.lock() {
+            if let Some(presence) = slot.as_ref() {
+                presence.sync(&discovered, active_pubkey.as_str());
+            }
+        }
     }
 
     pub fn project(&self) -> ProjectionView {
@@ -350,7 +365,12 @@ impl SharedProjections {
             .and_then(|slot| slot.as_ref().map(|projection| projection.snapshot()))
             .unwrap_or_default();
         let tree_state = self.group_tree.snapshot();
-        let presence_state = self.group_presence.snapshot_state();
+        let presence_state = self
+            .group_presence
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|presence| presence.snapshot_state()))
+            .unwrap_or_default();
         // Resolve my_pubkey first so it can be passed to tier computation.
         let me = self
             .active_account
@@ -510,8 +530,8 @@ impl App {
         let relay_url = nmp_app_29er::config::public_group_relay_url().to_string();
         let shared = Arc::new(SharedProjections {
             group_tree: Arc::new(GroupTreeProjection::new()),
-            group_preview: Arc::new(GroupPreviewSessions::new()),
-            group_presence: Arc::new(GroupPresenceSessions::new()),
+            group_preview: Mutex::new(None),
+            group_presence: Mutex::new(None),
             discovered: Mutex::new(None),
             joined: Mutex::new(None),
             joined_handle: Mutex::new(None),
@@ -618,6 +638,22 @@ impl App {
             *slot = app.active_account_handle();
         }
 
+        // `GroupPreviewSessions`/`GroupPresenceSessions` bake their `NmpApp`
+        // handle in at construction (#3115 `KeyedReadCollection`), so they
+        // can only be built here, once `app` exists — not at `App::new`
+        // (before login). `login()`/`init_nmp` run at most once per process
+        // (no re-login path in the TUI), so there is exactly one live
+        // instance for the process lifetime, same as `self.app` itself.
+        if let Ok(mut slot) = self.shared.group_preview.lock() {
+            *slot = Some(Arc::new(GroupPreviewSessions::new(
+                Arc::clone(&app),
+                Arc::clone(&self.shared.group_tree),
+            )));
+        }
+        if let Ok(mut slot) = self.shared.group_presence.lock() {
+            *slot = Some(Arc::new(GroupPresenceSessions::new(Arc::clone(&app))));
+        }
+
         // The `JoinedGroupsProjection` captures the active pubkey at
         // construction, which is not known until sign-in resolves. Wire it
         // from an identity-change observer (registered BEFORE sign-in so we
@@ -658,7 +694,7 @@ impl App {
                 }
                 *slot = reader;
             }
-            joined_shared.sync_group_sources(&joined_app);
+            joined_shared.sync_group_sources();
             let _ = joined_projection_tx.send(joined_shared.project());
         });
 
@@ -668,7 +704,6 @@ impl App {
         // Ownership of the boxed sink moves into the runtime's update-listener
         // slot; `App` does not need to hold it.
         let update_bridge = Box::new(ProjectionUpdateBridge {
-            app: Arc::clone(&app),
             shared: Arc::clone(&self.shared),
             projection_tx: self.projection_tx.clone(),
         });
@@ -684,7 +719,7 @@ impl App {
         if let Ok(mut slot) = self.shared.discovered.lock() {
             *slot = Some(discovered);
         }
-        self.shared.sync_group_sources(&app);
+        self.shared.sync_group_sources();
 
         app.add_signer(
             nmp_core::SignerSource::LocalNsec(zeroize::Zeroizing::new(nsec.to_string())),
@@ -929,10 +964,11 @@ impl App {
         }
         let messages = self.shared.group_tree.snapshot();
         let latest = messages.last_message_for(&group.local_id);
-        let _ = self
-            .shared
-            .group_presence
-            .mark_read_to_latest(&group.local_id, latest);
+        if let Ok(slot) = self.shared.group_presence.lock() {
+            if let Some(presence) = slot.as_ref() {
+                let _ = presence.mark_read_to_latest(&group.local_id, latest);
+            }
+        }
         self.selected_channel = Some(group);
         self.message_scroll = 0;
         self.focus = Focus::Chat;
@@ -1382,10 +1418,16 @@ impl Drop for App {
             self.release_event_ref(&primary_id);
         }
         let Some(app) = self.app.take() else { return };
-        self.shared
-            .group_preview
-            .close_all(&app, &self.shared.group_tree);
-        self.shared.group_presence.close_all(&app);
+        if let Ok(slot) = self.shared.group_preview.lock() {
+            if let Some(preview) = slot.as_ref() {
+                preview.close_all(&self.shared.group_tree);
+            }
+        }
+        if let Ok(slot) = self.shared.group_presence.lock() {
+            if let Some(presence) = slot.as_ref() {
+                presence.close_all();
+            }
+        }
         if let Some(handle) = self.discovery_handle.take() {
             let _ = close_nip29_group_discovery_session(&*app, handle);
         }
@@ -1512,7 +1554,7 @@ fn on_nmp_update(bridge: &ProjectionUpdateBridge, bytes: Vec<u8>) {
             }
         }
     }
-    bridge.shared.sync_group_sources(&bridge.app);
+    bridge.shared.sync_group_sources();
     let _ = bridge.projection_tx.send(bridge.shared.project());
 }
 
@@ -2246,9 +2288,7 @@ mod tests {
     #[test]
     fn nmp_update_push_publishes_projection_without_profile_sidecar() {
         let (app, mut rx) = make_app();
-        let runtime = Arc::new(new_app());
         let bridge = ProjectionUpdateBridge {
-            app: runtime,
             shared: Arc::clone(&app.shared),
             projection_tx: app.projection_tx.clone(),
         };
@@ -2263,7 +2303,6 @@ mod tests {
     #[test]
     fn nmp_update_push_refreshes_group_tree_without_polling() {
         let (app, mut rx) = make_app();
-        let runtime = Arc::new(new_app());
         let discovered = Arc::new(DiscoveredGroupsProjection::new(["wss://h"]));
         discovered.on_kernel_event(&metadata_evt("meta-child", "child", 100, "child"));
         app.shared.group_tree.on_kernel_event(&evt(
@@ -2277,7 +2316,6 @@ mod tests {
         }
 
         let bridge = ProjectionUpdateBridge {
-            app: runtime,
             shared: Arc::clone(&app.shared),
             projection_tx: app.projection_tx.clone(),
         };
