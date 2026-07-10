@@ -516,6 +516,13 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
     func addRelay(url: String, role: String)
 
     /**
+     * Clear a previously-reported viewport, reverting to the pre-#61
+     * default of keeping every discovered group's reads open. Idempotent
+     * (D6).
+     */
+    func clearGroupTreeViewport()
+
+    /**
      * Close the open group-chat session (idempotent, D6).
      */
     func closeGroupChat()
@@ -726,6 +733,20 @@ public protocol TwentyNinerAppProtocol: AnyObject, Sendable {
     func setCapabilityCallback(sink: CapabilitySink?)
 
     /**
+     * Report the group-tree viewport: the `local_id`s of groups currently
+     * visible (or near-visible) in the shell's rendered list (29er#61, per
+     * ADR-0078 — viewport is a caller input, not something NMP's
+     * `KeyedReadCollection` knows about). Feeds a viewport-filtered
+     * desired-set into the preview/presence collections and reconciles
+     * them immediately: scrolling a group into view opens its reads,
+     * scrolling it away (past a small look-ahead/behind buffer) closes
+     * them. A no-op call before any discovery session is open — the
+     * viewport is still recorded, so the session's first reconcile picks
+     * it up. Idempotent for an unchanged `visible_local_ids` (D6).
+     */
+    func setGroupTreeViewport(visibleLocalIds: [String])
+
+    /**
      * Set the LMDB storage directory (pre-start). Empty clears it. Returns
      * `true` when accepted (`NmpConfigStatus::Ok`).
      */
@@ -835,6 +856,17 @@ open func addRelay(url: String, role: String)  {try! rustCall() {
     uniffi_nmp_app_29er_fn_method_twentyninerapp_add_relay(self.uniffiClonePointer(),
         FfiConverterString.lower(url),
         FfiConverterString.lower(role),$0
+    )
+}
+}
+
+    /**
+     * Clear a previously-reported viewport, reverting to the pre-#61
+     * default of keeping every discovered group's reads open. Idempotent
+     * (D6).
+     */
+open func clearGroupTreeViewport()  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_clear_group_tree_viewport(self.uniffiClonePointer(),$0
     )
 }
 }
@@ -1213,6 +1245,25 @@ open func seedRelaysFromJson(json: String) -> Bool  {
 open func setCapabilityCallback(sink: CapabilitySink?)  {try! rustCall() {
     uniffi_nmp_app_29er_fn_method_twentyninerapp_set_capability_callback(self.uniffiClonePointer(),
         FfiConverterOptionCallbackInterfaceCapabilitySink.lower(sink),$0
+    )
+}
+}
+
+    /**
+     * Report the group-tree viewport: the `local_id`s of groups currently
+     * visible (or near-visible) in the shell's rendered list (29er#61, per
+     * ADR-0078 — viewport is a caller input, not something NMP's
+     * `KeyedReadCollection` knows about). Feeds a viewport-filtered
+     * desired-set into the preview/presence collections and reconciles
+     * them immediately: scrolling a group into view opens its reads,
+     * scrolling it away (past a small look-ahead/behind buffer) closes
+     * them. A no-op call before any discovery session is open — the
+     * viewport is still recorded, so the session's first reconcile picks
+     * it up. Idempotent for an unchanged `visible_local_ids` (D6).
+     */
+open func setGroupTreeViewport(visibleLocalIds: [String])  {try! rustCall() {
+    uniffi_nmp_app_29er_fn_method_twentyninerapp_set_group_tree_viewport(self.uniffiClonePointer(),
+        FfiConverterSequenceString.lower(visibleLocalIds),$0
     )
 }
 }
@@ -1742,6 +1793,31 @@ fileprivate struct FfiConverterOptionCallbackInterfaceUpdateSink: FfiConverterRu
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
+    typealias SwiftType = [String]
+
+    public static func write(_ value: [String], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterString.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [String] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [String]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterString.read(from: &buf))
+        }
+        return seq
+    }
+}
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -1758,6 +1834,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.contractVersionMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_add_relay() != 23241) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_clear_group_tree_viewport() != 37227) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_close_group_chat() != 895) {
@@ -1851,6 +1930,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_set_capability_callback() != 18349) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_set_group_tree_viewport() != 46568) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_nmp_app_29er_checksum_method_twentyninerapp_set_storage_path() != 27333) {
