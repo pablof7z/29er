@@ -55,6 +55,17 @@
 //! no separate observer needed. `KeyedReadCollection::reconcile` is a no-op
 //! diff when nothing changed, so firing on every frame (not just
 //! discovery-relevant ones) is cheap and correct (#3115's own contract).
+//!
+//! Since #3131, the callback filters via the frame's `UpdateFrameInfo`
+//! instead of unconditionally reconciling on every frame: it skips the
+//! reconcile unless the `nmp.nip29.discovered_groups` typed sidecar
+//! projection changed on this frame OR the live `active_pubkey` diverged
+//! from the value observed on the previous frame (tracked locally — identity
+//! switches are not a typed sidecar entry, so they cannot be read off
+//! `info` and must be diffed directly to avoid silently missing an account
+//! switch). Those two inputs are the entirety of what
+//! `reconcile_group_tree_sessions` reads, so this is a lossless filter, not
+//! an approximation.
 //! [`GroupSessions::close_discovery`] unregisters the observer.
 
 use std::sync::{Arc, Mutex};
@@ -206,15 +217,47 @@ impl GroupSessions {
         // Re-derives the desired group set from the live discovery reader
         // and the live active_pubkey on every call, so ONE trigger covers
         // both discovery replay landing and a later identity switch.
+        //
+        // `reconcile_group_tree_sessions` reads exactly two inputs:
+        // `session.discovered.snapshot()` (backed by the
+        // `nmp.nip29.discovered_groups` typed sidecar projection, #3131) and
+        // the live `active_pubkey`. A frame that touched neither cannot
+        // change the reconcile's desired output, so the observer skips the
+        // (idempotent, but not free) reconcile call for it. `active_pubkey`
+        // has no projection-key representation in `info` (identity switches
+        // are a separate observer, not a typed sidecar entry) — it is
+        // diffed locally against the previous frame's value instead of
+        // guessed at, so an account switch is never missed even on a frame
+        // where the discovered-groups set itself did not change.
         let observer_app = Arc::clone(&app);
         let observer_discovery = Arc::clone(&self.discovery);
-        session.update_frame_observer_id = app.register_update_frame_observer(move || {
-            if let Ok(guard) = observer_discovery.lock() {
-                if let Some(session) = guard.as_ref() {
-                    reconcile_group_tree_sessions(&observer_app, session);
+        let last_active_pubkey: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        session.update_frame_observer_id = app.register_update_frame_observer(
+            move |info: &nmp_native_runtime::UpdateFrameInfo| {
+                if let Ok(guard) = observer_discovery.lock() {
+                    if let Some(session) = guard.as_ref() {
+                        let groups_changed = info.changed_projection_keys.is_empty()
+                            || info.changed(nmp_nip29::DISCOVERED_GROUPS_KEY);
+                        let current_pubkey = observer_app
+                            .active_account_handle()
+                            .lock()
+                            .ok()
+                            .and_then(|slot| slot.clone());
+                        let pubkey_changed = last_active_pubkey
+                            .lock()
+                            .map(|mut last| {
+                                let changed = *last != current_pubkey;
+                                *last = current_pubkey;
+                                changed
+                            })
+                            .unwrap_or(true);
+                        if groups_changed || pubkey_changed {
+                            reconcile_group_tree_sessions(&observer_app, session);
+                        }
+                    }
                 }
-            }
-        });
+            },
+        );
 
         if let Ok(mut slot) = self.discovery.lock() {
             *slot = Some(session);

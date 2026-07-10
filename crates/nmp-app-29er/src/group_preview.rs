@@ -52,8 +52,7 @@ impl GroupPreviewSessions {
             move |_member_key, group: GroupId| {
                 open_group_preview(Arc::clone(&app), Arc::clone(&projection), group)
             },
-        )
-        .expect("fresh GroupPreviewSessions collection construction cannot fail");
+        );
         Self { collection }
     }
 

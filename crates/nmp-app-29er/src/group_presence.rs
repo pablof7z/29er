@@ -66,8 +66,7 @@ impl GroupPresenceSessions {
                     descriptor,
                 )
             },
-        )
-        .expect("fresh GroupPresenceSessions collection construction cannot fail");
+        );
         Self { collection, readers }
     }
 
