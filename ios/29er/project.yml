@@ -21,6 +21,35 @@ targets:
       - path: 29er
     dependencies:
       - package: FlatBuffers
+    preBuildScripts:
+      - name: "Force static Rust link (strip stray dylib)"
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          # `cargo build --target aarch64-apple-ios[-sim]` always emits BOTH
+          # libnmp_app_29er.a and libnmp_app_29er.dylib into the same target
+          # dir (crate-type = ["lib", "cdylib", "staticlib"] — the cdylib is
+          # needed by uniffi-bindgen; see scripts/check-uniffi-bindings-drift.sh).
+          # ld64 prefers a same-directory dylib over an archive for `-lname`,
+          # so leaving the dylib in place silently links the app dynamically
+          # against a Mac-only build path baked in at link time. The
+          # simulator shares the Mac filesystem so that path still resolves
+          # and the app runs fine — but on a real device that path doesn't
+          # exist (and isn't embedded in the app bundle), so the app builds
+          # and installs, then crashes at launch with
+          # `dyld: Library not loaded: .../target/.../libnmp_app_29er.dylib`.
+          # Deleting the dylib before the link phase leaves only the archive
+          # in each search dir, so `-lnmp_app_29er` resolves to the static
+          # lib deterministically on both device and simulator. The
+          # xcframework fallback is unaffected — it only ever wraps the
+          # archive (scripts/build-nmp-xcframework.sh).
+          for dir in \
+              "${SRCROOT}/../../target/aarch64-apple-ios/debug" \
+              "${SRCROOT}/../../target/aarch64-apple-ios/release" \
+              "${SRCROOT}/../../target/aarch64-apple-ios-sim/debug" \
+              "${SRCROOT}/../../target/aarch64-apple-ios-sim/release"; do
+              rm -f "${dir}/libnmp_app_29er.dylib"
+          done
     info:
       path: 29er/Info.plist
       properties:
@@ -79,7 +108,14 @@ targets:
         # consumers without a Rust toolchain. The `target/aarch64-apple-ios*`
         # search-path entries below are where plain `cargo build --target
         # ...` runs land and are sufficient for day-to-day iOS development —
-        # both fallbacks are kept.
+        # both fallbacks are kept. Those plain cargo dirs also contain a
+        # sibling `libnmp_app_29er.dylib` (cargo builds cdylib + staticlib
+        # together); the "Force static Rust link" preBuildScript on this
+        # target strips it before every build so `-lnmp_app_29er` can only
+        # resolve to the archive — otherwise ld64 prefers the co-located
+        # dylib, which links fine in the simulator (same Mac filesystem) but
+        # crashes at launch on-device (dyld can't find the Mac-only build
+        # path baked into the binary).
         "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]":
           - $(SRCROOT)/Vendor/NmpApp29er.xcframework/ios-arm64
           - $(SRCROOT)/../../target/aarch64-apple-ios/debug
@@ -118,6 +154,21 @@ targets:
       - path: 29er/Capabilities
     dependencies:
       - package: FlatBuffers
+    preBuildScripts:
+      - name: "Force static Rust link (strip stray dylib)"
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          # See the identical phase on the `29er` target for the full
+          # explanation: strips the cdylib cargo always emits alongside the
+          # staticlib so `-lnmp_app_29er` can't resolve to it.
+          for dir in \
+              "${SRCROOT}/../../target/aarch64-apple-ios/debug" \
+              "${SRCROOT}/../../target/aarch64-apple-ios/release" \
+              "${SRCROOT}/../../target/aarch64-apple-ios-sim/debug" \
+              "${SRCROOT}/../../target/aarch64-apple-ios-sim/release"; do
+              rm -f "${dir}/libnmp_app_29er.dylib"
+          done
     info:
       path: probe/Info.plist
       properties:
