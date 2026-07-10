@@ -31,6 +31,7 @@ nmp-nip29 = { git = "https://github.com/pablof7z/nostr-multi-platform.git", bran
 nmp-reactions = { git = "https://github.com/pablof7z/nostr-multi-platform.git", branch = "master" }
 nmp-nostr-id = { git = "https://github.com/pablof7z/nostr-multi-platform.git", branch = "master" }
 nmp-planner = { git = "https://github.com/pablof7z/nostr-multi-platform.git", branch = "master" }
+nmp-read-session = { git = "https://github.com/pablof7z/nostr-multi-platform.git", branch = "master" }
 nmp-signer-iface = { git = "https://github.com/pablof7z/nostr-multi-platform.git", branch = "master" }
 nmp-content = { git = "https://github.com/pablof7z/nostr-multi-platform.git", branch = "master" }
 nmp-app-29er = { path = "crates/nmp-app-29er" }

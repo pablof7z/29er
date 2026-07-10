@@ -42,6 +42,7 @@ nmp-nip25 = { workspace = true }
 nmp-nip29 = { workspace = true }
 nmp-reactions = { workspace = true }
 nmp-planner = { workspace = true }
+nmp-read-session = { workspace = true }
 nmp-signer-iface = { workspace = true }
 nmp-nostr-id = { workspace = true }
 serde = { workspace = true }
