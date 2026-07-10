@@ -24,7 +24,12 @@
 # bare `cargo build --target ...` produces, so this xcframework is *not*
 # required for local iOS development — it only matters for distributing a
 # prebuilt slice to a consumer without a Rust toolchain. The xcframework is
-# gitignored; nothing commits its output.
+# gitignored; nothing commits its output. The plain cargo dirs also carry a
+# sibling `libnmp_app_29er.dylib` (cargo builds cdylib + staticlib in one
+# invocation); a preBuildScript on the Xcode target strips that dylib before
+# every build so the linker can't pick it up over the archive — see the
+# "Force static Rust link" phase in project.yml. This xcframework is
+# unaffected: `-create-xcframework -library` below only ever wraps the `.a`.
 
 set -euo pipefail
 

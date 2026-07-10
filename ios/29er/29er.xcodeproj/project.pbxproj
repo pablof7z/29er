@@ -367,6 +367,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 4AA1DC76458F6BB2743AC23D /* Build configuration list for PBXNativeTarget "29er" */;
 			buildPhases = (
+				D7C21B4C5C5D4B628F490D5F /* Force static Rust link (strip stray dylib) */,
 				74942A27B400182018C0456D /* Sources */,
 				E2D5E0C51658537E3FBDE4DE /* Resources */,
 				638F9A46D55D85EA0B4724F4 /* Frameworks */,
@@ -405,6 +406,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 6987C2138C599634C822AD8B /* Build configuration list for PBXNativeTarget "probe" */;
 			buildPhases = (
+				DE2CD75D308AFD4673426ACA /* Force static Rust link (strip stray dylib) */,
 				3A85C786D16F06B7702100D7 /* Sources */,
 				F85F9560B4F05A5C8FFE33FA /* Frameworks */,
 			);
@@ -477,6 +479,47 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		D7C21B4C5C5D4B628F490D5F /* Force static Rust link (strip stray dylib) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Force static Rust link (strip stray dylib)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n# `cargo build --target aarch64-apple-ios[-sim]` always emits BOTH\n# libnmp_app_29er.a and libnmp_app_29er.dylib into the same target\n# dir (crate-type = [\"lib\", \"cdylib\", \"staticlib\"] — the cdylib is\n# needed by uniffi-bindgen; see scripts/check-uniffi-bindings-drift.sh).\n# ld64 prefers a same-directory dylib over an archive for `-lname`,\n# so leaving the dylib in place silently links the app dynamically\n# against a Mac-only build path baked in at link time. The\n# simulator shares the Mac filesystem so that path still resolves\n# and the app runs fine — but on a real device that path doesn't\n# exist (and isn't embedded in the app bundle), so the app builds\n# and installs, then crashes at launch with\n# `dyld: Library not loaded: .../target/.../libnmp_app_29er.dylib`.\n# Deleting the dylib before the link phase leaves only the archive\n# in each search dir, so `-lnmp_app_29er` resolves to the static\n# lib deterministically on both device and simulator. The\n# xcframework fallback is unaffected — it only ever wraps the\n# archive (scripts/build-nmp-xcframework.sh).\nfor dir in \\\n    \"${SRCROOT}/../../target/aarch64-apple-ios/debug\" \\\n    \"${SRCROOT}/../../target/aarch64-apple-ios/release\" \\\n    \"${SRCROOT}/../../target/aarch64-apple-ios-sim/debug\" \\\n    \"${SRCROOT}/../../target/aarch64-apple-ios-sim/release\"; do\n    rm -f \"${dir}/libnmp_app_29er.dylib\"\ndone\n";
+		};
+		DE2CD75D308AFD4673426ACA /* Force static Rust link (strip stray dylib) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Force static Rust link (strip stray dylib)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\n# See the identical phase on the `29er` target for the full\n# explanation: strips the cdylib cargo always emits alongside the\n# staticlib so `-lnmp_app_29er` can't resolve to it.\nfor dir in \\\n    \"${SRCROOT}/../../target/aarch64-apple-ios/debug\" \\\n    \"${SRCROOT}/../../target/aarch64-apple-ios/release\" \\\n    \"${SRCROOT}/../../target/aarch64-apple-ios-sim/debug\" \\\n    \"${SRCROOT}/../../target/aarch64-apple-ios-sim/release\"; do\n    rm -f \"${dir}/libnmp_app_29er.dylib\"\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		0CCBA53B9F1867C7D0837C0E /* Sources */ = {
