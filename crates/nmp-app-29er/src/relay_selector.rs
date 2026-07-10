@@ -73,9 +73,18 @@ impl RelaySelectorProjection {
         let from_nip51 = list_relays
             .as_ref()
             .is_some_and(|relays| !relays.is_empty());
+        // Absent a per-account NIP-51 relay set, the list defaults to whatever
+        // is currently selected — not unconditionally back to `fallback_relay`.
+        // `selected` starts out equal to `fallback_relay` (see `new`), so this
+        // is a no-op for the untouched default. But once `select_relay` has
+        // been called (either the `NMP_TEST_RELAYS` seeding path in
+        // `TwentyNinerApp::seed_relays_from_json`, or a future manual relay
+        // switch), that selection must stick instead of being silently
+        // discarded back to the hardcoded production relay on the very next
+        // snapshot — see 29er#64.
         let relays = list_relays
             .filter(|relays| !relays.is_empty())
-            .unwrap_or_else(|| vec![self.fallback_relay.clone()]);
+            .unwrap_or_else(|| vec![selected.clone()]);
 
         let active = if relays.iter().any(|relay| relay == &selected) {
             selected
@@ -330,6 +339,30 @@ fn relay_tags(event: &KernelEvent) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn select_relay_sticks_without_an_active_account_relay_set() {
+        // 29er#64: `TwentyNinerApp::seed_relays_from_json` (the `NMP_TEST_RELAYS`
+        // override path) calls `select_relay` with no NIP-51 relay set on
+        // record — either because there's no active account yet or the
+        // account has never published one. The selection must not be
+        // discarded back to `fallback_relay` (the hardcoded production relay)
+        // on the next snapshot.
+        let active = Arc::new(Mutex::new(None));
+        let projection =
+            RelaySelectorProjection::new(active, "wss://fallback.example".to_string());
+        assert_eq!(
+            projection.select_relay("wss://test.example"),
+            Some("wss://test.example".to_string())
+        );
+        let snapshot = projection.snapshot();
+        assert_eq!(snapshot.active_relay_url, "wss://test.example");
+        assert_eq!(snapshot.relays, vec![RelaySelectorRow {
+            relay_url: "wss://test.example".to_string(),
+            selected: true,
+            from_nip51: false,
+        }]);
+    }
 
     #[test]
     fn projection_uses_fallback_until_active_account_relay_set_arrives() {
