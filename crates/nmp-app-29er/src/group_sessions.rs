@@ -63,10 +63,27 @@
 //! from the value observed on the previous frame (tracked locally — identity
 //! switches are not a typed sidecar entry, so they cannot be read off
 //! `info` and must be diffed directly to avoid silently missing an account
-//! switch). Those two inputs are the entirety of what
-//! `reconcile_group_tree_sessions` reads, so this is a lossless filter, not
-//! an approximation.
+//! switch). Those two inputs, plus the live viewport (below), are the
+//! entirety of what `reconcile_group_tree_sessions` reads, so this is a
+//! lossless filter, not an approximation.
 //! [`GroupSessions::close_discovery`] unregisters the observer.
+//!
+//! ## Viewport gating (29er#61)
+//!
+//! `preview`/`presence` are reconciled against a
+//! [`crate::group_viewport::GroupTreeViewport`]-filtered desired-set, not
+//! the raw discovered-groups snapshot — per ADR-0078 ("viewport is an
+//! input, not intrinsic"), 29er (the caller) decides what's visible, NMP's
+//! `KeyedReadCollection` just reconciles whatever set it's handed.
+//! [`TwentyNinerApp::set_group_tree_viewport`] is the iOS shell's entry
+//! point: it updates the live viewport AND immediately re-reconciles
+//! (off-actor, same discipline as [`GroupSessions::mark_group_read`] and
+//! every other top-level command here — never from inside the registered
+//! snapshot-tick closure). The viewport persists across a discovery
+//! session's own open/close/refresh cycle, matching that a shell's scroll
+//! position is independent of relay-session lifecycle. `None`/unreported
+//! (the default) means every discovered group is kept live, preserving the
+//! pre-#61 eager behavior until a shell actually reports a viewport.
 
 use std::sync::{Arc, Mutex};
 
@@ -98,6 +115,7 @@ use crate::group_tree::{
     encode_group_tree_snapshot, membership_from_joined, GroupTreeProjection,
     GROUP_TREE_FILE_IDENTIFIER, GROUP_TREE_SCHEMA_ID, GROUP_TREE_SCHEMA_VERSION,
 };
+use crate::group_viewport::GroupTreeViewport;
 use crate::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use crate::DispatchOutcome;
 use crate::TwentyNinerApp;
@@ -152,6 +170,10 @@ pub(crate) struct GroupSessions {
     /// `"app.29er.group_tree"` composition closure so membership stays
     /// reactive across an account switch (re-read every snapshot tick).
     joined_reader: Arc<Mutex<Option<Arc<JoinedGroupsProjection>>>>,
+    /// The current group-tree viewport (module docs, "Viewport gating").
+    /// Deliberately NOT reset by `open_discovery`/`close_discovery` — a
+    /// shell's scroll position outlives any one discovery session.
+    viewport: Arc<GroupTreeViewport>,
 }
 
 impl GroupSessions {
@@ -166,6 +188,7 @@ impl GroupSessions {
         let joined: Arc<Mutex<Option<Nip29JoinedGroupsHandle>>> = Arc::new(Mutex::new(None));
         let joined_reader: Arc<Mutex<Option<Arc<JoinedGroupsProjection>>>> =
             Arc::new(Mutex::new(None));
+        let viewport = Arc::new(GroupTreeViewport::new());
 
         let observer_app = Arc::clone(app);
         let observer_relay = Arc::clone(&joined_relay);
@@ -190,6 +213,7 @@ impl GroupSessions {
             joined_relay,
             joined,
             joined_reader,
+            viewport,
         }
     }
 
@@ -218,19 +242,26 @@ impl GroupSessions {
         // and the live active_pubkey on every call, so ONE trigger covers
         // both discovery replay landing and a later identity switch.
         //
-        // `reconcile_group_tree_sessions` reads exactly two inputs:
+        // `reconcile_group_tree_sessions` reads three inputs:
         // `session.discovered.snapshot()` (backed by the
-        // `nmp.nip29.discovered_groups` typed sidecar projection, #3131) and
-        // the live `active_pubkey`. A frame that touched neither cannot
-        // change the reconcile's desired output, so the observer skips the
-        // (idempotent, but not free) reconcile call for it. `active_pubkey`
-        // has no projection-key representation in `info` (identity switches
-        // are a separate observer, not a typed sidecar entry) — it is
-        // diffed locally against the previous frame's value instead of
-        // guessed at, so an account switch is never missed even on a frame
-        // where the discovered-groups set itself did not change.
+        // `nmp.nip29.discovered_groups` typed sidecar projection, #3131),
+        // the live `active_pubkey`, and the live viewport. A frame that
+        // touched neither of the first two cannot change the reconcile's
+        // desired output, so the observer skips the (idempotent, but not
+        // free) reconcile call for it. `active_pubkey` has no
+        // projection-key representation in `info` (identity switches are a
+        // separate observer, not a typed sidecar entry) — it is diffed
+        // locally against the previous frame's value instead of guessed at,
+        // so an account switch is never missed even on a frame where the
+        // discovered-groups set itself did not change. The viewport is NOT
+        // part of this frame-driven skip check: it has no `info` entry
+        // either, and unlike `active_pubkey` it does not need one —
+        // `TwentyNinerApp::set_group_tree_viewport` reconciles directly
+        // on every viewport change (module docs, "Viewport gating"),
+        // independent of frame delivery.
         let observer_app = Arc::clone(&app);
         let observer_discovery = Arc::clone(&self.discovery);
+        let observer_viewport = Arc::clone(&self.viewport);
         let last_active_pubkey: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         session.update_frame_observer_id = app.register_update_frame_observer(
             move |info: &nmp_native_runtime::UpdateFrameInfo| {
@@ -252,7 +283,11 @@ impl GroupSessions {
                             })
                             .unwrap_or(true);
                         if groups_changed || pubkey_changed {
-                            reconcile_group_tree_sessions(&observer_app, session);
+                            reconcile_group_tree_sessions(
+                                &observer_app,
+                                session,
+                                &observer_viewport,
+                            );
                         }
                     }
                 }
@@ -373,6 +408,33 @@ impl GroupSessions {
             }
         }
     }
+
+    /// Report the group-tree viewport (module docs, "Viewport gating") and
+    /// immediately re-reconcile `preview`/`presence` against it — a direct,
+    /// off-actor call, the same top-level-command pattern every other
+    /// method here uses (e.g. `mark_group_read`), never the registered
+    /// snapshot-tick closure. A no-op when no discovery session is open
+    /// yet: the viewport itself is still recorded, so the NEXT
+    /// `open_discovery`'s first update-frame reconcile picks it up.
+    pub(crate) fn set_viewport(&self, app: &NmpApp, visible_local_ids: Vec<String>) {
+        self.viewport.set_visible(visible_local_ids);
+        self.reconcile_live_discovery(app);
+    }
+
+    /// Clear a previously-reported viewport (module docs). See
+    /// [`Self::set_viewport`] for the reconcile-timing contract.
+    pub(crate) fn clear_viewport(&self, app: &NmpApp) {
+        self.viewport.clear();
+        self.reconcile_live_discovery(app);
+    }
+
+    fn reconcile_live_discovery(&self, app: &NmpApp) {
+        if let Ok(guard) = self.discovery.lock() {
+            if let Some(session) = guard.as_ref() {
+                reconcile_group_tree_sessions(app, session, &self.viewport);
+            }
+        }
+    }
 }
 
 /// Reconcile the joined-groups session against `pubkey`/`relay`.
@@ -434,17 +496,24 @@ fn sync_joined_session(
 }
 
 /// Reconciles `session.preview`/`session.presence` against `session
-/// .discovered`'s CURRENT snapshot and the CURRENT live `active_pubkey`.
+/// .discovered`'s CURRENT snapshot, filtered through `viewport` (29er#61,
+/// module docs), and the CURRENT live `active_pubkey`.
 ///
-/// This is the ONE reconcile driver (module docs): the update-frame observer
+/// This is the reconcile driver (module docs): the update-frame observer
 /// registered in [`GroupSessions::open_discovery`] calls this on every
-/// emitted frame, on the update-listener thread — never the actor thread, so
-/// it never re-enters the 29er#60 deadlock class. `KeyedReadCollection::
+/// emitted frame, on the update-listener thread, AND
+/// [`GroupSessions::set_viewport`]/[`GroupSessions::clear_viewport`] call it
+/// directly on a viewport report — never the actor thread, so neither call
+/// site re-enters the 29er#60 deadlock class. `KeyedReadCollection::
 /// reconcile` (which `preview.sync`/`presence.sync` call) is a no-op diff
-/// when nothing changed, so calling this unconditionally on every frame
-/// (not just discovery-relevant ones) is cheap and correct.
-fn reconcile_group_tree_sessions(app: &NmpApp, session: &DiscoverySession) {
-    let snapshot = session.discovered.snapshot();
+/// when nothing changed, so calling this unconditionally (on every frame,
+/// or on every viewport report) is cheap and correct.
+fn reconcile_group_tree_sessions(
+    app: &NmpApp,
+    session: &DiscoverySession,
+    viewport: &GroupTreeViewport,
+) {
+    let snapshot = viewport.apply(&session.discovered.snapshot());
     let active_pubkey = app
         .active_account_handle()
         .lock()
@@ -639,6 +708,28 @@ impl TwentyNinerApp {
         self.sessions().mark_group_read(&local_id);
     }
 
+    /// Report the group-tree viewport: the `local_id`s of groups currently
+    /// visible (or near-visible) in the shell's rendered list (29er#61, per
+    /// ADR-0078 — viewport is a caller input, not something NMP's
+    /// `KeyedReadCollection` knows about). Feeds a viewport-filtered
+    /// desired-set into the preview/presence collections and reconciles
+    /// them immediately: scrolling a group into view opens its reads,
+    /// scrolling it away (past a small look-ahead/behind buffer) closes
+    /// them. A no-op call before any discovery session is open — the
+    /// viewport is still recorded, so the session's first reconcile picks
+    /// it up. Idempotent for an unchanged `visible_local_ids` (D6).
+    pub fn set_group_tree_viewport(&self, visible_local_ids: Vec<String>) {
+        self.sessions()
+            .set_viewport(self.app(), visible_local_ids);
+    }
+
+    /// Clear a previously-reported viewport, reverting to the pre-#61
+    /// default of keeping every discovered group's reads open. Idempotent
+    /// (D6).
+    pub fn clear_group_tree_viewport(&self) {
+        self.sessions().clear_viewport(self.app());
+    }
+
     /// Open the group-chat (kind:9 + kind:11) read session for one group.
     /// `group_id_json` is a JSON [`GroupId`] object:
     /// `{"host_relay_url":"wss://groups.example.com","local_id":"room"}`.
@@ -736,7 +827,7 @@ mod tests {
         {
             let guard = app.sessions().discovery.lock().unwrap();
             let session = guard.as_ref().expect("discovery session is open");
-            reconcile_group_tree_sessions(app.app(), session);
+            reconcile_group_tree_sessions(app.app(), session, &app.sessions().viewport);
         }
 
         let guard = app.sessions().discovery.lock().unwrap();
@@ -751,6 +842,73 @@ mod tests {
         // side (which has no such account gate) is the meaningful
         // assertion here.
         assert_eq!(session.presence.live_count_for_test(), 0);
+    }
+
+    // 29er#61: proves (a) a reported viewport narrows the live preview set
+    // to the visible group plus its buffer neighbors, (b) scrolling (a
+    // second `set_group_tree_viewport` call) opens the newly-visible
+    // group's reads and closes the scrolled-away ones, and (c) with no
+    // viewport ever reported, every discovered group stays live (the
+    // pre-#61 default, unchanged).
+    #[test]
+    fn viewport_gates_which_discovered_groups_stay_live() {
+        let app = TwentyNinerApp::new();
+        assert!(app.open_group_discovery("wss://groups.example.com".to_string()));
+        let local_ids = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+        {
+            let guard = app.sessions().discovery.lock().unwrap();
+            let session = guard.as_ref().expect("discovery session is open");
+            for id in local_ids {
+                session
+                    .discovered
+                    .on_kernel_event(&metadata_event(id, "wss://groups.example.com"));
+            }
+            reconcile_group_tree_sessions(app.app(), session, &app.sessions().viewport);
+            assert_eq!(
+                session.preview.live_count_for_test(),
+                10,
+                "(c) no viewport reported yet -> every discovered group is live"
+            );
+        }
+
+        // (a) "e" (index 4) becomes visible: VIEWPORT_BUFFER=3 keeps
+        // indices 1..=7 ("b".."h") live, not the full set of 10.
+        app.set_group_tree_viewport(vec!["e".to_string()]);
+        {
+            let guard = app.sessions().discovery.lock().unwrap();
+            let session = guard.as_ref().expect("discovery session is open");
+            assert_eq!(
+                session.preview.live_count_for_test(),
+                7,
+                "(a) only the visible group plus its buffer neighbors stay live"
+            );
+        }
+
+        // (b) scroll: "j" (index 9, the far end) becomes visible instead of
+        // "e" -> indices 6..=9 ("g".."j") stay live; "a".."f" close.
+        app.set_group_tree_viewport(vec!["j".to_string()]);
+        {
+            let guard = app.sessions().discovery.lock().unwrap();
+            let session = guard.as_ref().expect("discovery session is open");
+            assert_eq!(
+                session.preview.live_count_for_test(),
+                4,
+                "(b) scrolling opens the newly-visible group and closes the scrolled-away ones"
+            );
+        }
+
+        // Clearing the viewport reverts to the full set — same guarantee
+        // as (c), now exercised after a viewport WAS reported.
+        app.clear_group_tree_viewport();
+        {
+            let guard = app.sessions().discovery.lock().unwrap();
+            let session = guard.as_ref().expect("discovery session is open");
+            assert_eq!(
+                session.preview.live_count_for_test(),
+                10,
+                "clearing the viewport reverts to the full discovered set"
+            );
+        }
     }
 
     #[test]

@@ -18,7 +18,8 @@
 //! * [`composition::compose_29er_runtime`] — the shared composition root,
 //!   also called directly by the native Rust TUI on its own app instance.
 //! * Pure modules ([`compose`], [`config`], [`group_chat`], [`group_tree`],
-//!   [`relay_seeding`], [`dispatch`]) reused by both the facade and the TUI.
+//!   [`group_viewport`], [`relay_seeding`], [`dispatch`]) reused by both the
+//!   facade and the TUI.
 //!
 //! ## Doctrine
 //!
@@ -41,6 +42,7 @@ pub mod group_presence;
 pub mod group_preview;
 mod group_sessions;
 pub mod group_tree;
+pub mod group_viewport;
 pub mod kinds;
 pub mod media_upload;
 pub mod reactions;

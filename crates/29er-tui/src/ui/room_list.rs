@@ -23,6 +23,15 @@ pub struct RoomListComponent {
     selected_channel: Option<GroupId>,
     focused: bool,
     state: TreeState<String>,
+    /// The `local_id`s of rows on-screen after the most recent [`Self::
+    /// draw`] call (29er#61) — the group-tree viewport `App::
+    /// report_group_tree_viewport` feeds into `SharedProjections::
+    /// group_tree_viewport`. A pure by-product of rendering: computing it
+    /// here does not touch NMP, so it stays safe to run from inside
+    /// `draw`'s own render closure (the reconcile it eventually drives
+    /// happens later, outside that closure — see `App::
+    /// report_group_tree_viewport`'s doc note).
+    visible_local_ids: Vec<String>,
 }
 
 impl Default for RoomListComponent {
@@ -33,6 +42,7 @@ impl Default for RoomListComponent {
             selected_channel: None,
             focused: false,
             state: TreeState::default(),
+            visible_local_ids: Vec::new(),
         }
     }
 }
@@ -216,10 +226,44 @@ impl RoomListComponent {
             .find(|it| &it.local_id == leaf_id)
             .map(|it| it.group_id.clone())
     }
+
+    /// The `local_id`s of rows on-screen after the most recent [`Component::
+    /// draw`] call (29er#61) — `App::report_group_tree_viewport` reads this
+    /// once per frame, after `terminal.draw` returns.
+    pub fn visible_local_ids(&self) -> &[String] {
+        &self.visible_local_ids
+    }
+
+    /// Recompute the visible-rows viewport from the tree's current
+    /// scroll/expand state (`self.state`) and this frame's rendered
+    /// `area`. `TreeState::flatten` already accounts for expand/collapse;
+    /// `get_offset` + the block's inner height (area minus its 1-row
+    /// top/bottom border) bound that flattened list to what's actually
+    /// on-screen. Every rendered row is exactly one line tall (`item_text`
+    /// always builds a single-line `Text`), so no per-row height lookup is
+    /// needed. A pure computation over already-rendered state — it does
+    /// not touch NMP, so it is safe to call from inside `draw` itself.
+    fn compute_visible_local_ids(&self, area: Rect) -> Vec<String> {
+        let inner_height = area.height.saturating_sub(2) as usize;
+        if inner_height == 0 {
+            return Vec::new();
+        }
+        let flat = self.state.flatten(&self.tree_items);
+        let offset = self.state.get_offset().min(flat.len());
+        let end = (offset + inner_height).min(flat.len());
+        flat[offset..end]
+            .iter()
+            .filter_map(|entry| entry.identifier.last().cloned())
+            .collect()
+    }
 }
 
 impl Component for RoomListComponent {
     fn draw(&mut self, f: &mut Frame, area: Rect) {
+        // 29er#61: recompute BEFORE the early-return below, so an empty
+        // tree correctly reports zero visible rows too.
+        self.visible_local_ids = self.compute_visible_local_ids(area);
+
         let border_style = if self.focused {
             Style::default().fg(ui::MAUVE)
         } else {
@@ -498,5 +542,71 @@ mod tests {
         // Should produce one root with one child
         assert_eq!(tree.len(), 1);
         assert_eq!(tree[0].children().len(), 1);
+    }
+
+    fn n_items(n: usize) -> Vec<ChannelListItem> {
+        (0..n)
+            .map(|i| ChannelListItem {
+                group_id: GroupId::new("wss://h", format!("room-{i}")),
+                local_id: format!("room-{i}"),
+                name: format!("Room {i}"),
+                depth: 0,
+                unread: 0,
+                typing_count: 0,
+                member_count: 1,
+                admin_count: 0,
+                is_branch: false,
+                last_preview: None,
+                last_timestamp: None,
+                tier: crate::app::ChannelTier::Normal,
+            })
+            .collect()
+    }
+
+    // 29er#61: `visible_local_ids` is the group-tree viewport input `App::
+    // report_group_tree_viewport` feeds NMP. It must reflect only the rows
+    // that actually fit the rendered area — not every discovered room —
+    // otherwise the whole point of gating (not eagerly opening reads for
+    // off-screen groups) is moot.
+    #[test]
+    fn visible_local_ids_reflects_the_rendered_window_not_the_whole_tree() {
+        let mut c = RoomListComponent::new();
+        c.items = n_items(10);
+        c.tree_items = RoomListComponent::build_tree_items(&c.items);
+        // Height 5 minus the block's 1-row top/bottom border leaves 3
+        // visible rows.
+        let visible = c.compute_visible_local_ids(Rect::new(0, 0, 28, 5));
+        assert_eq!(visible, vec!["room-0", "room-1", "room-2"]);
+    }
+
+    #[test]
+    fn visible_local_ids_is_empty_when_the_area_has_no_inner_rows() {
+        let mut c = RoomListComponent::new();
+        c.items = n_items(3);
+        c.tree_items = RoomListComponent::build_tree_items(&c.items);
+        // 2 rows total is entirely consumed by the block's own border.
+        assert!(c.compute_visible_local_ids(Rect::new(0, 0, 28, 2)).is_empty());
+    }
+
+    #[test]
+    fn draw_updates_visible_local_ids_as_a_side_effect() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut c = RoomListComponent::new();
+        c.items = n_items(10);
+        c.tree_items = RoomListComponent::build_tree_items(&c.items);
+        assert!(
+            c.visible_local_ids().is_empty(),
+            "nothing rendered yet, so nothing should be reported visible"
+        );
+
+        let mut terminal = Terminal::new(TestBackend::new(28, 5)).unwrap();
+        terminal.draw(|f| c.draw(f, f.area())).unwrap();
+        assert_eq!(
+            c.visible_local_ids().len(),
+            3,
+            "draw() must populate visible_local_ids from the actually-rendered rows"
+        );
     }
 }

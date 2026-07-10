@@ -63,6 +63,12 @@ async fn run() -> Result<()> {
         ui.status_bar.update(&state);
         ui.help.update(&state);
         terminal.draw(|f| draw(f, &state, &mut ui))?;
+        // 29er#61: feed the room list's just-rendered visible rows into the
+        // group-tree viewport. A plain function call in this async loop —
+        // NOT inside the `terminal.draw` render closure above, and nowhere
+        // near NMP's own snapshot-tick closure (#60) — see `App::
+        // report_group_tree_viewport`'s doc note.
+        app.report_group_tree_viewport(ui.room_list.visible_local_ids());
         tokio::select! {
             _ = ticker.tick() => { app.tick(); }
             result = projection_rx.changed() => match result {

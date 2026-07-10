@@ -16,6 +16,7 @@ use nmp_app_29er::group_preview::GroupPreviewSessions;
 use nmp_app_29er::group_tree::{
     GroupTreeMessageState, GroupTreePresenceState, GroupTreeProjection,
 };
+use nmp_app_29er::group_viewport::GroupTreeViewport;
 use nmp_app_29er::kinds::{KIND_CHAT_MESSAGE, KIND_DISCUSSION_OR_ARTIFACT};
 use nmp_app_29er::{compose_29er_runtime, dispatch_nip29_action, DispatchOutcome};
 use nmp_content::embed_projection::EmbeddedEventEnvelope;
@@ -305,6 +306,11 @@ pub struct SharedProjections {
     /// `Mutex<Option<..>>` for the same reason.
     pub group_preview: Mutex<Option<Arc<GroupPreviewSessions>>>,
     pub group_presence: Mutex<Option<Arc<GroupPresenceSessions>>>,
+    /// The group-tree viewport (29er#61) — see [`Self::sync_group_sources`].
+    /// Unlike `group_preview`/`group_presence`, this needs no `NmpApp`
+    /// handle, so it is constructible up front, before login (mirrors
+    /// `group_tree` below).
+    pub group_tree_viewport: GroupTreeViewport,
     pub discovered: Mutex<Option<Arc<DiscoveredGroupsProjection>>>,
     /// Active-account joined/admin state (v0.8.2 replacement for the removed
     /// `GroupMembersProjection`). Wired lazily once the active pubkey resolves
@@ -339,6 +345,13 @@ impl SharedProjections {
             .ok()
             .and_then(|slot| slot.as_ref().map(|projection| projection.snapshot()))
             .unwrap_or_default();
+        // 29er#61 (ADR-0078: viewport is a caller input): reconcile against
+        // the viewport-filtered set, not the raw discovered set, so a group
+        // scrolled out of view stops receiving live preview/presence reads.
+        // `project()` below is deliberately NOT filtered — the rendered
+        // channel list still shows every discovered group, just without a
+        // live read for the ones currently off-screen.
+        let discovered = self.group_tree_viewport.apply(&discovered);
         if let Ok(slot) = self.group_preview.lock() {
             if let Some(preview) = slot.as_ref() {
                 preview.sync(&discovered);
@@ -523,6 +536,9 @@ pub struct App {
     relay_error: Option<String>,
     pending_media_uploads: HashMap<String, PendingMediaUpload>,
     processed_media_upload_results: HashSet<String>,
+    /// The visible local ids last reported to `shared.group_tree_viewport`
+    /// (29er#61) — see [`Self::report_group_tree_viewport`].
+    last_group_tree_viewport: Vec<String>,
 }
 
 impl App {
@@ -532,6 +548,7 @@ impl App {
             group_tree: Arc::new(GroupTreeProjection::new()),
             group_preview: Mutex::new(None),
             group_presence: Mutex::new(None),
+            group_tree_viewport: GroupTreeViewport::new(),
             discovered: Mutex::new(None),
             joined: Mutex::new(None),
             joined_handle: Mutex::new(None),
@@ -577,7 +594,26 @@ impl App {
             relay_error: None,
             pending_media_uploads: HashMap::new(),
             processed_media_upload_results: HashSet::new(),
+            last_group_tree_viewport: Vec::new(),
         }
+    }
+
+    /// Report the room list's current visible local ids (29er#61). Called
+    /// once per render frame from `main::run`'s loop, AFTER
+    /// `terminal.draw` returns — a plain function call in the TUI's own
+    /// async loop, never from inside ratatui's render closure or NMP's
+    /// snapshot-tick closure (#60). A no-op when the visible set hasn't
+    /// changed since the last call, so this stays cheap even though it
+    /// runs on every tick.
+    pub fn report_group_tree_viewport(&mut self, visible_local_ids: &[String]) {
+        if self.last_group_tree_viewport == visible_local_ids {
+            return;
+        }
+        self.last_group_tree_viewport = visible_local_ids.to_vec();
+        self.shared
+            .group_tree_viewport
+            .set_visible(visible_local_ids.iter().cloned());
+        self.shared.sync_group_sources();
     }
 
     /// Validate + hand the nsec straight to NMP, never storing it (issue #10).
@@ -2332,6 +2368,49 @@ mod tests {
         assert_eq!(
             child.last_preview.as_deref(),
             Some("pushed through group tree")
+        );
+    }
+
+    // 29er#61: `report_group_tree_viewport` is `main::run`'s once-per-frame
+    // entry point into `shared.group_tree_viewport`. Proves it (a) actually
+    // narrows what `group_tree_viewport.apply` keeps once a non-empty
+    // viewport is reported, and (b) is a no-op — same dedup cache, same
+    // filtered result — for a repeated identical report (the guard that
+    // keeps this cheap to call every render tick).
+    #[test]
+    fn report_group_tree_viewport_narrows_the_shared_viewport_and_dedupes_repeats() {
+        let (mut app, _rx) = make_app();
+        let discovered = DiscoveredGroupsSnapshot {
+            host_relay_urls: vec!["wss://h".to_string()],
+            groups: (0..10)
+                .map(|i| DiscoveredGroup {
+                    group_id: format!("room-{i}"),
+                    host_relay_url: "wss://h".to_string(),
+                    ..Default::default()
+                })
+                .collect(),
+        };
+        assert_eq!(
+            app.shared.group_tree_viewport.apply(&discovered).groups.len(),
+            10,
+            "no viewport reported yet -> unfiltered (current default)"
+        );
+
+        app.report_group_tree_viewport(&["room-0".to_string()]);
+        assert_eq!(app.last_group_tree_viewport, vec!["room-0".to_string()]);
+        let filtered_len = app.shared.group_tree_viewport.apply(&discovered).groups.len();
+        assert!(
+            filtered_len < 10,
+            "reporting a viewport must narrow the desired set"
+        );
+
+        // Repeated identical report: the dedup guard skips re-setting the
+        // viewport, but re-applying it is still stable/idempotent.
+        app.report_group_tree_viewport(&["room-0".to_string()]);
+        assert_eq!(app.last_group_tree_viewport, vec!["room-0".to_string()]);
+        assert_eq!(
+            app.shared.group_tree_viewport.apply(&discovered).groups.len(),
+            filtered_len
         );
     }
 }
